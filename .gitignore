@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.js.map
+
+# Generated baseline snapshots (keep schema.json and latest.json)
+baselines/snapshot-*.json
+
+# Environment
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
