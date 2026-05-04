@@ -1,0 +1,105 @@
+{
+  "capturedAt": "2026-05-04T09:10:54.988Z",
+  "monitorVersion": "43dfd03",
+  "sdkVersion": "^0.2.2",
+  "model": "claude-opus-4.6",
+  "experiments": {
+    "context-tax": {
+      "name": "context-tax",
+      "description": "Measures character/token overhead of CLI wrapper layer components",
+      "metrics": {
+        "systemPromptChars": {
+          "value": 49819,
+          "unit": "chars",
+          "description": "System prompt length in characters"
+        },
+        "systemPromptTokensEstimated": {
+          "value": 12455,
+          "unit": "tokens",
+          "description": "Estimated token count of system prompt (÷4 heuristic)"
+        },
+        "toolDefinitionsChars": {
+          "value": 2005,
+          "unit": "chars",
+          "description": "Combined length of all tool definitions serialized as JSON"
+        },
+        "toolDefinitionsTokensEstimated": {
+          "value": 501,
+          "unit": "tokens",
+          "description": "Estimated token count of tool definitions (÷4 heuristic)"
+        },
+        "toolCount": {
+          "value": 11,
+          "unit": "tools",
+          "description": "Number of registered tool definitions"
+        },
+        "avgCharsPerTool": {
+          "value": 163,
+          "unit": "chars",
+          "description": "Average characters per tool definition"
+        },
+        "totalOverheadChars": {
+          "value": 51824,
+          "unit": "chars",
+          "description": "Total wrapper overhead in characters"
+        },
+        "totalOverheadTokensEstimated": {
+          "value": 12956,
+          "unit": "tokens",
+          "description": "Total estimated token overhead from system prompt + tool definitions"
+        }
+      },
+      "rawData": {
+        "mode": "static",
+        "liveAvailable": true,
+        "note": "Pass liveMode: true to enable exact token counts.",
+        "perToolChars": [
+          {
+            "name": "load_csv",
+            "chars": 145
+          },
+          {
+            "name": "read_channel_history",
+            "chars": 281
+          },
+          {
+            "name": "read_instruction",
+            "chars": 218
+          },
+          {
+            "name": "manage_agents",
+            "chars": 130
+          },
+          {
+            "name": "test-agent",
+            "chars": 49
+          },
+          {
+            "name": "manage_mcp",
+            "chars": 105
+          },
+          {
+            "name": "manage_tasks",
+            "chars": 125
+          },
+          {
+            "name": "recall_memory",
+            "chars": 254
+          },
+          {
+            "name": "autogent-playwright",
+            "chars": 127
+          },
+          {
+            "name": "spawn_task",
+            "chars": 121
+          },
+          {
+            "name": "web_search",
+            "chars": 239
+          }
+        ]
+      }
+    }
+  }
+}

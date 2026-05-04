@@ -3,7 +3,15 @@
  *
  * Usage:
  *   npm run experiments
+ *
+ *   # With real autogent wrapper data:
  *   SYSTEM_PROMPT_FILE=./prompt.txt TOOL_DEFS_FILE=./tools.json npm run experiments
+ *
+ *   # With live token counting (requires GITHUB_TOKEN):
+ *   LIVE_MODE=true npm run experiments
+ *
+ *   # Skip refusal-rate probes (faster):
+ *   SKIP_REFUSAL=true npm run experiments
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -12,9 +20,14 @@ import { ExperimentRunner } from '../src/harness/runner.js';
 import { SnapshotStore } from '../src/harness/snapshot.js';
 import { diffSnapshots, formatDiffReport } from '../src/harness/diff.js';
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
+import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
+import { hasGitHubToken } from '../src/harness/models-api-client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASELINES_DIR = join(__dirname, '../baselines');
+
+const LIVE_MODE = process.env['LIVE_MODE'] === 'true';
+const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
 
 interface ToolDef {
   name: string;
@@ -36,9 +49,11 @@ async function main(): Promise<void> {
   console.log('CLI Wrapper Monitor');
   console.log('===================\n');
 
-  const store = new SnapshotStore(BASELINES_DIR);
+  const liveAvailable = hasGitHubToken();
+  console.log(`Live mode: ${LIVE_MODE && liveAvailable ? 'enabled' : 'disabled'}${LIVE_MODE && !liveAvailable ? ' (GITHUB_TOKEN not set)' : ''}`);
+  console.log('');
 
-  // Load existing baseline BEFORE running new experiments so we can compare
+  const store = new SnapshotStore(BASELINES_DIR);
   const existingBaseline = store.loadLatest();
 
   const runner = new ExperimentRunner();
@@ -54,18 +69,30 @@ async function main(): Promise<void> {
     new ContextTaxExperiment({
       systemPrompt: systemPromptRaw,
       toolDefinitions: toolDefs,
+      liveMode: LIVE_MODE,
     }),
   );
 
-  // -- Refusal Rate (sprint 2: uncomment when live mode is implemented) --
-  // runner.register(new RefusalRateExperiment());
+  // -- Refusal Rate --
+  if (!SKIP_REFUSAL && (LIVE_MODE || liveAvailable)) {
+    console.log('Refusal-rate experiment: live mode (GITHUB_TOKEN detected)');
+    runner.register(
+      new RefusalRateExperiment({
+        maxProbesPerCategory: 3, // cap at 3 per category for cost control
+      }),
+    );
+  } else if (!SKIP_REFUSAL) {
+    console.log(
+      'Refusal-rate experiment: skipped (set GITHUB_TOKEN or LIVE_MODE=true to enable)',
+    );
+  }
+  console.log('');
 
   // Run all registered experiments
   console.log('Running experiments...');
   const snapshot = await runner.runAll();
   console.log('');
 
-  // Save new snapshot
   const savedPath = store.save(snapshot);
   console.log(`Snapshot saved: ${savedPath}`);
   console.log('');

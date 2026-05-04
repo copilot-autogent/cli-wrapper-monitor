@@ -1,12 +1,13 @@
 {
   "name": "@copilot-autogent/cli-wrapper-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Regression monitor for Copilot CLI wrapper behavior",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "experiments": "tsx scripts/run-experiments.ts"
+    "experiments": "tsx scripts/run-experiments.ts",
+    "capture-baseline": "tsx scripts/capture-autogent-baseline.ts"
   },
   "dependencies": {
     "@github/copilot-sdk": "^0.2.2",
