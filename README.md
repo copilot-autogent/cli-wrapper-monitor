@@ -73,9 +73,13 @@ cli-wrapper-monitor/
 │       ├── context-tax.ts   # Token overhead of system prompt + tool definitions
 │       └── refusal-rate.ts  # Refusal behavior on standard probe set (sprint 2)
 ├── scripts/
-│   └── run-experiments.ts   # CLI entry point
+│   ├── run-experiments.ts          # Run all experiments, save snapshot
+│   ├── capture-autogent-baseline.ts # Capture live autogent session baseline
+│   ├── generate-diff-report.ts     # Compare two snapshots, output markdown diff
+│   └── trend-report.ts             # Show all historical baselines as trend table
 └── baselines/
-    └── schema.json          # JSON Schema for snapshot files
+    ├── schema.json          # JSON Schema for snapshot files
+    └── latest.json          # Most recent captured baseline
 ```
 
 ## Usage
@@ -92,6 +96,18 @@ SYSTEM_PROMPT_FILE=./my-prompt.txt npm run experiments
 
 # Pass tool definitions JSON
 TOOL_DEFS_FILE=./tools.json npm run experiments
+
+# Generate a diff report comparing baseline to a new snapshot
+npm run diff -- --baseline baselines/latest.json --current baselines/2026-06-01.json
+
+# Generate a diff report and save to reports/
+npm run diff -- --baseline baselines/latest.json --current baselines/2026-06-01.json --output reports/diff-2026-06.md
+
+# Show trend table across all historical baselines
+npm run trend
+
+# Save trend report to file
+npm run trend -- --output reports/trend-2026-06.md
 ```
 
 > **Note**: The refusal-rate experiment requires a live SDK connection (`GITHUB_TOKEN`). This is a sprint 2 feature.
@@ -138,6 +154,14 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 - **Results in repo** — snapshots committed to `baselines/`, reports generated locally
 - **Blog only on interesting findings** — this is not a vanity metric dashboard
 
+## Published Reports
+
+| Date | Report | Summary |
+|------|--------|--------|
+| 2026-05-04 | [Context Tax Baseline](./reports/context-tax-baseline-2026-05-04.md) | 12,956 tokens overhead (6.5% of 200k window) |
+
+**Blog coverage**: [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — analysis of the May 2026 baseline published on AI Security Blog.
+
 ## Roadmap
 
 ### Sprint 1 — Scaffold ✅
@@ -146,12 +170,17 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 - Refusal-rate experiment (stub)
 - JSON schema for baseline snapshots
 
-### Sprint 2 — Live Experiments
+### Sprint 2 — Live Experiments ✅
 - Connect context-tax to live SDK for exact token counts
 - Implement refusal-rate live mode with SDK session
-- Capture first real baseline snapshot
+- Capture first real baseline snapshot (12,956 tokens overhead)
 
-### Sprint 3 — Analysis
-- Trend visualization (markdown tables over time)
-- Automated diff report generation
-- Historical analysis tooling
+### Sprint 3 — Analysis ✅
+- Automated diff report generation (`npm run diff`)
+- Trend visualization across historical baselines (`npm run trend`)
+- Blog cross-post: [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions)
+
+### Sprint 4 — Next Snapshot (June 2026)
+- Capture second baseline (first week of June)
+- Run diff against May baseline — first real comparison
+- Publish diff report if meaningful changes detected
