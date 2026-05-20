@@ -53,6 +53,7 @@ Tracking this over time reveals when hook or system prompt changes silently alte
 | `toolDefinitionsTokensEstimated` | context-tax | tokens |
 | `toolCount` | context-tax | count |
 | `totalOverheadTokensEstimated` | context-tax | tokens |
+| `bootstrapTruncated` | context-tax | bool |
 | `safeAllowedRate` | refusal-rate | fraction |
 | `dangerousRefusedRate` | refusal-rate | fraction |
 | `borderlineRefusedRate` | refusal-rate | fraction |
@@ -79,7 +80,8 @@ cli-wrapper-monitor/
 │   └── trend-report.ts             # Show all historical baselines as trend table
 └── baselines/
     ├── schema.json          # JSON Schema for snapshot files
-    └── latest.json          # Most recent captured baseline
+    ├── latest.json          # First captured baseline (May 4, 2026)
+    └── 2026-05-20.json      # Second baseline (May 20, 2026)
 ```
 
 ## Usage
@@ -98,45 +100,23 @@ SYSTEM_PROMPT_FILE=./my-prompt.txt npm run experiments
 TOOL_DEFS_FILE=./tools.json npm run experiments
 
 # Generate a diff report comparing baseline to a new snapshot
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-06-01.json
+npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-20.json
 
 # Generate a diff report and save to reports/
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-06-01.json --output reports/diff-2026-06.md
+npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-20.json --output reports/diff-2026-05-20.md
 
 # Show trend table across all historical baselines
 npm run trend
 
 # Save trend report to file
-npm run trend -- --output reports/trend-2026-06.md
+npm run trend -- --output reports/trend-2026-05.md
 ```
 
 > **Note**: The refusal-rate experiment requires a live SDK connection (`GITHUB_TOKEN`). This is a sprint 2 feature.
 
 ## Snapshot Format
 
-Results are stored as JSON in `baselines/` following [schema.json](./baselines/schema.json):
-
-```json
-{
-  "capturedAt": "2025-04-28T12:00:00.000Z",
-  "monitorVersion": "abc1234",
-  "sdkVersion": "^0.2.2",
-  "model": "claude-sonnet-4.6",
-  "experiments": {
-    "context-tax": {
-      "name": "context-tax",
-      "description": "Measures token overhead of CLI wrapper layer components",
-      "metrics": {
-        "systemPromptChars": {
-          "value": 12450,
-          "unit": "chars",
-          "description": "Length of system prompt in characters"
-        }
-      }
-    }
-  }
-}
-```
+Results are stored as JSON in `baselines/` following [schema.json](./baselines/schema.json).
 
 ## Regression Thresholds
 
@@ -146,6 +126,16 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 | 🟡 Warning | 5–10% change |
 | 🔴 Regression | > 10% change |
 
+## Published Reports
+
+| Date | Report | Summary |
+|------|--------|--------|
+| 2026-05-04 | [Context Tax Baseline](./reports/context-tax-baseline-2026-05-04.md) | 12,956 tokens overhead (6.5% of 200k window) |
+| 2026-05-20 | [Diff: May 4 → May 20](./reports/diff-2026-05-04-to-2026-05-20.md) | 🔴 +24% regression in 16 days — 29 tools, bootstrap truncation detected |
+| 2026-05-20 | [Regression Analysis](./reports/context-tax-regression-2026-05-20.md) | Root cause: PLAYBOOK/CONTEXT exceed 20k truncation limit |
+
+**Blog coverage**: [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — May baseline analysis.
+
 ## Methodology Notes
 
 - **Monthly cadence** — not CI on every commit; wrapper changes are infrequent
@@ -153,14 +143,7 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 - **Static + live modes** — context-tax works without credentials; refusal-rate needs a live session
 - **Results in repo** — snapshots committed to `baselines/`, reports generated locally
 - **Blog only on interesting findings** — this is not a vanity metric dashboard
-
-## Published Reports
-
-| Date | Report | Summary |
-|------|--------|--------|
-| 2026-05-04 | [Context Tax Baseline](./reports/context-tax-baseline-2026-05-04.md) | 12,956 tokens overhead (6.5% of 200k window) |
-
-**Blog coverage**: [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — analysis of the May 2026 baseline published on AI Security Blog.
+- **RN-005**: LLM SDK 0.20a2 introduces interleaved reasoning via `/v1/responses` — live-mode baselines should check for reasoning token overhead
 
 ## Roadmap
 
@@ -175,12 +158,19 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 - Implement refusal-rate live mode with SDK session
 - Capture first real baseline snapshot (12,956 tokens overhead)
 
-### Sprint 3 — Analysis ✅
+### Sprint 3 — Analysis Tooling ✅
 - Automated diff report generation (`npm run diff`)
 - Trend visualization across historical baselines (`npm run trend`)
 - Blog cross-post: [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions)
 
-### Sprint 4 — Next Snapshot (June 2026)
-- Capture second baseline (first week of June)
-- Run diff against May baseline — first real comparison
-- Publish diff report if meaningful changes detected
+### Sprint 4 — First Regression Detected ✅
+- Second baseline captured (May 20, 2026)
+- First real diff: 🔴 +24% total overhead in 16 days
+- Bootstrap truncation discovery: PLAYBOOK.md and CONTEXT.md silently truncated
+- Actionable finding: raise `maxCharsPerFile` from 20k to 40k
+
+### Sprint 5 — Next Steps
+- Blog post: "We found a regression in our own AI agent" (the bootstrap truncation story)
+- Implement `maxCharsPerFile` fix in autogent and measure impact
+- Add system prompt hash to baseline schema for content-level tracking
+- Begin refusal-rate live experiment with standardized probe set
