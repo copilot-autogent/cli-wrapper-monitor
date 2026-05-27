@@ -81,7 +81,8 @@ cli-wrapper-monitor/
 └── baselines/
     ├── schema.json          # JSON Schema for snapshot files
     ├── latest.json          # First captured baseline (May 4, 2026)
-    └── 2026-05-20.json      # Second baseline (May 20, 2026)
+    ├── 2026-05-20.json      # Second baseline — 🔴 +24% regression detected
+    └── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
 ```
 
 ## Usage
@@ -100,10 +101,10 @@ SYSTEM_PROMPT_FILE=./my-prompt.txt npm run experiments
 TOOL_DEFS_FILE=./tools.json npm run experiments
 
 # Generate a diff report comparing baseline to a new snapshot
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-20.json
+npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-27.json
 
 # Generate a diff report and save to reports/
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-20.json --output reports/diff-2026-05-20.md
+npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-27.json --output reports/diff-2026-05-27.md
 
 # Show trend table across all historical baselines
 npm run trend
@@ -118,6 +119,8 @@ npm run trend -- --output reports/trend-2026-05.md
 
 Results are stored as JSON in `baselines/` following [schema.json](./baselines/schema.json).
 
+Starting with the May 27 baseline, each bootstrap file entry includes a `contentHash` (MD5) to detect content rewrites that happen to preserve file length.
+
 ## Regression Thresholds
 
 | Severity | Threshold |
@@ -131,10 +134,13 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 | Date | Report | Summary |
 |------|--------|--------|
 | 2026-05-04 | [Context Tax Baseline](./reports/context-tax-baseline-2026-05-04.md) | 12,956 tokens overhead (6.5% of 200k window) |
-| 2026-05-20 | [Diff: May 4 → May 20](./reports/diff-2026-05-04-to-2026-05-20.md) | 🔴 +24% regression in 16 days — 29 tools, bootstrap truncation detected |
+| 2026-05-20 | [Diff: May 4 → May 20](./reports/diff-2026-05-04-to-2026-05-20.md) | 🔴 +24% regression — 29 tools, bootstrap truncation detected |
 | 2026-05-20 | [Regression Analysis](./reports/context-tax-regression-2026-05-20.md) | Root cause: PLAYBOOK/CONTEXT exceed 20k truncation limit |
+| 2026-05-27 | [Diff: May 20 → May 27](./reports/diff-2026-05-20-to-2026-05-27.md) | 🟡 +2.3% this period; fix PR open; cumulative +27.3% from baseline |
 
-**Blog coverage**: [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — May baseline analysis.
+**Blog coverage**:
+- [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — May baseline analysis
+- [We Found a Regression in Our Own Agent](https://copilot-autogent.github.io/ai-security-blog/blog/we-found-a-regression-in-our-own-agent) — the bootstrap truncation story
 
 ## Methodology Notes
 
@@ -143,6 +149,7 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 - **Static + live modes** — context-tax works without credentials; refusal-rate needs a live session
 - **Results in repo** — snapshots committed to `baselines/`, reports generated locally
 - **Blog only on interesting findings** — this is not a vanity metric dashboard
+- **Content hashes** — each bootstrap file entry includes MD5 hash to detect rewrites that preserve length
 - **RN-005**: LLM SDK 0.20a2 introduces interleaved reasoning via `/v1/responses` — live-mode baselines should check for reasoning token overhead
 
 ## Roadmap
@@ -167,10 +174,15 @@ Results are stored as JSON in `baselines/` following [schema.json](./baselines/s
 - Second baseline captured (May 20, 2026)
 - First real diff: 🔴 +24% total overhead in 16 days
 - Bootstrap truncation discovery: PLAYBOOK.md and CONTEXT.md silently truncated
-- Actionable finding: raise `maxCharsPerFile` from 20k to 40k
+- Published regression analysis report
 
-### Sprint 5 — Next Steps
-- Blog post: "We found a regression in our own AI agent" (the bootstrap truncation story)
-- Implement `maxCharsPerFile` fix in autogent and measure impact
-- Add system prompt hash to baseline schema for content-level tracking
+### Sprint 5 — Fix + Blog ✅
+- Blog post: [We Found a Regression in Our Own Agent](https://copilot-autogent.github.io/ai-security-blog/blog/we-found-a-regression-in-our-own-agent)
+- Upstream fix PR opened: [autogent#383](https://github.com/JackywithaWhiteDog/autogent/pull/383) (maxCharsPerFile 20k→60k)
+- Third baseline captured (May 27, 2026) — 🟡 +2.3% this period, cumulative +27.3% from May 4
+- Content hash added to baseline schema (detect rewrites that preserve length)
+
+### Sprint 6 — Next Steps
+- Capture post-fix baseline after PR #383 merges (expect ~+105% system prompt chars)
 - Begin refusal-rate live experiment with standardized probe set
+- Review tool growth trajectory (11 → 30 in 23 days)

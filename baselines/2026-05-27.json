@@ -1,0 +1,102 @@
+{
+  "capturedAt": "2026-05-27T17:04:51.000Z",
+  "monitorVersion": "48b85b7",
+  "sdkVersion": "^0.2.2",
+  "model": "claude-sonnet-4.6",
+  "experiments": {
+    "context-tax": {
+      "name": "context-tax",
+      "description": "Measures character/token overhead of CLI wrapper layer components",
+      "metrics": {
+        "systemPromptChars": {
+          "value": 57733,
+          "unit": "chars",
+          "description": "System prompt length in characters (assembled from bootstrap files with per-file 20k truncation)"
+        },
+        "systemPromptTokensEstimated": {
+          "value": 14433,
+          "unit": "tokens",
+          "description": "Estimated token count of system prompt (÷4 heuristic)"
+        },
+        "toolDefinitionsChars": {
+          "value": 8240,
+          "unit": "chars",
+          "description": "Combined length of all tool definitions serialized as JSON"
+        },
+        "toolDefinitionsTokensEstimated": {
+          "value": 2060,
+          "unit": "tokens",
+          "description": "Estimated token count of tool definitions (÷4 heuristic)"
+        },
+        "toolCount": {
+          "value": 30,
+          "unit": "tools",
+          "description": "Number of registered tool definitions"
+        },
+        "avgCharsPerTool": {
+          "value": 275,
+          "unit": "chars",
+          "description": "Average characters per tool definition"
+        },
+        "totalOverheadChars": {
+          "value": 65973,
+          "unit": "chars",
+          "description": "Total wrapper overhead in characters"
+        },
+        "totalOverheadTokensEstimated": {
+          "value": 16493,
+          "unit": "tokens",
+          "description": "Total estimated token overhead from system prompt + tool definitions"
+        },
+        "bootstrapTruncated": {
+          "value": 1,
+          "unit": "bool",
+          "description": "Whether any bootstrap files were truncated (1=yes, 0=no). Fix pending in PR #383 (maxCharsPerFile 20k→60k)."
+        }
+      },
+      "rawData": {
+        "mode": "static",
+        "liveAvailable": false,
+        "note": "Static analysis. Bootstrap files measured from disk. Per-file truncation limit: 20,000 chars (pre-fix). Fix PR #383 will raise limit to 60k. Files exceeding limit: PLAYBOOK.md (53,583 chars), CONTEXT.md (47,057 chars).",
+        "bootstrapFileSizes": [
+          { "name": "SOUL.md", "chars": 4517, "truncated": false, "contentHash": "501a1582b45185f5f67403726af81344" },
+          { "name": "PLAYBOOK.md", "chars": 53583, "truncatedTo": 20000, "truncated": true, "contentHash": "e15890df546beaed32ca8c0ac7c849ba" },
+          { "name": "CONTEXT.md", "chars": 47057, "truncatedTo": 20000, "truncated": true, "contentHash": "46e2b80d973fa10e6b9f7f86270b55f6" },
+          { "name": "USER.md", "chars": 13216, "truncated": false, "contentHash": "8fda05634d55d5726d2a6c4ae626edbf" }
+        ],
+        "perToolChars": [
+          { "name": "read_instruction", "chars": 250 },
+          { "name": "write_instruction", "chars": 280 },
+          { "name": "patch_instruction", "chars": 260 },
+          { "name": "introspect", "chars": 220 },
+          { "name": "rollback_change", "chars": 200 },
+          { "name": "read_channel_history", "chars": 280 },
+          { "name": "send_file", "chars": 240 },
+          { "name": "manage_mcp", "chars": 350 },
+          { "name": "recall_memory", "chars": 240 },
+          { "name": "save_memory", "chars": 350 },
+          { "name": "delete_memory", "chars": 200 },
+          { "name": "patch_memory", "chars": 240 },
+          { "name": "list_memory", "chars": 180 },
+          { "name": "web_search", "chars": 260 },
+          { "name": "browser_navigate", "chars": 200 },
+          { "name": "browser_snapshot", "chars": 200 },
+          { "name": "browser_click", "chars": 200 },
+          { "name": "browser_type", "chars": 210 },
+          { "name": "browser_take_screenshot", "chars": 180 },
+          { "name": "browser_navigate_back", "chars": 150 },
+          { "name": "browser_evaluate", "chars": 210 },
+          { "name": "browser_press_key", "chars": 170 },
+          { "name": "browser_tabs", "chars": 210 },
+          { "name": "load_csv", "chars": 280 },
+          { "name": "sql_query", "chars": 220 },
+          { "name": "list_tables", "chars": 160 },
+          { "name": "manage_tasks", "chars": 800 },
+          { "name": "spawn_task", "chars": 450 },
+          { "name": "manage_agents", "chars": 350 },
+          { "name": "pipeline_add", "chars": 700 }
+        ]
+      }
+    }
+  }
+}
