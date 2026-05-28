@@ -1,6 +1,6 @@
 {
-  "capturedAt": "2026-05-04T09:10:54.988Z",
-  "monitorVersion": "43dfd03",
+  "capturedAt": "2026-05-28T03:02:29.819Z",
+  "monitorVersion": "fd5d556",
   "sdkVersion": "^0.2.2",
   "model": "claude-opus-4.6",
   "experiments": {
@@ -9,42 +9,42 @@
       "description": "Measures character/token overhead of CLI wrapper layer components",
       "metrics": {
         "systemPromptChars": {
-          "value": 49819,
+          "value": 118737,
           "unit": "chars",
           "description": "System prompt length in characters"
         },
         "systemPromptTokensEstimated": {
-          "value": 12455,
+          "value": 29684,
           "unit": "tokens",
           "description": "Estimated token count of system prompt (÷4 heuristic)"
         },
         "toolDefinitionsChars": {
-          "value": 2005,
+          "value": 2693,
           "unit": "chars",
           "description": "Combined length of all tool definitions serialized as JSON"
         },
         "toolDefinitionsTokensEstimated": {
-          "value": 501,
+          "value": 673,
           "unit": "tokens",
           "description": "Estimated token count of tool definitions (÷4 heuristic)"
         },
         "toolCount": {
-          "value": 11,
+          "value": 14,
           "unit": "tools",
           "description": "Number of registered tool definitions"
         },
         "avgCharsPerTool": {
-          "value": 163,
+          "value": 173,
           "unit": "chars",
           "description": "Average characters per tool definition"
         },
         "totalOverheadChars": {
-          "value": 51824,
+          "value": 121430,
           "unit": "chars",
           "description": "Total wrapper overhead in characters"
         },
         "totalOverheadTokensEstimated": {
-          "value": 12956,
+          "value": 30357,
           "unit": "tokens",
           "description": "Total estimated token overhead from system prompt + tool definitions"
         }
@@ -87,8 +87,20 @@
             "chars": 254
           },
           {
+            "name": "pipeline_add",
+            "chars": 387
+          },
+          {
             "name": "autogent-playwright",
             "chars": 127
+          },
+          {
+            "name": "send_file",
+            "chars": 146
+          },
+          {
+            "name": "skill_manage",
+            "chars": 98
           },
           {
             "name": "spawn_task",
@@ -101,5 +113,7 @@
         ]
       }
     }
-  }
+  },
+  "binaryHash": "sha256:2ce57cb28adc008d83fd61910c5005b32640efc974bbe3db2db4bc72bde57486",
+  "systemPromptHash": "sha256:189f14a689d17e1fba913707d52b6a81c8cc608f69e6fe007757cea4939c1f26"
 }

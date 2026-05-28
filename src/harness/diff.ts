@@ -49,11 +49,27 @@ export function diffSnapshots(
     }
   }
 
+  const binaryChanged =
+    baseline.binaryHash !== undefined &&
+    current.binaryHash !== undefined &&
+    baseline.binaryHash !== 'unknown' &&
+    current.binaryHash !== 'unknown' &&
+    baseline.binaryHash !== current.binaryHash;
+
+  const systemPromptChanged =
+    baseline.systemPromptHash !== undefined &&
+    current.systemPromptHash !== undefined &&
+    baseline.systemPromptHash !== 'unknown' &&
+    current.systemPromptHash !== 'unknown' &&
+    baseline.systemPromptHash !== current.systemPromptHash;
+
   return {
     baseline,
     current,
     changes,
     hasRegressions: changes.some((c) => c.severity === 'regression'),
+    binaryChanged,
+    systemPromptChanged,
   };
 }
 
@@ -66,11 +82,29 @@ export function formatDiffReport(report: DiffReport): string {
     `**Current**:  ${report.current.capturedAt} (${report.current.monitorVersion})`,
     `**Model**: ${report.current.model}`,
     '',
+  ];
+
+  // Hash change warnings
+  if (report.binaryChanged) {
+    const prev = report.baseline.binaryHash?.slice(0, 8) ?? '?';
+    const curr = report.current.binaryHash?.slice(0, 8) ?? '?';
+    lines.push(`⚠️  **CLI binary changed**: \`${prev}…\` → \`${curr}…\``);
+  }
+  if (report.systemPromptChanged) {
+    const prev = report.baseline.systemPromptHash?.slice(0, 8) ?? '?';
+    const curr = report.current.systemPromptHash?.slice(0, 8) ?? '?';
+    lines.push(`⚠️  **System prompt changed**: \`${prev}…\` → \`${curr}…\``);
+  }
+  if (report.binaryChanged || report.systemPromptChanged) {
+    lines.push('');
+  }
+
+  lines.push(
     report.hasRegressions ? '⚠️  **Regressions detected**' : '✅ No regressions',
     '',
     '## Metric Changes',
     '',
-  ];
+  );
 
   if (report.changes.length === 0) {
     lines.push('_No overlapping metrics to compare._');
