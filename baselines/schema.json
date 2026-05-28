@@ -24,6 +24,14 @@
       "type": "string",
       "description": "Copilot model identifier used during experiments"
     },
+    "binaryHash": {
+      "type": "string",
+      "description": "sha256 fingerprint of the monitored CLI binary (e.g. dist/index.js), prefixed with 'sha256:', or 'unknown'"
+    },
+    "systemPromptHash": {
+      "type": "string",
+      "description": "sha256 fingerprint of the assembled system prompt (SOUL+PLAYBOOK+CONTEXT+USER), prefixed with 'sha256:', or 'unknown'"
+    },
     "experiments": {
       "type": "object",
       "description": "Experiment results, keyed by experiment name",

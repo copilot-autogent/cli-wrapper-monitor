@@ -11,6 +11,7 @@
  *   AUTOGENT_PATH=/path/to/autogent npx tsx scripts/capture-autogent-baseline.ts
  *   LIVE_MODE=true GITHUB_TOKEN=<token> npx tsx scripts/capture-autogent-baseline.ts
  */
+import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,64 @@ const WORKSPACE_PATH =
 // ---------------------------------------------------------------------------
 // Extraction helpers
 // ---------------------------------------------------------------------------
+
+/** Compute a sha256 hex digest of any Buffer or string content. */
+function sha256(content: Buffer | string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+/**
+ * Compute a sha256 fingerprint of the monitored CLI binary.
+ *
+ * Candidates tried in order:
+ *   1. dist/index.js  — compiled entry point (most representative single file)
+ *   2. All *.js files in dist/ concatenated (broader coverage)
+ *   3. src/session.ts — TypeScript source fallback when no dist exists
+ *
+ * Returns 'sha256:<hex>' or 'unknown' if no candidate is found.
+ */
+function computeBinaryHash(autogentPath: string): string {
+  // Candidate 1: dist/index.js
+  const distIndex = join(autogentPath, 'dist', 'index.js');
+  if (existsSync(distIndex)) {
+    return 'sha256:' + sha256(readFileSync(distIndex));
+  }
+
+  // Candidate 2: concatenation of all dist/*.js files
+  const distDir = join(autogentPath, 'dist');
+  if (existsSync(distDir)) {
+    try {
+      const jsFiles = readdirSync(distDir)
+        .filter((f) => f.endsWith('.js'))
+        .sort();
+      if (jsFiles.length > 0) {
+        const combined = jsFiles
+          .map((f) => readFileSync(join(distDir, f)))
+          .reduce((a, b) => Buffer.concat([a, b]));
+        return 'sha256:' + sha256(combined);
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Candidate 3: TypeScript source fallback
+  const srcSession = join(autogentPath, 'src', 'session.ts');
+  if (existsSync(srcSession)) {
+    return 'sha256:' + sha256(readFileSync(srcSession));
+  }
+
+  return 'unknown';
+}
+
+/**
+ * Compute a sha256 fingerprint of the assembled system prompt string.
+ * Returns 'sha256:<hex>' or 'unknown' if the prompt is empty.
+ */
+function computeSystemPromptHash(systemPrompt: string): string {
+  if (!systemPrompt) return 'unknown';
+  return 'sha256:' + sha256(systemPrompt);
+}
 
 interface ToolDef {
   name: string;
@@ -177,6 +236,13 @@ async function main(): Promise<void> {
   console.log(`Live mode: ${LIVE_MODE ? 'enabled' : 'disabled (set LIVE_MODE=true to enable)'}`);
   console.log('');
 
+  // Compute fingerprints
+  const binaryHash = autogentExists ? computeBinaryHash(AUTOGENT_PATH) : 'unknown';
+  const systemPromptHash = computeSystemPromptHash(systemPrompt);
+  console.log(`Binary hash:        ${binaryHash}`);
+  console.log(`System prompt hash: ${systemPromptHash}`);
+  console.log('');
+
   const store = new SnapshotStore(BASELINES_DIR);
   const existingBaseline = store.loadLatest();
 
@@ -191,6 +257,11 @@ async function main(): Promise<void> {
 
   console.log('Running experiments...');
   const snapshot = await runner.runAll();
+
+  // Attach fingerprints to the snapshot
+  snapshot.binaryHash = binaryHash;
+  snapshot.systemPromptHash = systemPromptHash;
+
   console.log('');
 
   const savedPath = store.save(snapshot);
@@ -212,6 +283,22 @@ async function main(): Promise<void> {
 
   if (existingBaseline) {
     const diff = diffSnapshots(existingBaseline, snapshot);
+
+    // Emit hash-change warnings before full diff
+    if (diff.binaryChanged) {
+      const prev = existingBaseline.binaryHash?.slice(0, 16) ?? '?';
+      const curr = snapshot.binaryHash?.slice(0, 16) ?? '?';
+      console.warn(`⚠️  CLI binary changed: ${prev}… → ${curr}…`);
+    }
+    if (diff.systemPromptChanged) {
+      const prev = existingBaseline.systemPromptHash?.slice(0, 16) ?? '?';
+      const curr = snapshot.systemPromptHash?.slice(0, 16) ?? '?';
+      console.warn(`⚠️  System prompt changed: ${prev}… → ${curr}…`);
+    }
+    if (diff.binaryChanged || diff.systemPromptChanged) {
+      console.warn('');
+    }
+
     console.log(formatDiffReport(diff));
     if (diff.hasRegressions) {
       console.error('\n❌ Regressions detected — please investigate');

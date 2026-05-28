@@ -27,6 +27,10 @@ export interface MetricSnapshot {
   sdkVersion: string;
   /** Copilot model used during experiments */
   model: string;
+  /** sha256 fingerprint of the monitored CLI binary (e.g. dist/index.js), or 'unknown' */
+  binaryHash?: string;
+  /** sha256 fingerprint of the assembled system prompt, or 'unknown' */
+  systemPromptHash?: string;
   /** Experiment results indexed by experiment name */
   experiments: Record<string, ExperimentResult>;
 }
@@ -57,4 +61,8 @@ export interface DiffReport {
   current: MetricSnapshot;
   changes: MetricChange[];
   hasRegressions: boolean;
+  /** True when the monitored CLI binary hash changed between snapshots */
+  binaryChanged: boolean;
+  /** True when the assembled system prompt hash changed between snapshots */
+  systemPromptChanged: boolean;
 }

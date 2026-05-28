@@ -89,6 +89,37 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
   lines.push(`| **SDK** | ${baselineSnap.sdkVersion} → ${currentSnap.sdkVersion} |`);
   lines.push(``);
 
+  // Hash fingerprint change warnings
+  const binaryChanged =
+    baselineSnap.binaryHash !== undefined &&
+    currentSnap.binaryHash !== undefined &&
+    baselineSnap.binaryHash !== 'unknown' &&
+    currentSnap.binaryHash !== 'unknown' &&
+    baselineSnap.binaryHash !== currentSnap.binaryHash;
+
+  const systemPromptChanged =
+    baselineSnap.systemPromptHash !== undefined &&
+    currentSnap.systemPromptHash !== undefined &&
+    baselineSnap.systemPromptHash !== 'unknown' &&
+    currentSnap.systemPromptHash !== 'unknown' &&
+    baselineSnap.systemPromptHash !== currentSnap.systemPromptHash;
+
+  if (binaryChanged || systemPromptChanged) {
+    lines.push(`## ⚠️ Fingerprint Changes`);
+    lines.push(``);
+    if (binaryChanged) {
+      const prev = baselineSnap.binaryHash!.slice(0, 15);
+      const curr = currentSnap.binaryHash!.slice(0, 15);
+      lines.push(`- **CLI binary changed**: \`${prev}…\` → \`${curr}…\``);
+    }
+    if (systemPromptChanged) {
+      const prev = baselineSnap.systemPromptHash!.slice(0, 15);
+      const curr = currentSnap.systemPromptHash!.slice(0, 15);
+      lines.push(`- **System prompt changed**: \`${prev}…\` → \`${curr}…\``);
+    }
+    lines.push(``);
+  }
+
   // Collect all experiment names
   const experimentNames = new Set([
     ...Object.keys(baselineSnap.experiments),
