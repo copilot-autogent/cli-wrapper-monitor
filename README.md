@@ -43,6 +43,27 @@ Tests refusal behavior across a standardized probe set:
 
 Tracking this over time reveals when hook or system prompt changes silently alter the security boundary.
 
+## Automated Capture
+
+Monthly baselines are captured automatically by the [Monthly Baseline Capture](./.github/workflows/monthly-baseline.yml) GitHub Actions workflow. It runs on the **1st of every month at 06:00 UTC** and can also be triggered manually via *Actions → Monthly Baseline Capture → Run workflow*.
+
+### What the workflow does
+
+1. Checks out both this repo and `JackywithaWhiteDog/autogent` (for tool-count and source extraction)
+2. Runs `npm run capture` — exits non-zero if any metric regresses by >10%
+3. Generates a markdown diff report and writes it to the workflow run summary
+4. Commits the new baseline and diff report back to `main` (tagged `[skip ci]` to avoid loops)
+5. Fails the workflow run when regressions are detected so GitHub notifies the maintainer
+
+### One-time setup
+
+Add a repository secret named **`AUTOGENT_PAT`** containing a GitHub personal access token with at least `contents: read` on `JackywithaWhiteDog/autogent`. Without it the capture still runs but extracts 0 tools and an empty system prompt — useful for testing the workflow plumbing but not for real regression tracking.
+
+Steps:
+1. Create a [fine-grained PAT](https://github.com/settings/tokens?type=beta) for `JackywithaWhiteDog/autogent` → *Repository permissions → Contents → Read-only*
+2. In `copilot-autogent/cli-wrapper-monitor` → *Settings → Secrets and variables → Actions → New repository secret*
+3. Name: `AUTOGENT_PAT`, Value: the token
+
 ## Metrics
 
 | Metric | Experiment | Unit |
@@ -64,6 +85,9 @@ Tracking this over time reveals when hook or system prompt changes silently alte
 
 ```
 cli-wrapper-monitor/
+├── .github/
+│   └── workflows/
+│       └── monthly-baseline.yml  # Scheduled monthly capture + diff report
 ├── src/
 │   ├── harness/
 │   │   ├── types.ts         # Core types: Experiment, MetricSnapshot, DiffReport
@@ -80,9 +104,10 @@ cli-wrapper-monitor/
 │   └── trend-report.ts             # Show all historical baselines as trend table
 └── baselines/
     ├── schema.json          # JSON Schema for snapshot files
-    ├── latest.json          # First captured baseline (May 4, 2026)
+    ├── latest.json          # Most recent baseline
     ├── 2026-05-20.json      # Second baseline — 🔴 +24% regression detected
-    └── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
+    ├── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
+    └── 2026-05-31.json      # Fourth baseline — post-fix (+105% system prompt, 0 truncation)
 ```
 
 ## Usage
@@ -100,11 +125,15 @@ SYSTEM_PROMPT_FILE=./my-prompt.txt npm run experiments
 # Pass tool definitions JSON
 TOOL_DEFS_FILE=./tools.json npm run experiments
 
-# Generate a diff report comparing baseline to a new snapshot
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-27.json
+# Capture baseline from a local autogent checkout (defaults to /app)
+npm run capture
+AUTOGENT_PATH=/path/to/autogent npm run capture
+
+# Generate a diff report comparing two baselines
+npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05-31.json
 
 # Generate a diff report and save to reports/
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-27.json --output reports/diff-2026-05-27.md
+npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05-31.json --output reports/diff-2026-05-31.md
 
 # Show trend table across all historical baselines
 npm run trend
@@ -144,10 +173,10 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 
 ## Methodology Notes
 
-- **Monthly cadence** — not CI on every commit; wrapper changes are infrequent
+- **Monthly cadence** — automated via GitHub Actions (1st of month); not CI on every commit
 - **Copilot CLI/SDK only** — no cross-CLI comparison (resource constraint)
 - **Static + live modes** — context-tax works without credentials; refusal-rate needs a live session
-- **Results in repo** — snapshots committed to `baselines/`, reports generated locally
+- **Results in repo** — snapshots committed to `baselines/`, diff reports to `reports/`
 - **Blog only on interesting findings** — this is not a vanity metric dashboard
 - **Content hashes** — each bootstrap file entry includes MD5 hash to detect rewrites that preserve length
 - **RN-005**: LLM SDK 0.20a2 introduces interleaved reasoning via `/v1/responses` — live-mode baselines should check for reasoning token overhead
@@ -182,7 +211,13 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 - Third baseline captured (May 27, 2026) — 🟡 +2.3% this period, cumulative +27.3% from May 4
 - Content hash added to baseline schema (detect rewrites that preserve length)
 
-### Sprint 6 — Next Steps
-- Capture post-fix baseline after PR #383 merges (expect ~+105% system prompt chars)
+### Sprint 6 — Monthly Automation ✅
+- Fourth baseline captured (May 31, 2026) — post-fix: +105% system prompt chars, truncation resolved
+- Monthly baseline capture automated via GitHub Actions ([`.github/workflows/monthly-baseline.yml`](./.github/workflows/monthly-baseline.yml))
+- Workflow fires on the 1st of each month; commits baselines and diff reports back to `main`
+- Regressions surface as red workflow runs with step-summary diff report
+
+### Sprint 7 — Next Steps
+- Add `AUTOGENT_PAT` secret and validate first automated capture fires correctly (June 1)
 - Begin refusal-rate live experiment with standardized probe set
-- Review tool growth trajectory (11 → 30 in 23 days)
+- Review tool growth trajectory (30 tools as of May 31)
