@@ -1,0 +1,109 @@
+{
+  "capturedAt": "2026-06-14T08:00:00.000Z",
+  "monitorVersion": "2b308dc",
+  "sdkVersion": "^0.2.2",
+  "model": "claude-sonnet-4.6",
+  "binaryHash": "sha256:pending",
+  "systemPromptHash": "unknown",
+  "experiments": {
+    "context-tax": {
+      "name": "context-tax",
+      "description": "Measures character/token overhead of CLI wrapper layer components",
+      "metrics": {
+        "systemPromptChars": {
+          "value": 137733,
+          "unit": "chars",
+          "description": "System prompt length assuming 60k per-file limit (code default after PR #383). Actual delivered chars depend on runtime config: local autogent.json still has maxCharsPerFile=20000 (see rawData note), which would truncate to 57,733 chars."
+        },
+        "systemPromptTokensEstimated": {
+          "value": 34433,
+          "unit": "tokens",
+          "description": "Estimated token count at 60k limit (\u00f74 heuristic). At 20k limit (local config), estimate is 14,433 tokens."
+        },
+        "toolDefinitionsChars": {
+          "value": 65477,
+          "unit": "chars",
+          "description": "Combined length of all 35 tool definitions serialized as JSON. NOTE: Prior baselines used per-tool char estimates (avg ~275 chars); actual serialized JSON is ~932 chars/tool. The May 31 baseline value of 8,240 was a significant underestimate. This baseline uses actual JSON.stringify() measurement."
+        },
+        "toolDefinitionsTokensEstimated": {
+          "value": 16369,
+          "unit": "tokens",
+          "description": "Estimated token count of tool definitions (\u00f74 heuristic)"
+        },
+        "toolCount": {
+          "value": 35,
+          "unit": "tools",
+          "description": "Number of registered tool definitions (up from 30 on May 31; added: begin_plan, checkpoint_plan, review_pr, verify_deploy, skill_manage)"
+        },
+        "avgCharsPerTool": {
+          "value": 932,
+          "unit": "chars",
+          "description": "Average chars per tool definition (actual measurement; prior baselines used estimates of ~275 chars/tool)"
+        },
+        "totalOverheadChars": {
+          "value": 203210,
+          "unit": "chars",
+          "description": "Total wrapper overhead at 60k per-file limit (137,733 system prompt + 65,477 tools). At 20k limit: 123,210 chars."
+        },
+        "totalOverheadTokensEstimated": {
+          "value": 50803,
+          "unit": "tokens",
+          "description": "Total estimated token overhead at 60k limit (34,433 system prompt + 16,369 tools)"
+        },
+        "bootstrapTruncated": {
+          "value": 1,
+          "unit": "bool",
+          "description": "Both PLAYBOOK.md (133,761 chars) and CONTEXT.md (74,973 chars) now exceed the 60k per-file limit. The PR #383 fix (20k\u219260k) is no longer sufficient. bootstrapTruncated returns to 1."
+        }
+      },
+      "rawData": {
+        "mode": "static",
+        "liveAvailable": false,
+        "note": "Static analysis baseline captured June 14, 2026. PLAYBOOK.md has grown 150% since May 31 (53,583\u2192133,761 chars), CONTEXT.md grew 59% (47,057\u219274,973 chars). Both now exceed the 60k maxCharsPerFile limit that PR #383 established. Additionally, the local autogent.json runtime config still has maxCharsPerFile=20000 (not updated since before PR #383), meaning the actual runtime truncation is worse than the 60k-limit scenario documented here. Tool definitions measured via actual JSON.stringify() serialization rather than per-file estimates used in prior baselines; this corrects a systematic undercount (prior estimate: ~275 chars/tool, actual: ~932 chars/tool).",
+        "bootstrapFileSizes": [
+          { "name": "SOUL.md", "chars": 4517, "truncated": false, "contentHash": "501a1582b45185f5f67403726af81344" },
+          { "name": "PLAYBOOK.md", "chars": 133761, "truncated": true, "truncatedTo": 60000, "contentHash": "633bea303cf392128aad300596364b74" },
+          { "name": "CONTEXT.md", "chars": 74973, "truncated": true, "truncatedTo": 60000, "contentHash": "76fec05c3121be7eb04523deaee80b68" },
+          { "name": "USER.md", "chars": 13216, "truncated": false, "contentHash": "8fda05634d55d5726d2a6c4ae626edbf" }
+        ],
+        "perToolChars": [
+          { "name": "manage_tasks", "chars": 4415 },
+          { "name": "manage_mcp", "chars": 33779 },
+          { "name": "review_pr", "chars": 2680 },
+          { "name": "manage_agents", "chars": 2381 },
+          { "name": "verify_deploy", "chars": 2038 },
+          { "name": "spawn_task", "chars": 1916 },
+          { "name": "pipeline_add", "chars": 1562 },
+          { "name": "read_channel_history", "chars": 1224 },
+          { "name": "checkpoint_plan", "chars": 1125 },
+          { "name": "web_search", "chars": 1035 },
+          { "name": "save_memory", "chars": 947 },
+          { "name": "patch_instruction", "chars": 925 },
+          { "name": "write_instruction", "chars": 840 },
+          { "name": "send_file", "chars": 799 },
+          { "name": "skill_manage", "chars": 781 },
+          { "name": "browser_tabs", "chars": 770 },
+          { "name": "patch_memory", "chars": 643 },
+          { "name": "begin_plan", "chars": 641 },
+          { "name": "load_csv", "chars": 622 },
+          { "name": "read_instruction", "chars": 596 },
+          { "name": "browser_type", "chars": 484 },
+          { "name": "delete_memory", "chars": 473 },
+          { "name": "browser_take_screenshot", "chars": 471 },
+          { "name": "browser_evaluate", "chars": 459 },
+          { "name": "browser_click", "chars": 447 },
+          { "name": "introspect", "chars": 438 },
+          { "name": "browser_snapshot", "chars": 431 },
+          { "name": "sql_query", "chars": 424 },
+          { "name": "recall_memory", "chars": 417 },
+          { "name": "rollback_change", "chars": 355 },
+          { "name": "browser_press_key", "chars": 314 },
+          { "name": "browser_navigate", "chars": 313 },
+          { "name": "list_memory", "chars": 294 },
+          { "name": "list_tables", "chars": 247 },
+          { "name": "browser_navigate_back", "chars": 191 }
+        ]
+      }
+    }
+  }
+}
