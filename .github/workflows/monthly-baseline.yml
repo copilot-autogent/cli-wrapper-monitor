@@ -1,0 +1,157 @@
+# Monthly baseline capture for the CLI wrapper monitor.
+#
+# Runs on the 1st of every month at 06:00 UTC and can be triggered
+# manually via workflow_dispatch (useful for on-demand captures or
+# testing the workflow itself).
+#
+# Prerequisites
+# -------------
+# Add a repository secret named AUTOGENT_PAT containing a GitHub
+# personal access token (classic or fine-grained) with at least
+# `contents: read` on JackywithaWhiteDog/autogent. Without this
+# secret the workflow degrades gracefully (0 tools, empty system
+# prompt) but the resulting baseline has little diagnostic value.
+name: Monthly Baseline Capture
+
+on:
+  schedule:
+    - cron: '0 6 1 * *'  # 1st of every month at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      autogent_ref:
+        description: 'autogent branch / tag / SHA to check out (default: main)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: write  # needed to commit baselines back to the repo
+
+jobs:
+  capture:
+    name: Capture baseline
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # 1. Repositories
+      # ------------------------------------------------------------------ #
+      - name: Checkout cli-wrapper-monitor
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history so git log in the capture script works
+          fetch-depth: 0
+
+      - name: Checkout autogent source
+        uses: actions/checkout@v4
+        # continue-on-error so the rest of the workflow still runs even
+        # when AUTOGENT_PAT is missing or the repo is inaccessible.
+        continue-on-error: true
+        with:
+          repository: JackywithaWhiteDog/autogent
+          token: ${{ secrets.AUTOGENT_PAT }}
+          ref: ${{ inputs.autogent_ref || 'main' }}
+          path: autogent-src
+          # Fetch only the latest commit — full history not needed here
+          fetch-depth: 1
+
+      # ------------------------------------------------------------------ #
+      # 2. Build environment
+      # ------------------------------------------------------------------ #
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ------------------------------------------------------------------ #
+      # 3. Snapshot the previous baseline so we can diff against it later
+      # ------------------------------------------------------------------ #
+      - name: Save pre-capture baseline
+        run: |
+          if [ -f baselines/latest.json ]; then
+            cp baselines/latest.json baselines/pre-capture.json
+            echo "Pre-capture baseline saved."
+          else
+            echo "No prior baseline found — first capture."
+          fi
+
+      # ------------------------------------------------------------------ #
+      # 4. Run the capture
+      # ------------------------------------------------------------------ #
+      - name: Capture baseline
+        id: capture
+        # AUTOGENT_PATH is set only when the autogent checkout succeeded.
+        # The capture script handles the missing-path case by returning
+        # empty system prompt / 0 tools rather than crashing.
+        env:
+          AUTOGENT_PATH: ${{ github.workspace }}/autogent-src
+        # continue-on-error keeps the workflow alive even when the script
+        # exits 1 (regression detected) so we can still commit the snapshot
+        # and surface the diff in the step summary.
+        run: npm run capture
+        continue-on-error: true
+
+      # ------------------------------------------------------------------ #
+      # 5. Generate diff report and write to step summary
+      # ------------------------------------------------------------------ #
+      - name: Generate diff report
+        id: diff
+        run: |
+          mkdir -p reports
+          DATE=$(date +%Y-%m-%d)
+          REPORT="reports/diff-${DATE}.md"
+
+          if [ -f baselines/pre-capture.json ] && [ -f baselines/latest.json ]; then
+            if ! npm run diff -- \
+                --baseline baselines/pre-capture.json \
+                --current  baselines/latest.json \
+                --output   "${REPORT}" 2>&1; then
+              echo "diff script exited non-zero; report may be partial" >&2
+            fi
+            if [ -f "${REPORT}" ]; then
+              cat "${REPORT}" >> "$GITHUB_STEP_SUMMARY"
+              echo "report_path=${REPORT}" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo 'No prior baseline — skipping diff report (first capture).' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+        continue-on-error: true
+
+      # ------------------------------------------------------------------ #
+      # 6. Commit baselines and reports back to main
+      # ------------------------------------------------------------------ #
+      - name: Commit results
+        run: |
+          # Clean up the temporary pre-capture snapshot before committing
+          rm -f baselines/pre-capture.json
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add baselines/ reports/
+
+          if git diff --staged --quiet; then
+            echo "Nothing to commit — baseline is unchanged."
+          else
+            DATE=$(date +%Y-%m-%d)
+            git commit -m "chore: monthly baseline capture ${DATE} [skip ci]"
+            git push
+            echo "Committed and pushed baseline for ${DATE}."
+          fi
+
+      # ------------------------------------------------------------------ #
+      # 7. Fail the workflow run when the capture detected regressions
+      #    (so notifications fire and the run is marked red).
+      # ------------------------------------------------------------------ #
+      - name: Fail on regression
+        if: steps.capture.outcome == 'failure'
+        run: |
+          echo ''
+          echo '❌ The capture script exited with a non-zero status.'
+          echo '   One or more metrics changed by >10%. Check the diff'
+          echo '   report above for details.'
+          exit 1
