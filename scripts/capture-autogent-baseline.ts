@@ -6,10 +6,16 @@
  * against them. This gives a real baseline reflecting the actual token
  * overhead of the CLI wrapper in production.
  *
+ * When GITHUB_TOKEN is present the refusal-rate experiment also runs,
+ * sending the standardized probe set to the GitHub Models API and recording
+ * safeAllowedRate / dangerousRefusedRate / borderlineRefusedRate alongside
+ * the context-tax metrics.
+ *
  * Usage:
  *   npx tsx scripts/capture-autogent-baseline.ts
  *   AUTOGENT_PATH=/path/to/autogent npx tsx scripts/capture-autogent-baseline.ts
  *   LIVE_MODE=true GITHUB_TOKEN=<token> npx tsx scripts/capture-autogent-baseline.ts
+ *   SKIP_REFUSAL=true npx tsx scripts/capture-autogent-baseline.ts
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -19,12 +25,15 @@ import { ExperimentRunner } from '../src/harness/runner.js';
 import { SnapshotStore } from '../src/harness/snapshot.js';
 import { diffSnapshots, formatDiffReport } from '../src/harness/diff.js';
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
+import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
+import { hasGitHubToken } from '../src/harness/models-api-client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASELINES_DIR = join(__dirname, '../baselines');
 
 const AUTOGENT_PATH = process.env['AUTOGENT_PATH'] ?? '/app';
 const LIVE_MODE = process.env['LIVE_MODE'] === 'true';
+const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -234,6 +243,18 @@ async function main(): Promise<void> {
     );
   }
   console.log(`Live mode: ${LIVE_MODE ? 'enabled' : 'disabled (set LIVE_MODE=true to enable)'}`);
+
+  // Refusal-rate experiment status
+  const refusalLiveAvailable = hasGitHubToken();
+  if (SKIP_REFUSAL) {
+    console.log('Refusal-rate experiment: skipped (SKIP_REFUSAL=true)');
+  } else if (refusalLiveAvailable) {
+    console.log('Refusal-rate experiment: live mode (GITHUB_TOKEN detected)');
+  } else {
+    console.log(
+      'Refusal-rate experiment: skipped (set GITHUB_TOKEN to enable live refusal probes)',
+    );
+  }
   console.log('');
 
   // Compute fingerprints
@@ -254,6 +275,18 @@ async function main(): Promise<void> {
       liveMode: LIVE_MODE,
     }),
   );
+
+  // -- Refusal Rate --
+  // Runs whenever a GitHub token is available; each probe uses the GitHub
+  // Models API so results are comparable across snapshots (same probe set,
+  // same model, same classifier).
+  if (!SKIP_REFUSAL && refusalLiveAvailable) {
+    runner.register(
+      new RefusalRateExperiment({
+        maxProbesPerCategory: 3, // cap at 3 per category for cost control
+      }),
+    );
+  }
 
   console.log('Running experiments...');
   const snapshot = await runner.runAll();

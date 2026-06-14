@@ -105,9 +105,14 @@ jobs:
         # AUTOGENT_PATH is set in the environment only when step 3 verified
         # the source layout. If absent the capture script falls back to 0
         # tools / empty system prompt rather than reading from a partial dir.
+        # GITHUB_TOKEN enables the refusal-rate experiment (GitHub Models API).
+        # If the token lacks models:read the experiment records an error and
+        # degrades gracefully — the workflow continues and commits the snapshot.
         # continue-on-error keeps the workflow alive even when the script
         # exits 1 (regression detected) so we can still commit the snapshot
         # and surface the diff in the step summary.
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
         run: npm run capture
         continue-on-error: true
 
