@@ -33,7 +33,7 @@ PLAYBOOK.md has grown from 39,673 chars (May 20) to 133,761 chars (June 14) — 
 | PLAYBOOK.md | 60,000 | 73,761 | 55% 🔴 |
 | CONTEXT.md | 60,000 | 14,973 | 20% 🟡 |
 
-Over half of PLAYBOOK.md — including all sections added after May 31 — never reaches the model.
+Over half of PLAYBOOK.md — including all sections added after May 31 — never reaches the model. CONTEXT.md also loses ~15k chars of content every session.
 
 ### 60k boundary in PLAYBOOK.md
 
@@ -61,17 +61,19 @@ At 60,000 chars, the content ends mid-way through the **"Verify git log Before C
 |------|-------------|--------|----------|
 | 2026-05-04 | ~26,000 chars* | — | — |
 | 2026-05-20 | 39,673 chars | +13,673 | 16 days |
-| 2026-05-27 | ~44,000 chars* | ~+4,000 | 7 days |
-| 2026-05-31 | 53,583 chars | +9,583 | 4 days |
+| 2026-05-27 | 53,583 chars† | +13,910 | 7 days |
+| 2026-05-31 | 53,583 chars‡ | +0 | 4 days |
 | **2026-06-14** | **133,761 chars** | **+80,178** | **14 days** |
 
-*Inferred from total system prompt sizes in historical baselines.
+\* Inferred from total system prompt sizes in historical baselines (May 4 baseline JSON not retained).  
+† Directly measured in `baselines/2026-05-27.json` (`bootstrapFileSizes[PLAYBOOK.md].chars = 53583`; truncated to 20,000 by old limit).  
+‡ Reconstructed from 2026-05-27 snapshot; identical contentHash (`e15890df...`) confirms no change between May 27 and May 31.
 
-The growth **accelerated sharply** after the PR #383 fix: once the truncation constraint was removed, development proceeded rapidly adding new operational rules. This is expected behavior — the truncation was masking the true growth rate.
+The growth **accelerated sharply between May 31 and June 14**: once the truncation constraint was removed by PR #383, development proceeded rapidly adding new operational rules. PLAYBOOK.md had already reached 53k by May 27 (silently truncated to 20k at the time); the +80k burst came in the 14 days following the fix.
 
 ### Projection under current growth rate
 
-At ~5,700 chars/day (June 14 rate):
+At ~5,700 chars/day (May 31→Jun 14 rate):
 
 | Horizon | Projected PLAYBOOK.md | Status vs 60k |
 |---------|-----------------------|---------------|
@@ -199,7 +201,9 @@ Proposed priority tiers:
 
 2. **Apply priority ordering**: reorder sections in PLAYBOOK.md so Non-Negotiable Rules, Autonomy Guidelines, and the Active Workflow sections appear first. This ensures they survive if PLAYBOOK.md grows past the limit again before Phase 2 ships.
 
-3. **Raise `maxCharsPerFile` temporarily to 150k** in `autogent.json` so no content is dropped while Phase 1 is in progress. Revert to 60k after Phase 1 archiving is complete.
+3. **Raise `maxCharsPerFile` temporarily to 150k** in `autogent.json` so no content is dropped in the **main session** while Phase 1 archiving is in progress. Note: task agents use `assembleTaskPrompt` with a separate hard-coded 50k budget — they continue to truncate until Phase 2 (or a separate fix to `assembleTaskPrompt`) ships. Revert to 60k after Phase 1 archiving is complete.
+
+4. **CONTEXT.md scope note**: CONTEXT.md is also over the 60k limit at 74,973 chars (20% dropped). A parallel archiving pass for CONTEXT.md is recommended alongside Phase 1 PLAYBOOK archiving. A detailed section-size breakdown for CONTEXT.md is left to a follow-up issue.
 
 ### Phase 2 — On-demand section loading (new issue, ~1–2 weeks engineering)
 

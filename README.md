@@ -80,7 +80,7 @@ cli-wrapper-monitor/
 │   └── trend-report.ts             # Show all historical baselines as trend table
 └── baselines/
     ├── schema.json          # JSON Schema for snapshot files
-    ├── latest.json          # Symlink to most recent baseline
+    ├── latest.json          # Copy of most recent baseline
     ├── 2026-05-20.json      # Second baseline — 🔴 +24% regression detected
     ├── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
     └── 2026-05-31.json      # Post-fix baseline — ✅ truncation resolved (PR #383)
