@@ -62,6 +62,9 @@ This growth pattern creates two tensions:
 **Trade-offs**:
 - Adds 1 turn latency when agent needs a migrated pattern (must recall first)
 - Relies on agent knowing WHEN to recall (prompt must guide this)
+- **`recall_memory` is search/rank-based, not deterministic keyed lookup**: without explicit trigger rules, canonical topic aliases, and a defined fallback path for miss scenarios, agents may silently skip recall or retrieve the wrong section — negating the "no operational knowledge loss" success criterion. Each migrated topic MUST ship with: (a) a trigger phrase in PLAYBOOK.md or session prompt, (b) the exact topic key, and (c) a fallback instruction (e.g., "if recall returns no match, treat as if that rule says X").
+- **End-to-end session cost is not purely the baseline reduction**: recalled topics re-add tokens during the sessions that need them. Workflows that touch migrated patterns multiple times per session will pay the recall overhead on each turn the agent decides to retrieve. Net savings depend heavily on actual access frequency — the Phase 2 audit must measure per-section access counts before committing a savings estimate.
+- **Governance drift risk**: PLAYBOOK.md is versioned in git, diff-reviewable, and auditable. Memory topics are mutable at runtime. Moving operational doctrine to memory weakens review/audit visibility unless a versioning rule is enforced. Mitigation: each migrated memory topic must have a corresponding stub in PLAYBOOK.md (`## <Section> — archived to memory topic <name> on <date>`), treated as the canonical record of intent.
 
 **Implementation**:
 1. Audit PLAYBOOK.md sections by access frequency:
@@ -69,14 +72,17 @@ This growth pattern creates two tensions:
    - **Warm** (weekly): Diagnosis Before Iteration, Asymmetric-Regret
    - **Cold** (monthly or less): Portfolio rules (already migrated), research methodology
 
-2. Migrate **cold** sections to memory:
-   - Sprint recovery → memory topic `playbook-sprint-recovery-patterns`
+   > **Note on high-blast-radius cold sections**: Frequency alone is insufficient. Sprint recovery / outage runbooks are rare but are needed most urgently in ambiguous, degraded conditions — precisely when an agent has the weakest cue to proactively recall them. **These must stay in PLAYBOOK.md** even if access frequency is low. Classification rule: any section whose absence during an incident could cause irreversible harm stays in the always-loaded bootstrap regardless of frequency tier.
+
+2. Migrate **cold** sections to memory (frequency-low AND blast-radius-low):
    - Research paper analysis → `playbook-research-patterns`
    - Shogi methodology → `playbook-shogi-patterns` (if not already in `project-shogi-srs-manifest`)
 
-3. Update PLAYBOOK.md to add a "Memory Topics Index" section pointing to migrated content
+   > Sprint recovery / incident runbook patterns are excluded from migration per the blast-radius rule above.
 
-**Estimated savings**: 53k → 35k chars (~-34%), recovering ~18k chars (~4.5k tokens)
+3. Update PLAYBOOK.md to add a "Memory Topics Index" section pointing to migrated content, with stub entries (`## <Section> — archived <date>`) serving as the audit trail.
+
+**Estimated savings**: 53k → ~35k chars (~-34%), recovering ~18k chars (~4.5k tokens) at baseline. Actual per-session savings lower when migrated patterns are in active use; actual net reduction depends on Phase 2 frequency audit.
 
 ### Option C: Lazy-loaded skill files (MEDIUM COMPLEXITY)
 
@@ -104,14 +110,16 @@ This growth pattern creates two tensions:
 **Implement Option B (memory-based contextual loading):**
 
 1. **Phase 1** (this issue): Write this recommendation report. No code changes yet.
-2. **Phase 2** (follow-up issue): Audit PLAYBOOK.md, identify cold sections (target: 15-20k chars to migrate).
-3. **Phase 3** (follow-up issue): Migrate cold sections to memory topics, update PLAYBOOK.md with memory index.
-4. **Phase 4** (July baseline): Capture post-migration baseline, verify ~-35% reduction.
+2. **Phase 2** (follow-up issue): Audit PLAYBOOK.md — measure per-section access frequency AND blast-radius, identify cold+low-blast-radius sections (revised target: 10-15k chars to migrate, excluding high-blast-radius content).
+3. **Phase 3** (follow-up issue): Migrate qualifying cold sections to memory topics. For each: add PLAYBOOK.md stub, define trigger phrase, define topic alias, define miss fallback. Update PLAYBOOK.md with memory index.
+4. **Phase 4** (July baseline): Capture post-migration baseline, verify net reduction (expect ~-25–34% depending on actual access frequency).
 
 **Success criteria**:
-- PLAYBOOK.md drops from 53k → 35k chars
+- PLAYBOOK.md drops from 53k → ≤ 38k chars (conservative floor accounting for blast-radius exclusions)
 - No loss of operational knowledge (still accessible via recall)
-- Session prompts guide agents to recall when needed
+- Session prompts include explicit trigger rules for each migrated topic
+- Each migrated topic has a PLAYBOOK.md stub as audit trail
+- High-blast-radius incident runbooks remain in PLAYBOOK.md
 
 **Alternative path**: If Jacky/upstream autogent team decides to build conditional bootstrap loading (Option A), revisit this recommendation. Option B is reversible — memory topics can be reintegrated into PLAYBOOK if conditional loading ships.
 
