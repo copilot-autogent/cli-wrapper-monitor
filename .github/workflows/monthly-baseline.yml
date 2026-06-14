@@ -42,6 +42,7 @@ jobs:
           fetch-depth: 0
 
       - name: Checkout autogent source
+        id: checkout_autogent
         uses: actions/checkout@v4
         # continue-on-error so the rest of the workflow still runs even
         # when AUTOGENT_PAT is missing or the repo is inaccessible.
@@ -67,7 +68,25 @@ jobs:
         run: npm ci
 
       # ------------------------------------------------------------------ #
-      # 3. Snapshot the previous baseline so we can diff against it later
+      # 3. Resolve AUTOGENT_PATH
+      #
+      # Set AUTOGENT_PATH only when the checkout actually succeeded AND the
+      # expected source layout is present. A failed checkout leaves behind
+      # an empty directory, so we verify the src/ subtree exists rather than
+      # relying on bare path existence.
+      # ------------------------------------------------------------------ #
+      - name: Resolve autogent path
+        run: |
+          if [ "${{ steps.checkout_autogent.outcome }}" = "success" ] && \
+             [ -d autogent-src/src ]; then
+            echo "AUTOGENT_PATH=${{ github.workspace }}/autogent-src" >> "$GITHUB_ENV"
+            echo "Autogent source available at autogent-src/"
+          else
+            echo "Autogent source not available — capture will use static fallback (0 tools, empty system prompt)."
+          fi
+
+      # ------------------------------------------------------------------ #
+      # 4. Snapshot the previous baseline so we can diff against it later
       # ------------------------------------------------------------------ #
       - name: Save pre-capture baseline
         run: |
@@ -79,15 +98,13 @@ jobs:
           fi
 
       # ------------------------------------------------------------------ #
-      # 4. Run the capture
+      # 5. Run the capture
       # ------------------------------------------------------------------ #
       - name: Capture baseline
         id: capture
-        # AUTOGENT_PATH is set only when the autogent checkout succeeded.
-        # The capture script handles the missing-path case by returning
-        # empty system prompt / 0 tools rather than crashing.
-        env:
-          AUTOGENT_PATH: ${{ github.workspace }}/autogent-src
+        # AUTOGENT_PATH is set in the environment only when step 3 verified
+        # the source layout. If absent the capture script falls back to 0
+        # tools / empty system prompt rather than reading from a partial dir.
         # continue-on-error keeps the workflow alive even when the script
         # exits 1 (regression detected) so we can still commit the snapshot
         # and surface the diff in the step summary.
@@ -95,7 +112,7 @@ jobs:
         continue-on-error: true
 
       # ------------------------------------------------------------------ #
-      # 5. Generate diff report and write to step summary
+      # 6. Generate diff report and write to step summary
       # ------------------------------------------------------------------ #
       - name: Generate diff report
         id: diff
@@ -122,7 +139,7 @@ jobs:
         continue-on-error: true
 
       # ------------------------------------------------------------------ #
-      # 6. Commit baselines and reports back to main
+      # 7. Commit baselines and reports back to main
       # ------------------------------------------------------------------ #
       - name: Commit results
         run: |
@@ -139,12 +156,15 @@ jobs:
           else
             DATE=$(date +%Y-%m-%d)
             git commit -m "chore: monthly baseline capture ${DATE} [skip ci]"
+            # Rebase onto any commits that landed since checkout
+            # (handles concurrent schedule + manual trigger runs)
+            git pull --rebase origin main
             git push
             echo "Committed and pushed baseline for ${DATE}."
           fi
 
       # ------------------------------------------------------------------ #
-      # 7. Fail the workflow run when the capture detected regressions
+      # 8. Fail the workflow run when the capture detected regressions
       #    (so notifications fire and the run is marked red).
       # ------------------------------------------------------------------ #
       - name: Fail on regression
