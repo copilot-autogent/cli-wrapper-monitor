@@ -59,7 +59,7 @@
       "rawData": {
         "mode": "reconstructed",
         "liveAvailable": false,
-        "note": "Reconstructed post-fix baseline. autogent#383 merged 2026-05-31T01:18:57Z raising maxCharsPerFile from 20k to 60k. File sizes derived from 2026-05-27 snapshot (4 days prior — closest available measurement). PLAYBOOK.md (53,583 chars) and CONTEXT.md (47,057 chars) now within 60k limit — no truncation. The +105% increase in systemPromptChars (57,733 → 118,373) is intentional fix delivery, not a regression.",
+        "note": "Reconstructed post-fix baseline. autogent#383 merged 2026-05-31T01:18:57Z raising maxCharsPerFile from 20k to 60k. File sizes derived from 2026-05-27 snapshot (4 days prior — closest available measurement). PLAYBOOK.md (53,583 chars) and CONTEXT.md (47,057 chars) now within 60k limit — no truncation. The +105% increase in systemPromptChars (57,733 → 118,373) is intentional fix delivery, not a regression. Model field set to claude-sonnet-4.6 matching 2026-05-27 baseline (prior latest.json used claude-opus-4.6 from a separate live-mode capture). systemPromptHash set to 'unknown' because exact file content at May 31 is unavailable; diff engine skips hash comparison when either side is 'unknown' (src/harness/diff.ts).",
         "bootstrapFileSizes": [
           { "name": "SOUL.md", "chars": 4517, "truncated": false, "contentHash": "501a1582b45185f5f67403726af81344" },
           { "name": "PLAYBOOK.md", "chars": 53583, "truncated": false, "contentHash": "e15890df546beaed32ca8c0ac7c849ba" },
