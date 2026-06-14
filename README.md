@@ -80,9 +80,10 @@ cli-wrapper-monitor/
 │   └── trend-report.ts             # Show all historical baselines as trend table
 └── baselines/
     ├── schema.json          # JSON Schema for snapshot files
-    ├── latest.json          # First captured baseline (May 4, 2026)
+    ├── latest.json          # Symlink to most recent baseline
     ├── 2026-05-20.json      # Second baseline — 🔴 +24% regression detected
-    └── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
+    ├── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
+    └── 2026-05-31.json      # Post-fix baseline — ✅ truncation resolved (PR #383)
 ```
 
 ## Usage
@@ -137,6 +138,8 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 | 2026-05-20 | [Diff: May 4 → May 20](./reports/diff-2026-05-04-to-2026-05-20.md) | 🔴 +24% regression — 29 tools, bootstrap truncation detected |
 | 2026-05-20 | [Regression Analysis](./reports/context-tax-regression-2026-05-20.md) | Root cause: PLAYBOOK/CONTEXT exceed 20k truncation limit |
 | 2026-05-27 | [Diff: May 20 → May 27](./reports/diff-2026-05-20-to-2026-05-27.md) | 🟡 +2.3% this period; fix PR open; cumulative +27.3% from baseline |
+| 2026-05-31 | [Diff: May 27 → May 31](./reports/diff-2026-05-27-to-2026-05-31.md) | ✅ Fix delivered (+105% intentional); truncation resolved |
+| 2026-06-14 | [PLAYBOOK Restructuring Analysis](./reports/playbook-restructuring-feasibility-2026-06-14.md) | PLAYBOOK.md at 133k chars (2.2× 60k limit); two-phase restructuring recommended |
 
 **Blog coverage**:
 - [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — May baseline analysis
@@ -182,7 +185,13 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 - Third baseline captured (May 27, 2026) — 🟡 +2.3% this period, cumulative +27.3% from May 4
 - Content hash added to baseline schema (detect rewrites that preserve length)
 
-### Sprint 6 — Next Steps
-- Capture post-fix baseline after PR #383 merges (expect ~+105% system prompt chars)
+### Sprint 6 — Growth Analysis + Restructuring Recommendation ✅
+- Post-fix baseline captured (May 31, 2026) — ✅ truncation resolved
+- June 14 measurement: PLAYBOOK.md at 133,761 chars (2.2× the new 60k limit)
+- [PLAYBOOK restructuring feasibility analysis](./reports/playbook-restructuring-feasibility-2026-06-14.md) published
+- Two-phase recommendation: content archiving (immediate) + on-demand section loading (engineering sprint)
+
+### Sprint 7 — Next Steps
+- Capture June baseline (post-PLAYBOOK archiving)
 - Begin refusal-rate live experiment with standardized probe set
-- Review tool growth trajectory (11 → 30 in 23 days)
+- File upstream issue: on-demand `playbook/` section loading
