@@ -62,3 +62,5 @@ The next monthly baseline (2026-07-03) will establish the new "clean" reference 
 - autogent PR #383: https://github.com/JackywithaWhiteDog/autogent/pull/383
 - Monitor issue #3: https://github.com/copilot-autogent/cli-wrapper-monitor/issues/3
 - Sprint 4 detection: https://github.com/copilot-autogent/cli-wrapper-monitor/blob/main/baselines/2026-05-20.json (first baseline showing `bootstrapTruncated: 1`)
+
+Closes #3
