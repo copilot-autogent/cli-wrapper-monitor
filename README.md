@@ -80,9 +80,11 @@ cli-wrapper-monitor/
 │   └── trend-report.ts             # Show all historical baselines as trend table
 └── baselines/
     ├── schema.json          # JSON Schema for snapshot files
-    ├── latest.json          # First captured baseline (May 4, 2026)
+    ├── latest.json          # Symlink to most recent baseline
     ├── 2026-05-20.json      # Second baseline — 🔴 +24% regression detected
-    └── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
+    ├── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
+    ├── 2026-05-31.json      # Post-fix baseline — ✅ PR #383 resolved truncation
+    └── 2026-06-14.json      # 🔴 New regression — PLAYBOOK.md breaches 60k limit
 ```
 
 ## Usage
@@ -101,16 +103,16 @@ SYSTEM_PROMPT_FILE=./my-prompt.txt npm run experiments
 TOOL_DEFS_FILE=./tools.json npm run experiments
 
 # Generate a diff report comparing baseline to a new snapshot
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-27.json
+npm run diff -- --baseline baselines/2026-05-31.json --current baselines/2026-06-14.json
 
 # Generate a diff report and save to reports/
-npm run diff -- --baseline baselines/latest.json --current baselines/2026-05-27.json --output reports/diff-2026-05-27.md
+npm run diff -- --baseline baselines/2026-05-31.json --current baselines/2026-06-14.json --output reports/diff-2026-05-31-to-2026-06-14.md
 
 # Show trend table across all historical baselines
 npm run trend
 
 # Save trend report to file
-npm run trend -- --output reports/trend-2026-05.md
+npm run trend -- --output reports/trend-2026-06.md
 ```
 
 > **Note**: The refusal-rate experiment requires a live SDK connection (`GITHUB_TOKEN`). This is a sprint 2 feature.
@@ -137,6 +139,9 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 | 2026-05-20 | [Diff: May 4 → May 20](./reports/diff-2026-05-04-to-2026-05-20.md) | 🔴 +24% regression — 29 tools, bootstrap truncation detected |
 | 2026-05-20 | [Regression Analysis](./reports/context-tax-regression-2026-05-20.md) | Root cause: PLAYBOOK/CONTEXT exceed 20k truncation limit |
 | 2026-05-27 | [Diff: May 20 → May 27](./reports/diff-2026-05-20-to-2026-05-27.md) | 🟡 +2.3% this period; fix PR open; cumulative +27.3% from baseline |
+| 2026-05-31 | [Diff: May 27 → May 31](./reports/diff-2026-05-27-to-2026-05-31.md) | ✅ Fix delivered — truncation resolved, +105% intentional growth |
+| 2026-06-14 | [Diff: May 31 → Jun 14](./reports/diff-2026-05-31-to-2026-06-14.md) | 🔴 New regression — PLAYBOOK +150% in 14 days, 60k limit breached again |
+| 2026-06-14 | [PLAYBOOK Restructuring Feasibility](./reports/playbook-restructuring-feasibility-2026-06-14.md) | Three-option analysis with recommendation (issue #4) |
 
 **Blog coverage**:
 - [The Hidden Cost of Instructions](https://copilot-autogent.github.io/ai-security-blog/blog/hidden-cost-of-instructions) — May baseline analysis
@@ -150,6 +155,7 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 - **Results in repo** — snapshots committed to `baselines/`, reports generated locally
 - **Blog only on interesting findings** — this is not a vanity metric dashboard
 - **Content hashes** — each bootstrap file entry includes MD5 hash to detect rewrites that preserve length
+- **Tool definition measurement** — from Jun 14 baseline onward, tool chars are measured via `JSON.stringify()` on the actual definition objects (not per-tool estimates). This corrects a systematic undercount in prior baselines (~275 chars/tool estimated vs ~932 chars/tool actual).
 - **RN-005**: LLM SDK 0.20a2 introduces interleaved reasoning via `/v1/responses` — live-mode baselines should check for reasoning token overhead
 
 ## Roadmap
@@ -182,7 +188,15 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 - Third baseline captured (May 27, 2026) — 🟡 +2.3% this period, cumulative +27.3% from May 4
 - Content hash added to baseline schema (detect rewrites that preserve length)
 
-### Sprint 6 — Next Steps
-- Capture post-fix baseline after PR #383 merges (expect ~+105% system prompt chars)
-- Begin refusal-rate live experiment with standardized probe set
-- Review tool growth trajectory (11 → 30 in 23 days)
+### Sprint 6 — Post-Fix Validation ✅
+- Post-fix baseline captured (May 31, 2026) — ✅ bootstrapTruncated resolved, +105% intentional
+- Tool definition measurement corrected: actual JSON.stringify() vs prior estimates
+- New regression detected: PLAYBOOK.md +150% in 14 days, breaches 60k limit again
+- PLAYBOOK restructuring feasibility analysis completed (issue [#4](https://github.com/copilot-autogent/cli-wrapper-monitor/issues/4))
+
+### Sprint 7 — PLAYBOOK Restructuring
+- Apply Phase 1 fix: reorder PLAYBOOK sections + archive domain-specific rules to memory
+- Target: PLAYBOOK.md < 60k chars, `bootstrapTruncated: 0` restored
+- Upstream autogent PR: add `bootstrap.files` array config (sectioned loading)
+- Fix local config override: update `maxCharsPerFile` from 20k → 60k in runtime config
+- Add PLAYBOOK size check to monthly monitor threshold (🟡 45k, 🔴 55k)
