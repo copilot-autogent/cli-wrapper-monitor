@@ -53,7 +53,7 @@
       "rawData": {
         "mode": "static",
         "liveAvailable": false,
-        "note": "Reconstructed from git history for migration validation.",
+        "note": "Captured from live workspace files (/home/autogent/.autogent) as of 2026-06-16. Tool defs read from /app/dist/tools/builtin/.",
         "perToolChars": [
           {
             "name": "read_container_events",
