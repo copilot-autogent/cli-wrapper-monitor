@@ -168,24 +168,24 @@ export function formatDiffReport(report: DiffReport): string {
   if (report.modelPoolChanges.length > 0) {
     lines.push('', '## Model Pool Changes', '');
     for (const change of report.modelPoolChanges) {
-      if (change.type === 'added') {
-        const m = change.after!;
+      if (change.type === 'added' && change.after) {
+        const m = change.after;
         lines.push(
           `✅ **Added**: \`${m.id}\` — state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`,
         );
-      } else if (change.type === 'removed') {
-        const m = change.before!;
+      } else if (change.type === 'removed' && change.before) {
+        const m = change.before;
         lines.push(
           `❌ **Removed**: \`${m.id}\` — was state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`,
         );
-      } else if (change.type === 'state_changed') {
+      } else if (change.type === 'state_changed' && change.before && change.after) {
         lines.push(
-          `⚠️  **State changed**: \`${change.modelId}\` — ${change.before!.state} → ${change.after!.state}`,
+          `⚠️  **State changed**: \`${change.modelId}\` — ${change.before.state} → ${change.after.state}`,
         );
-      } else if (change.type === 'context_window_changed') {
+      } else if (change.type === 'context_window_changed' && change.before && change.after) {
         lines.push(
           `⚠️  **Context window changed**: \`${change.modelId}\` — ` +
-            `${change.before!.contextWindow.toLocaleString()} → ${change.after!.contextWindow.toLocaleString()} tokens`,
+            `${change.before.contextWindow.toLocaleString()} → ${change.after.contextWindow.toLocaleString()} tokens`,
         );
       }
     }

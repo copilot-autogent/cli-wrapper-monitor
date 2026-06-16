@@ -230,15 +230,18 @@ function extractSystemPrompt(autogentPath: string, workspacePath: string): strin
  * Pass SKIP_MODEL_POOL=true to bypass entirely (useful for fast local runs).
  */
 async function captureModelPool(): Promise<ModelPool | null> {
-  const capturedAt = new Date().toISOString();
-  const client = new CopilotClient({
-    useLoggedInUser: true,
-    useStdio: true,
-    autoStart: true,
-  });
-
+  let client: CopilotClient | undefined;
   try {
+    // Constructor inside try so failures are caught by the same handler.
+    client = new CopilotClient({
+      useLoggedInUser: true,
+      useStdio: true,
+      autoStart: true,
+    });
     await client.start();
+    // Timestamp immediately before the call so ModelPool.capturedAt reflects
+    // when the model list was actually fetched, not when startup began.
+    const capturedAt = new Date().toISOString();
     const rawModels = await client.listModels();
     const models = rawModels.map((m) => ({
       id: m.id,
@@ -250,10 +253,12 @@ async function captureModelPool(): Promise<ModelPool | null> {
     console.warn(`⚠️  Model pool capture skipped: ${String(err)}`);
     return null;
   } finally {
-    try {
-      await (client as unknown as { disconnect?: () => Promise<void> }).disconnect?.();
-    } catch {
-      // best-effort cleanup
+    if (client) {
+      try {
+        await (client as unknown as { disconnect?: () => Promise<void> }).disconnect?.();
+      } catch {
+        // best-effort cleanup
+      }
     }
   }
 }
@@ -356,6 +361,13 @@ async function main(): Promise<void> {
       console.log(`Model pool captured: ${modelPool.models.length} models`);
       const enabled = modelPool.models.filter((m) => m.state === 'enabled').length;
       console.log(`  Enabled: ${enabled}  Total: ${modelPool.models.length}`);
+    } else if (existingBaseline?.modelPool) {
+      // The previous baseline had a model pool but this capture failed.
+      // Warn explicitly so operators know the monitor was blind this run.
+      console.warn(
+        '⚠️  Model pool capture failed — previous baseline had a pool. ' +
+          'Model pool changes cannot be detected for this run.',
+      );
     }
   }
 
@@ -411,7 +423,7 @@ async function main(): Promise<void> {
       if (removals.length > 0) {
         console.warn(`⚠️  Model(s) removed: ${removals.map((c) => c.modelId).join(', ')}`);
       }
-      if (stateChanges.some((c) => c.after?.state === 'disabled' || c.after?.state === 'unconfigured')) {
+      if (stateChanges.some((c) => c.after?.state !== 'enabled')) {
         const deprecated = stateChanges.filter((c) => c.after?.state !== 'enabled');
         console.warn(`⚠️  Model(s) deprecated/disabled: ${deprecated.map((c) => c.modelId).join(', ')}`);
       }
