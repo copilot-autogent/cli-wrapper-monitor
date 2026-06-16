@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { ExperimentRunner } from '../src/harness/runner.js';
 import { SnapshotStore } from '../src/harness/snapshot.js';
 import { diffSnapshots, formatDiffReport } from '../src/harness/diff.js';
+import { computeSizeDelta, formatSizeDeltaTable } from '../src/harness/size-delta.js';
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
@@ -301,7 +302,7 @@ async function main(): Promise<void> {
   console.log(`Snapshot saved: ${savedPath}`);
   console.log('');
 
-  // Print metrics summary
+  // Print full metrics per experiment
   for (const [expName, result] of Object.entries(snapshot.experiments)) {
     console.log(`Experiment: ${expName}`);
     if (result.error) {
@@ -313,6 +314,10 @@ async function main(): Promise<void> {
     }
     console.log('');
   }
+
+  // Size delta summary table (always emitted; shows '—' when no prior baseline)
+  const sizeDelta = computeSizeDelta(snapshot, existingBaseline);
+  console.log(formatSizeDeltaTable(sizeDelta));
 
   if (existingBaseline) {
     const diff = diffSnapshots(existingBaseline, snapshot);
