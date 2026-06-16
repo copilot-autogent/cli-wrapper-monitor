@@ -45,6 +45,25 @@ export function computeSizeDelta(
   const currentExp = current.experiments['context-tax'];
   const latestExp = latest?.experiments['context-tax'] ?? null;
 
+  // If the experiment failed, return a zero-delta result to avoid spurious
+  // SIZE ALERTs caused by missing metrics (e.g. all values → 0 → -100% delta).
+  if (currentExp?.error) {
+    return {
+      metrics: TRACKED_METRICS.map(({ key, label }) => ({
+        key,
+        label,
+        current: 0,
+        unit: '',
+        previous: null,
+        deltaAbsolute: null,
+        deltaPct: null,
+        alert: false,
+      })),
+      hasAlert: false,
+      previousCapturedAt: latest?.capturedAt ?? null,
+    };
+  }
+
   const metrics: SizeMetricDelta[] = TRACKED_METRICS.map(({ key, label }) => {
     const currentMetric = currentExp?.metrics[key];
     const latestMetric = latestExp?.metrics[key] ?? null;
@@ -54,13 +73,21 @@ export function computeSizeDelta(
     const prevVal = latestMetric !== null ? latestMetric.value : null;
 
     const deltaAbsolute = prevVal !== null ? currentVal - prevVal : null;
+
+    // deltaPct is null when prevVal is 0 (division by zero) or there is no
+    // prior baseline.  Note: this is intentionally strict (> not >=) per the
+    // issue spec which says ">10% change".  diff.ts uses >= for its own
+    // regression threshold — the two are separate output channels.
     const deltaPct =
       deltaAbsolute !== null && prevVal !== null && prevVal !== 0
         ? (deltaAbsolute / prevVal) * 100
         : null;
 
+    // 0 → N is treated as always alerting: we can't compute a %, but any
+    // growth from zero is a notable change worth investigating.
     const alert =
-      deltaPct !== null && Math.abs(deltaPct) > SIZE_ALERT_THRESHOLD_PCT;
+      (deltaPct !== null && Math.abs(deltaPct) > SIZE_ALERT_THRESHOLD_PCT) ||
+      (prevVal === 0 && deltaAbsolute !== null && currentVal > 0);
 
     return {
       key,
@@ -106,17 +133,22 @@ export function formatSizeDeltaTable(result: SizeDeltaResult): string {
   );
 
   for (const m of result.metrics) {
-    const current = `${m.current.toLocaleString()} ${m.unit}`.padEnd(C2);
+    const current = `${m.current.toLocaleString('en-US')} ${m.unit}`.padEnd(C2);
     const previous = (
       m.previous !== null
-        ? `${m.previous.toLocaleString()} ${m.unit}`
+        ? `${m.previous.toLocaleString('en-US')} ${m.unit}`
         : '—'
     ).padEnd(C3);
 
     let sinceLast = '—';
-    if (m.deltaAbsolute !== null && m.deltaPct !== null) {
+    if (m.deltaAbsolute !== null) {
       const sign = m.deltaAbsolute >= 0 ? '+' : '';
-      sinceLast = `${sign}${m.deltaAbsolute.toLocaleString()} (${sign}${m.deltaPct.toFixed(1)}%)`;
+      if (m.deltaPct !== null) {
+        sinceLast = `${sign}${m.deltaAbsolute.toLocaleString('en-US')} (${sign}${m.deltaPct.toFixed(1)}%)`;
+      } else {
+        // prevVal was 0 — percentage undefined; show absolute change
+        sinceLast = `${sign}${m.deltaAbsolute.toLocaleString('en-US')} (∞%)`;
+      }
       if (m.alert) sinceLast += ' ⚠️';
     }
 
@@ -128,10 +160,10 @@ export function formatSizeDeltaTable(result: SizeDeltaResult): string {
 
   if (result.hasAlert) {
     lines.push(
-      '  ┌────────────────────────────────────────────────────────┐',
-      '  │  ⚠️  SIZE ALERT: a key metric grew >10% since last run  │',
-      '  │  Investigate growth before the next scheduled baseline  │',
-      '  └────────────────────────────────────────────────────────┘',
+      '  ┌──────────────────────────────────────────────────────────┐',
+      '  │  ⚠️  SIZE ALERT: a key metric changed by >10% since last  │',
+      '  │  Investigate drift before the next scheduled baseline     │',
+      '  └──────────────────────────────────────────────────────────┘',
     );
     lines.push('');
   }

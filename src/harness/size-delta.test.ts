@@ -80,7 +80,7 @@ describe('computeSizeDelta', () => {
   });
 
   it('does NOT alert at exactly the threshold', () => {
-    // Strictly greater than 10%, so exactly 10% should NOT trigger
+    // Issue spec says ">10%", so exactly 10% should NOT trigger
     const latest = makeSnapshot(100_000, 25_000, 10);
     const current = makeSnapshot(110_000, 27_500, 10); // exactly +10%
 
@@ -139,6 +139,54 @@ describe('computeSizeDelta', () => {
       expect(m.current).toBe(0);
     }
   });
+
+  it('does NOT fire alert when context-tax experiment errors', () => {
+    // Simulates runner recording metrics: {} on experiment failure.
+    // Without this guard, all metrics → 0 vs previous 100k → -100% → false alert.
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const errorSnapshot: MetricSnapshot = {
+      capturedAt: '2026-06-01T00:00:00.000Z',
+      monitorVersion: 'abc',
+      sdkVersion: '^0.2.0',
+      model: 'claude',
+      experiments: {
+        'context-tax': {
+          name: 'context-tax',
+          description: 'test',
+          metrics: {},
+          error: 'Failed to connect',
+        },
+      },
+    };
+
+    const result = computeSizeDelta(errorSnapshot, latest);
+    expect(result.hasAlert).toBe(false);
+    for (const m of result.metrics) {
+      expect(m.alert).toBe(false);
+      expect(m.deltaAbsolute).toBeNull();
+    }
+  });
+
+  it('alerts when toolCount grows from 0 to non-zero', () => {
+    const latest = makeSnapshot(100_000, 25_000, 0); // toolCount was 0
+    const current = makeSnapshot(100_000, 25_000, 5);
+
+    const result = computeSizeDelta(current, latest);
+
+    const tools = result.metrics.find((m) => m.key === 'toolCount')!;
+    expect(tools.alert).toBe(true);
+    expect(result.hasAlert).toBe(true);
+  });
+
+  it('shows (∞%) in table when previous was 0', () => {
+    const latest = makeSnapshot(100_000, 25_000, 0);
+    const current = makeSnapshot(100_000, 25_000, 5);
+
+    const result = computeSizeDelta(current, latest);
+    const table = formatSizeDeltaTable(result);
+
+    expect(table).toContain('∞%');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -194,6 +242,7 @@ describe('formatSizeDeltaTable', () => {
     const result = computeSizeDelta(current, latest);
     const table = formatSizeDeltaTable(result);
 
+    // toLocaleString('en-US') is used in the formatter, so thousands separator is ','
     expect(table).toContain('+5,000');
     expect(table).toContain('+5.0%');
   });
