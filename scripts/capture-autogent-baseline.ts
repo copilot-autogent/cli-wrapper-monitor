@@ -16,11 +16,13 @@
  *   AUTOGENT_PATH=/path/to/autogent npx tsx scripts/capture-autogent-baseline.ts
  *   LIVE_MODE=true GITHUB_TOKEN=<token> npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_REFUSAL=true npx tsx scripts/capture-autogent-baseline.ts
+ *   SKIP_MODEL_POOL=true npx tsx scripts/capture-autogent-baseline.ts
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CopilotClient } from '@github/copilot-sdk';
 import { ExperimentRunner } from '../src/harness/runner.js';
 import { SnapshotStore } from '../src/harness/snapshot.js';
 import { diffSnapshots, formatDiffReport } from '../src/harness/diff.js';
@@ -28,6 +30,7 @@ import { computeSizeDelta, formatSizeDeltaTable } from '../src/harness/size-delt
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
+import type { ModelPool } from '../src/harness/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASELINES_DIR = join(__dirname, '../baselines');
@@ -35,6 +38,7 @@ const BASELINES_DIR = join(__dirname, '../baselines');
 const AUTOGENT_PATH = process.env['AUTOGENT_PATH'] ?? '/app';
 const LIVE_MODE = process.env['LIVE_MODE'] === 'true';
 const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
+const SKIP_MODEL_POOL = process.env['SKIP_MODEL_POOL'] === 'true';
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -213,6 +217,53 @@ function extractSystemPrompt(autogentPath: string, workspacePath: string): strin
 }
 
 // ---------------------------------------------------------------------------
+// Model pool capture
+// ---------------------------------------------------------------------------
+
+/**
+ * Capture the available model pool via CopilotClient.listModels().
+ *
+ * Returns a ModelPool on success, or null if the SDK process is unavailable
+ * (e.g. in CI environments without a running CLI). Errors are logged as
+ * warnings — they never crash the baseline capture.
+ *
+ * Pass SKIP_MODEL_POOL=true to bypass entirely (useful for fast local runs).
+ */
+async function captureModelPool(): Promise<ModelPool | null> {
+  let client: CopilotClient | undefined;
+  try {
+    // Constructor inside try so failures are caught by the same handler.
+    client = new CopilotClient({
+      useLoggedInUser: true,
+      useStdio: true,
+      autoStart: true,
+    });
+    await client.start();
+    // Timestamp immediately before the call so ModelPool.capturedAt reflects
+    // when the model list was actually fetched, not when startup began.
+    const capturedAt = new Date().toISOString();
+    const rawModels = await client.listModels();
+    const models = rawModels.map((m) => ({
+      id: m.id,
+      state: m.policy?.state ?? 'unconfigured',
+      contextWindow: m.capabilities.limits.max_context_window_tokens,
+    }));
+    return { capturedAt, models };
+  } catch (err) {
+    console.warn(`⚠️  Model pool capture skipped: ${String(err)}`);
+    return null;
+  } finally {
+    if (client) {
+      try {
+        await (client as unknown as { disconnect?: () => Promise<void> }).disconnect?.();
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -242,6 +293,11 @@ async function main(): Promise<void> {
     console.log(
       `  Tools: ${toolDefs.map((t) => t.name).join(', ')}`,
     );
+  }
+  if (SKIP_MODEL_POOL) {
+    console.log('Model pool capture: skipped (SKIP_MODEL_POOL=true)');
+  } else {
+    console.log('Model pool capture: enabled (set SKIP_MODEL_POOL=true to skip)');
   }
   console.log(`Live mode: ${LIVE_MODE ? 'enabled' : 'disabled (set LIVE_MODE=true to enable)'}`);
 
@@ -296,6 +352,25 @@ async function main(): Promise<void> {
   snapshot.binaryHash = binaryHash;
   snapshot.systemPromptHash = systemPromptHash;
 
+  // Capture model pool
+  if (!SKIP_MODEL_POOL) {
+    console.log('Capturing model pool...');
+    const modelPool = await captureModelPool();
+    if (modelPool) {
+      snapshot.modelPool = modelPool;
+      console.log(`Model pool captured: ${modelPool.models.length} models`);
+      const enabled = modelPool.models.filter((m) => m.state === 'enabled').length;
+      console.log(`  Enabled: ${enabled}  Total: ${modelPool.models.length}`);
+    } else if (existingBaseline?.modelPool) {
+      // The previous baseline had a model pool but this capture failed.
+      // Warn explicitly so operators know the monitor was blind this run.
+      console.warn(
+        '⚠️  Model pool capture failed — previous baseline had a pool. ' +
+          'Model pool changes cannot be detected for this run.',
+      );
+    }
+  }
+
   console.log('');
 
   const savedPath = store.save(snapshot);
@@ -338,6 +413,28 @@ async function main(): Promise<void> {
     }
 
     console.log(formatDiffReport(diff));
+
+    // Emit model pool change summary
+    if (diff.modelPoolChanges.length > 0) {
+      const removals = diff.modelPoolChanges.filter((c) => c.type === 'removed');
+      const additions = diff.modelPoolChanges.filter((c) => c.type === 'added');
+      const stateChanges = diff.modelPoolChanges.filter((c) => c.type === 'state_changed');
+      const ctxChanges = diff.modelPoolChanges.filter((c) => c.type === 'context_window_changed');
+      if (removals.length > 0) {
+        console.warn(`⚠️  Model(s) removed: ${removals.map((c) => c.modelId).join(', ')}`);
+      }
+      if (stateChanges.some((c) => c.after?.state !== 'enabled')) {
+        const deprecated = stateChanges.filter((c) => c.after?.state !== 'enabled');
+        console.warn(`⚠️  Model(s) deprecated/disabled: ${deprecated.map((c) => c.modelId).join(', ')}`);
+      }
+      if (additions.length > 0) {
+        console.log(`ℹ️  Model(s) added: ${additions.map((c) => c.modelId).join(', ')}`);
+      }
+      if (ctxChanges.length > 0) {
+        console.log(`ℹ️  Context window changed: ${ctxChanges.map((c) => c.modelId).join(', ')}`);
+      }
+    }
+
     if (diff.hasRegressions) {
       console.error('\n❌ Regressions detected — please investigate');
       process.exitCode = 1;

@@ -1,7 +1,43 @@
-import type { DiffReport, MetricChange, MetricSnapshot } from './types.js';
+import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange } from './types.js';
 
 const WARNING_THRESHOLD_PCT = 5;
 const REGRESSION_THRESHOLD_PCT = 10;
+
+/** Diff two model pools, returning structured change records. */
+export function diffModelPool(
+  baseline: ModelPool | undefined,
+  current: ModelPool | undefined,
+): ModelPoolChange[] {
+  if (!baseline || !current) return [];
+
+  const changes: ModelPoolChange[] = [];
+  const baseMap = new Map(baseline.models.map((m) => [m.id, m]));
+  const currMap = new Map(current.models.map((m) => [m.id, m]));
+
+  // Removed models
+  for (const [id, before] of baseMap) {
+    if (!currMap.has(id)) {
+      changes.push({ type: 'removed', modelId: id, before });
+    }
+  }
+
+  // Added models and changed models
+  for (const [id, after] of currMap) {
+    const before = baseMap.get(id);
+    if (!before) {
+      changes.push({ type: 'added', modelId: id, after });
+      continue;
+    }
+    if (before.state !== after.state) {
+      changes.push({ type: 'state_changed', modelId: id, before, after });
+    }
+    if (before.contextWindow !== after.contextWindow) {
+      changes.push({ type: 'context_window_changed', modelId: id, before, after });
+    }
+  }
+
+  return changes;
+}
 
 /**
  * Compare two snapshots and return a diff report.
@@ -63,6 +99,8 @@ export function diffSnapshots(
     current.systemPromptHash !== 'unknown' &&
     baseline.systemPromptHash !== current.systemPromptHash;
 
+  const modelPoolChanges = diffModelPool(baseline.modelPool, current.modelPool);
+
   return {
     baseline,
     current,
@@ -70,6 +108,7 @@ export function diffSnapshots(
     hasRegressions: changes.some((c) => c.severity === 'regression'),
     binaryChanged,
     systemPromptChanged,
+    modelPoolChanges,
   };
 }
 
@@ -108,22 +147,48 @@ export function formatDiffReport(report: DiffReport): string {
 
   if (report.changes.length === 0) {
     lines.push('_No overlapping metrics to compare._');
-    return lines.join('\n');
+  } else {
+    for (const change of report.changes) {
+      const icon =
+        change.severity === 'regression'
+          ? '🔴'
+          : change.severity === 'warning'
+            ? '🟡'
+            : '⚪';
+      const sign = change.deltaAbsolute >= 0 ? '+' : '';
+      lines.push(
+        `${icon} **${change.experiment}/${change.metric}**: ` +
+          `${change.baseline.value} → ${change.current.value} ${change.current.unit} ` +
+          `(${sign}${change.deltaPct.toFixed(1)}%)`,
+      );
+    }
   }
 
-  for (const change of report.changes) {
-    const icon =
-      change.severity === 'regression'
-        ? '🔴'
-        : change.severity === 'warning'
-          ? '🟡'
-          : '⚪';
-    const sign = change.deltaAbsolute >= 0 ? '+' : '';
-    lines.push(
-      `${icon} **${change.experiment}/${change.metric}**: ` +
-        `${change.baseline.value} → ${change.current.value} ${change.current.unit} ` +
-        `(${sign}${change.deltaPct.toFixed(1)}%)`,
-    );
+  // Model pool changes
+  if (report.modelPoolChanges.length > 0) {
+    lines.push('', '## Model Pool Changes', '');
+    for (const change of report.modelPoolChanges) {
+      if (change.type === 'added' && change.after) {
+        const m = change.after;
+        lines.push(
+          `✅ **Added**: \`${m.id}\` — state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`,
+        );
+      } else if (change.type === 'removed' && change.before) {
+        const m = change.before;
+        lines.push(
+          `❌ **Removed**: \`${m.id}\` — was state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`,
+        );
+      } else if (change.type === 'state_changed' && change.before && change.after) {
+        lines.push(
+          `⚠️  **State changed**: \`${change.modelId}\` — ${change.before.state} → ${change.after.state}`,
+        );
+      } else if (change.type === 'context_window_changed' && change.before && change.after) {
+        lines.push(
+          `⚠️  **Context window changed**: \`${change.modelId}\` — ` +
+            `${change.before.contextWindow.toLocaleString()} → ${change.after.contextWindow.toLocaleString()} tokens`,
+        );
+      }
+    }
   }
 
   return lines.join('\n');
