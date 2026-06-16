@@ -1,22 +1,22 @@
 {
   "$schema": "./schema.json",
-  "capturedAt": "2026-06-16T21:20:00.000Z",
+  "capturedAt": "2026-06-14T09:45:30.000Z",
   "monitorVersion": "66421c6",
   "sdkVersion": "^0.2.2",
   "model": "claude-sonnet-4.6",
-  "note": "Post-PLAYBOOK-migration snapshot (autogent#571 merged 2026-06-14; current state as of 2026-06-16)",
+  "note": "Pre-PLAYBOOK-migration snapshot (reconstructed from workspace git commit 9a8735d6, parent of autogent#571 merge)",
   "experiments": {
     "context-tax": {
       "name": "context-tax",
       "description": "Measures character/token overhead of CLI wrapper layer components",
       "metrics": {
         "systemPromptChars": {
-          "value": 156244,
+          "value": 226953,
           "unit": "chars",
           "description": "System prompt length in characters"
         },
         "systemPromptTokensEstimated": {
-          "value": 39061,
+          "value": 56738,
           "unit": "tokens",
           "description": "Estimated token count of system prompt (÷4 heuristic)"
         },
@@ -41,12 +41,12 @@
           "description": "Average characters per tool definition"
         },
         "totalOverheadChars": {
-          "value": 159527,
+          "value": 230236,
           "unit": "chars",
           "description": "Total wrapper overhead in characters"
         },
         "totalOverheadTokensEstimated": {
-          "value": 39882,
+          "value": 57559,
           "unit": "tokens",
           "description": "Total estimated token overhead from system prompt + tool definitions"
         }
@@ -54,7 +54,7 @@
       "rawData": {
         "mode": "static",
         "liveAvailable": false,
-        "note": "Captured from live workspace files (/home/autogent/.autogent) as of 2026-06-16. Tool defs read from /app/dist/tools/builtin/.",
+        "note": "Reconstructed from git history for migration validation.",
         "perToolChars": [
           {
             "name": "read_container_events",
@@ -145,5 +145,6 @@
     }
   },
   "binaryHash": "sha256:2ce57cb28adc008d83fd61910c5005b32640efc974bbe3db2db4bc72bde57486",
-  "systemPromptHash": "sha256:c01466da21c5cba51ed7887b3c8ee9c81bca16b4f7b9a3a014d7bb76cd7cfbe5"
+  "systemPromptHash": "sha256:4a5a229d1e7e57b933e24df3f849d30166e1360d266d324d0063d5a0ea278114",
+  "binaryHashNote": "Captured from current /app/dist/index.js at time of report generation (2026-06-16). The PLAYBOOK migration (autogent#571) was bootstrap-only; no /app code changed."
 }
