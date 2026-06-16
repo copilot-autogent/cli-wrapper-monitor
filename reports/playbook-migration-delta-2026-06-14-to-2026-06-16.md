@@ -16,7 +16,7 @@
 | **Post-migration** | 2026-06-16T21:20:00Z (current state) |
 | **System prompt reduction** | **−70,709 chars (−31.2%)** |
 | **Token savings** | **−17,677 tokens** |
-| **Success criteria (≥30%)** | ✅ **PASSED** |
+| **Success criteria (≥30%)** | ✅ **PASSED** (size reduction; semantic rule verification out of scope — see caveats) |
 
 ---
 

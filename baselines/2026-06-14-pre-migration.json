@@ -1,4 +1,5 @@
 {
+  "$schema": "./schema.json",
   "capturedAt": "2026-06-14T09:45:30.000Z",
   "monitorVersion": "66421c6",
   "sdkVersion": "^0.2.2",
