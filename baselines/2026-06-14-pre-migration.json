@@ -144,5 +144,6 @@
     }
   },
   "binaryHash": "sha256:2ce57cb28adc008d83fd61910c5005b32640efc974bbe3db2db4bc72bde57486",
-  "systemPromptHash": "sha256:4a5a229d1e7e57b933e24df3f849d30166e1360d266d324d0063d5a0ea278114"
+  "systemPromptHash": "sha256:4a5a229d1e7e57b933e24df3f849d30166e1360d266d324d0063d5a0ea278114",
+  "binaryHashNote": "Captured from current /app/dist/index.js at time of report generation (2026-06-16). The PLAYBOOK migration (autogent#571) was bootstrap-only; no /app code changed."
 }

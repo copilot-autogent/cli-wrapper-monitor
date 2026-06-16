@@ -39,15 +39,17 @@
 
 | File | Pre-migration | Post-migration | Delta |
 |------|--------------|----------------|-------|
-| SOUL.md | 4,493 chars | 4,517 chars | +24 |
+| SOUL.md | 4,493 chars | 4,493 chars | 0 |
 | **PLAYBOOK.md** | **134,969 chars** | **49,583 chars** | **−85,386 (−63.3%)** |
 | CONTEXT.md | 74,532 chars | 88,715 chars | +14,183 (+19.0%) |
-| USER.md | 12,938 chars | 13,712 chars | +774 |
-| **Total (file sizes)** | **226,932 chars** | **156,527 chars** | **−70,405 (−31.0%)** |
+| USER.md | 12,938 chars | 13,432 chars | +494 |
+| **Sum (files)** | **226,932 chars** | **156,223 chars** | **−70,709 (−31.2%)** |
 
-> **Note on totals**: The per-file sum (226,932) differs by 21 chars from `systemPromptChars`
-> (226,953) because the capture script joins files with `"\n\n---\n\n"` (7 chars × 3
-> separators = 21 extra chars). The `systemPromptChars` metric is the canonical value.
+> **Note on totals**: The per-file sum differs from `systemPromptChars` by exactly 21 chars
+> in both cases (3 separators × `"\n\n---\n\n"` = 7 chars each). Pre: 226,932 + 21 = 226,953 ✓
+> Post: 156,223 + 21 = 156,244 ✓. All values use `String.length` (UTF-16 code units) for
+> consistency with the baseline metric. Raw byte counts (`wc -c`) are larger due to
+> multi-byte UTF-8 chars (emoji, `→`, `—`, etc.) in the bootstrap files.
 >
 > CONTEXT.md grew +14,183 chars between June 14 and June 16 as new gotchas were added
 > (empirical-first, self-skip escalation, security checklist, etc.). This partially offsets
@@ -96,8 +98,8 @@ between the PR #9 analysis and the migration date (new rules added daily).
 | Tool count stable | ✅ 21 tools (unchanged) |
 | Binary hash | ✅ unchanged (`sha256:2ce57cb2…`) — PLAYBOOK migration is bootstrap-only |
 | System prompt hash changed | ✅ expected (PLAYBOOK content changed) |
-| PLAYBOOK.md ≤ 50k ceiling | ✅ 49,583 chars (under 50k limit) |
-| No operational rules removed | ⚠️ unverified by this report — size metrics cannot prove semantic equivalence; autogent#571 acceptance criteria covers this |
+| PLAYBOOK.md ≤ 50k ceiling | ✅ 49,583 chars (verified from git commit `9b378da1`, the migration commit itself) |
+| No operational rules removed | ⚠️ not verified by this report — size metrics cannot establish semantic equivalence; covered by autogent#571 acceptance criteria |
 
 ---
 
@@ -106,7 +108,7 @@ between the PR #9 analysis and the migration date (new rules added daily).
 - [x] Pre-migration baseline captured (2026-06-14, reconstructed from workspace git `9a8735d6`)
 - [x] Post-migration baseline captured (2026-06-16, `baselines/2026-06-16-post-migration.json`)
 - [x] Delta report confirms ≥30% system prompt reduction (actual: **31.2%**)
-- [x] No unexpected regressions (tool count stable, no operational rules lost)
+- [ ] No unexpected regressions: tool count stable ✅; semantic rule preservation not verified by this observation-only report (see autogent#571)
 
 ---
 
