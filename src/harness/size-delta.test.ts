@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   computeSizeDelta,
   formatSizeDeltaTable,
+  sendSizeAlertWebhook,
   SIZE_ALERT_THRESHOLD_PCT,
 } from './size-delta.js';
 import type { MetricSnapshot } from './types.js';
@@ -249,5 +250,135 @@ describe('formatSizeDeltaTable', () => {
 
   it('exports SIZE_ALERT_THRESHOLD_PCT as a public constant', () => {
     expect(SIZE_ALERT_THRESHOLD_PCT).toBe(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendSizeAlertWebhook
+// ---------------------------------------------------------------------------
+
+describe('sendSizeAlertWebhook', () => {
+  // Restore env and fetch mock after each test
+  let originalEnv: string | undefined;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    originalEnv = process.env['DISCORD_WEBHOOK_URL'];
+    mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env['DISCORD_WEBHOOK_URL'];
+    } else {
+      process.env['DISCORD_WEBHOOK_URL'] = originalEnv;
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it('does NOT call fetch when hasAlert is false', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(105_000, 26_000, 10); // +5% — no alert
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is not set', async () => {
+    delete process.env['DISCORD_WEBHOOK_URL'];
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10); // +20% — alert
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT throw when DISCORD_WEBHOOK_URL is absent (graceful no-op)', async () => {
+    delete process.env['DISCORD_WEBHOOK_URL'];
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10);
+    const result = computeSizeDelta(current, latest);
+
+    await expect(sendSizeAlertWebhook(result)).resolves.toBeUndefined();
+  });
+
+  it('POSTs to the webhook URL when SIZE ALERT fires', async () => {
+    const webhookUrl = 'https://discord.com/api/webhooks/123/abc';
+    process.env['DISCORD_WEBHOOK_URL'] = webhookUrl;
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10); // +20%
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch).toHaveBeenCalledWith(webhookUrl, expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+    }));
+  });
+
+  it('POST body contains metric name, % change, and SIZE ALERT text', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10); // +20%
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('SIZE ALERT');
+    expect(body.content).toContain('System prompt chars');
+    expect(body.content).toContain('+20.0%');
+  });
+
+  it('POST body includes CI run URL when provided', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10);
+    const result = computeSizeDelta(current, latest);
+    const ciUrl = 'https://github.com/copilot-autogent/cli-wrapper-monitor/actions/runs/12345';
+
+    await sendSizeAlertWebhook(result, ciUrl);
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain(ciUrl);
+  });
+
+  it('POST body does NOT include CI link when ciRunUrl is omitted', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10);
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).not.toContain('actions/runs');
+  });
+
+  it('only includes alerting metrics in the POST body', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    // Only systemPromptChars crosses the threshold
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 25_500, 10); // chars +20%, tokens +2%, tools unchanged
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('System prompt chars');
+    // Tokens (est.) grew only 2% — should NOT be in the alert
+    expect(body.content).not.toContain('Tokens (est.)');
   });
 });

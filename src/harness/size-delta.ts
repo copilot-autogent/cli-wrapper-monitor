@@ -170,3 +170,51 @@ export function formatSizeDeltaTable(result: SizeDeltaResult): string {
 
   return lines.join('\n');
 }
+
+/**
+ * Send a Discord webhook notification when a SIZE ALERT fires.
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. When the env var is absent
+ * or empty the function returns immediately — no CI failure is produced.
+ *
+ * @param result     - the SizeDeltaResult that triggered the alert
+ * @param ciRunUrl   - optional link to the CI run (from GITHUB_SERVER_URL + GITHUB_RUN_ID)
+ */
+export async function sendSizeAlertWebhook(
+  result: SizeDeltaResult,
+  ciRunUrl?: string,
+): Promise<void> {
+  if (!result.hasAlert) return;
+
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl) return;
+
+  const alertingMetrics = result.metrics.filter((m) => m.alert);
+
+  const metricLines = alertingMetrics.map((m) => {
+    const sign = (m.deltaAbsolute ?? 0) >= 0 ? '+' : '';
+    const pctStr =
+      m.deltaPct !== null
+        ? `${sign}${m.deltaPct.toFixed(1)}%`
+        : '∞%';
+    const prevStr =
+      m.previous !== null
+        ? `${m.previous.toLocaleString('en-US')} ${m.unit}`
+        : '—';
+    const currStr = `${m.current.toLocaleString('en-US')} ${m.unit}`;
+    return `• **${m.label}**: ${prevStr} → ${currStr} (${pctStr})`;
+  });
+
+  const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
+
+  const content =
+    `⚠️ **SIZE ALERT** — a key CLI wrapper metric changed by >10%\n` +
+    metricLines.join('\n') +
+    ciLine;
+
+  await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+}
