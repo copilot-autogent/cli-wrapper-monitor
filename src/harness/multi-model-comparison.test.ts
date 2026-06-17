@@ -51,15 +51,14 @@ function makeSnapshot(
 // ---------------------------------------------------------------------------
 
 describe('detectBehavioralDifferences', () => {
-  it('returns no-difference message when all models are consistent', () => {
+  it('returns empty array when all models are consistent', () => {
     const snap = makeSnapshot([
       { model: 'claude', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
       { model: 'gpt', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
       { model: 'gemini', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
     ]);
     const diffs = detectBehavioralDifferences(snap);
-    expect(diffs).toHaveLength(1);
-    expect(diffs[0]).toContain('No meaningful differences');
+    expect(diffs).toHaveLength(0);
   });
 
   it('flags models with safeAllowedRate < 1.0', () => {
@@ -141,7 +140,9 @@ describe('formatComparisonTable', () => {
   });
 
   it('includes context tax metrics', () => {
-    const snap = makeSnapshot([{ model: 'gpt-4o-mini', safe: 1.0, dangerous: 1.0, borderline: 0.5 }]);
+    const snap = makeSnapshot([
+      { model: 'gpt-4o-mini', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+    ]);
     const table = formatComparisonTable(snap);
     expect(table).toContain('Context Tax');
     expect(table).toContain('10,000');
@@ -150,8 +151,7 @@ describe('formatComparisonTable', () => {
 
   it('marks refusal as skipped when no refusal data', () => {
     const snap = makeSnapshot([{ model: 'gpt-4o-mini' }]);
-    // Manually clear refusal so it is null
-    snap.entries[0].refusal = null;
+    snap.entries[0]!.refusal = null;
     const table = formatComparisonTable(snap);
     expect(table).toContain('skipped');
   });
@@ -163,6 +163,26 @@ describe('formatComparisonTable', () => {
     const table = formatComparisonTable(snap);
     expect(table).toContain('0.667');
     expect(table).toContain('1.000');
+  });
+
+  it('shows no-differences message (not a Detected header) when models are consistent', () => {
+    const snap = makeSnapshot([
+      { model: 'gpt', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+      { model: 'claude', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+    ]);
+    const table = formatComparisonTable(snap);
+    expect(table).not.toContain('Behavioral Differences Detected');
+    expect(table).toContain('No meaningful behavioral differences');
+  });
+
+  it('shows Detected header when a real difference exists', () => {
+    const snap = makeSnapshot([
+      { model: 'gpt', safe: 1.0, dangerous: 0.667, borderline: 0.5 },
+      { model: 'claude', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+    ]);
+    const table = formatComparisonTable(snap);
+    expect(table).toContain('Behavioral Differences Detected');
+    expect(table).toContain('security gap');
   });
 });
 
@@ -202,7 +222,7 @@ describe('formatComparisonMarkdown', () => {
 
   it('shows skipped message when no refusal data', () => {
     const snap = makeSnapshot([{ model: 'gpt-4o-mini' }]);
-    snap.entries[0].refusal = null;
+    snap.entries[0]!.refusal = null;
     const md = formatComparisonMarkdown(snap);
     expect(md).toContain('SKIP_REFUSAL');
   });
@@ -211,5 +231,14 @@ describe('formatComparisonMarkdown', () => {
     const snap = makeSnapshot([{ model: 'gpt-4o-mini', safe: 1.0 }]);
     const md = formatComparisonMarkdown(snap);
     expect(md).toContain('Raw Data');
+  });
+
+  it('shows no-differences message when models are consistent', () => {
+    const snap = makeSnapshot([
+      { model: 'gpt', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+      { model: 'claude', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+    ]);
+    const md = formatComparisonMarkdown(snap);
+    expect(md).toContain('No meaningful behavioral differences');
   });
 });

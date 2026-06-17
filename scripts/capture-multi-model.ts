@@ -19,8 +19,8 @@
  *   Default N=3 → 27 calls max.  N=5 → 45 calls max.
  *
  * Output:
- *   reports/multi-model-YYYY-MM-DD.json   — machine-readable snapshot
- *   reports/multi-model-YYYY-MM-DD.md     — human-readable report
+ *   reports/multi-model-YYYY-MM-DDTHH-MM-SS.json   — machine-readable snapshot
+ *   reports/multi-model-YYYY-MM-DDTHH-MM-SS.md     — human-readable report
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -33,7 +33,11 @@ import {
   formatComparisonTable,
   formatComparisonMarkdown,
 } from '../src/harness/multi-model-comparison.js';
-import type { ModelBehaviorEntry, MultiModelComparisonSnapshot } from '../src/harness/types.js';
+import type {
+  ModelBehaviorEntry,
+  ModelContextTax,
+  MultiModelComparisonSnapshot,
+} from '../src/harness/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPORTS_DIR = join(__dirname, '../reports');
@@ -67,7 +71,7 @@ const MODELS: string[] = process.env['MODELS']
   : DEFAULT_MODELS;
 
 // ---------------------------------------------------------------------------
-// Shared extraction helpers (same logic as capture-autogent-baseline.ts)
+// Extraction helpers (same logic as capture-autogent-baseline.ts)
 // ---------------------------------------------------------------------------
 
 interface ToolDef {
@@ -87,13 +91,13 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const content = readFileSync(join(distToolsDir, file), 'utf-8');
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
-        if (nameMatch && descMatch) {
+        if (nameMatch?.[1] && descMatch?.[1]) {
           tools.push({ name: nameMatch[1], description: descMatch[1] });
         }
       }
       if (tools.length > 0) return tools;
     } catch {
-      // fall through
+      // fall through to TypeScript source fallback
     }
   }
 
@@ -106,7 +110,7 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const content = readFileSync(join(srcToolsDir, file), 'utf-8');
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
-        if (nameMatch && descMatch) {
+        if (nameMatch?.[1] && descMatch?.[1]) {
           tools.push({ name: nameMatch[1], description: descMatch[1] });
         }
       }
@@ -142,60 +146,50 @@ function extractSystemPrompt(autogentPath: string, workspacePath: string): strin
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
     const content = readFileSync(candidate, 'utf-8');
-    const templateMatch = content.match(/`(You are[\s\S]{200,?}?)`/);
-    if (templateMatch) return templateMatch[1];
-    const stringMatch = content.match(/"(You are[^"){200,?})"/);
-    if (stringMatch) return stringMatch[1];
+    // Fixed quantifiers: {200,}? means "at least 200, non-greedy"
+    const templateMatch = content.match(/`(You are[\s\S]{200,}?)`/);
+    if (templateMatch?.[1]) return templateMatch[1];
+    const stringMatch = content.match(/"(You are[^"]{200,})"/);
+    if (stringMatch?.[1]) return stringMatch[1];
   }
 
   return '';
 }
 
 // ---------------------------------------------------------------------------
-// Per-model sweep
+// Context tax computation (model-invariant — hoisted out of per-model loop)
+// ---------------------------------------------------------------------------
+
+async function computeContextTax(
+  systemPrompt: string,
+  toolDefs: ToolDef[],
+): Promise<ModelContextTax> {
+  const experiment = new ContextTaxExperiment({
+    systemPrompt,
+    toolDefinitions: toolDefs,
+    liveMode: false, // static mode — same result for every model
+  });
+  const result = await experiment.run();
+  const m = result.metrics;
+  return {
+    systemPromptChars: m['systemPromptChars']?.value ?? 0,
+    systemPromptTokensEstimated: m['systemPromptTokensEstimated']?.value ?? 0,
+    toolDefinitionsChars: m['toolDefinitionsChars']?.value ?? 0,
+    toolDefinitionsTokensEstimated: m['toolDefinitionsTokensEstimated']?.value ?? 0,
+    toolCount: m['toolCount']?.value ?? 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Per-model refusal sweep
 // ---------------------------------------------------------------------------
 
 async function runModelSweep(
   model: string,
-  systemPrompt: string,
-  toolDefs: ToolDef[],
+  contextTax: ModelContextTax,
   skipRefusal: boolean,
 ): Promise<ModelBehaviorEntry> {
   console.log(`\n  → Model: ${model}`);
-
-  // Context tax is the same for all models in static mode
-  const ctxExperiment = new ContextTaxExperiment({
-    systemPrompt,
-    toolDefinitions: toolDefs,
-    liveMode: false, // static mode — no per-model API call needed
-  });
-
-  let contextTax: ModelBehaviorEntry['contextTax'];
-  try {
-    const ctxResult = await ctxExperiment.run();
-    const m = ctxResult.metrics;
-    contextTax = {
-      systemPromptChars: m['systemPromptChars']?.value ?? 0,
-      systemPromptTokensEstimated: m['systemPromptTokensEstimated']?.value ?? 0,
-      toolDefinitionsChars: m['toolDefinitionsChars']?.value ?? 0,
-      toolDefinitionsTokensEstimated: m['toolDefinitionsTokensEstimated']?.value ?? 0,
-      toolCount: m['toolCount']?.value ?? 0,
-    };
-  } catch (err) {
-    console.error(`    ✗ context-tax failed for ${model}: ${String(err)}`);
-    return {
-      model,
-      contextTax: {
-        systemPromptChars: 0,
-        systemPromptTokensEstimated: 0,
-        toolDefinitionsChars: 0,
-        toolDefinitionsTokensEstimated: 0,
-        toolCount: 0,
-      },
-      refusal: null,
-      error: String(err),
-    };
-  }
 
   if (skipRefusal || !hasGitHubToken()) {
     if (!skipRefusal && !hasGitHubToken()) {
@@ -204,7 +198,6 @@ async function runModelSweep(
     return { model, contextTax, refusal: null };
   }
 
-  // Run refusal-rate experiment with this specific model
   const refusalExperiment = new RefusalRateExperiment({
     model,
     maxProbesPerCategory: 3, // cost cap: 3 × 3 categories = 9 calls per model
@@ -256,7 +249,26 @@ async function main(): Promise<void> {
   const systemPrompt = extractSystemPrompt(AUTOGENT_PATH, WORKSPACE_PATH);
   const toolDefs = extractToolDefs(AUTOGENT_PATH);
   console.log(`System prompt: ${systemPrompt.length} chars`);
-  console.log(`Tool defs:     ${toolDefs.length} tools\n`);
+  console.log(`Tool defs:     ${toolDefs.length} tools`);
+
+  // Compute context tax once — model-invariant in static mode
+  console.log('\nComputing context tax...');
+  let contextTax: ModelContextTax;
+  try {
+    contextTax = await computeContextTax(systemPrompt, toolDefs);
+    console.log(
+      `  System prompt: ${contextTax.systemPromptChars.toLocaleString()} chars /` +
+        ` ${contextTax.systemPromptTokensEstimated.toLocaleString()} tokens est.`,
+    );
+    console.log(
+      `  Tool defs:     ${contextTax.toolDefinitionsChars.toLocaleString()} chars /` +
+        ` ${contextTax.toolDefinitionsTokensEstimated.toLocaleString()} tokens est.`,
+    );
+    console.log(`  Tool count:    ${contextTax.toolCount}`);
+  } catch (err) {
+    console.error(`Context tax computation failed: ${String(err)}`);
+    process.exit(1);
+  }
 
   // Derive monitor version
   let monitorVersion = 'unknown';
@@ -269,10 +281,11 @@ async function main(): Promise<void> {
     // not in a git repo
   }
 
-  // Run sweep
+  // Run refusal sweep per model
+  console.log('\nRunning refusal sweep...');
   const entries: ModelBehaviorEntry[] = [];
   for (const model of MODELS) {
-    const entry = await runModelSweep(model, systemPrompt, toolDefs, SKIP_REFUSAL);
+    const entry = await runModelSweep(model, contextTax, SKIP_REFUSAL);
     entries.push(entry);
   }
 
@@ -283,11 +296,11 @@ async function main(): Promise<void> {
     entries,
   };
 
-  // Persist results
+  // Persist results — timestamp includes time to avoid same-day overwrites
   mkdirSync(REPORTS_DIR, { recursive: true });
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const jsonPath = join(REPORTS_DIR, `multi-model-${dateStr}.json`);
-  const mdPath = join(REPORTS_DIR, `multi-model-${dateStr}.md`);
+  const tsStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const jsonPath = join(REPORTS_DIR, `multi-model-${tsStr}.json`);
+  const mdPath = join(REPORTS_DIR, `multi-model-${tsStr}.md`);
 
   writeFileSync(jsonPath, JSON.stringify(snapshot, null, 2), 'utf-8');
   writeFileSync(mdPath, formatComparisonMarkdown(snapshot), 'utf-8');
