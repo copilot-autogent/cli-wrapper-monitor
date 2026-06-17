@@ -299,6 +299,17 @@ describe('sendSizeAlertWebhook', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is whitespace-only', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = '   ';
+    const latest = makeSnapshot(100_000, 25_000, 10);
+    const current = makeSnapshot(120_000, 30_000, 10); // +20% — alert
+    const result = computeSizeDelta(current, latest);
+
+    await sendSizeAlertWebhook(result);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('does NOT throw when DISCORD_WEBHOOK_URL is absent (graceful no-op)', async () => {
     delete process.env['DISCORD_WEBHOOK_URL'];
     const latest = makeSnapshot(100_000, 25_000, 10);
@@ -415,5 +426,20 @@ describe('sendSizeAlertWebhook', () => {
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
     expect(body.content.length).toBeLessThanOrEqual(2000);
+  });
+
+  it('POST body shows ∞% when previous toolCount was 0 (prevVal=0 branch)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const latest = makeSnapshot(100_000, 25_000, 0); // toolCount was 0
+    const current = makeSnapshot(100_000, 25_000, 5); // toolCount → 5 (∞%)
+    const result = computeSizeDelta(current, latest);
+    expect(result.hasAlert).toBe(true);
+
+    await sendSizeAlertWebhook(result);
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('∞%');
+    expect(body.content).toContain('Tool count');
   });
 });

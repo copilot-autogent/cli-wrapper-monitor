@@ -394,15 +394,16 @@ async function main(): Promise<void> {
   const sizeDelta = computeSizeDelta(snapshot, existingBaseline);
   console.log(formatSizeDeltaTable(sizeDelta));
 
-  // Send Discord webhook notification when SIZE ALERT fires.
-  // DISCORD_WEBHOOK_URL absent → silent no-op (no CI failure).
-  const ciRunUrl =
-    process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_REPOSITORY'] && process.env['GITHUB_RUN_ID']
-      ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
-      : undefined;
-  await sendSizeAlertWebhook(sizeDelta, ciRunUrl);
-
   if (existingBaseline) {
+    // Send Discord webhook notification when SIZE ALERT fires.
+    // Only meaningful when a prior baseline exists for comparison.
+    // DISCORD_WEBHOOK_URL absent → silent no-op (no CI failure).
+    const ciRunUrl =
+      process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_REPOSITORY'] && process.env['GITHUB_RUN_ID']
+        ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
+        : undefined;
+    await sendSizeAlertWebhook(sizeDelta, ciRunUrl);
+
     const diff = diffSnapshots(existingBaseline, snapshot);
 
     // Emit hash-change warnings before full diff

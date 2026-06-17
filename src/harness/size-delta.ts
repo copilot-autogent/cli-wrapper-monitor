@@ -189,14 +189,15 @@ export async function sendSizeAlertWebhook(
   if (!result.hasAlert) return;
 
   const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
-  if (!webhookUrl) return;
+  if (!webhookUrl || !webhookUrl.trim()) return;
 
   const alertingMetrics = result.metrics.filter((m) => m.alert);
 
   const metricLines = alertingMetrics.map((m) => {
-    // When deltaAbsolute is null (no prior baseline), we still have alert=true
-    // only for the 0→N case which has a non-null deltaAbsolute; guard anyway.
-    const sign = (m.deltaAbsolute !== null && m.deltaAbsolute >= 0) ? '+' : '';
+    // Use deltaPct to derive sign so the prefix always matches the direction
+    // shown in the percentage string. Fall back to deltaAbsolute for the ∞%
+    // (prevVal=0) case where deltaPct is null but delta is always positive.
+    const sign = (m.deltaPct !== null ? m.deltaPct >= 0 : (m.deltaAbsolute ?? 0) >= 0) ? '+' : '';
     const pctStr =
       m.deltaPct !== null
         ? `${sign}${m.deltaPct.toFixed(1)}%`
