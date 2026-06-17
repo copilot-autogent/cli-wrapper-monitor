@@ -176,6 +176,8 @@ export function formatSizeDeltaTable(result: SizeDeltaResult): string {
  *
  * Reads DISCORD_WEBHOOK_URL from the environment. When the env var is absent
  * or empty the function returns immediately — no CI failure is produced.
+ * Network errors and non-2xx responses are caught and logged as warnings so
+ * a flaky Discord endpoint never causes a CI failure.
  *
  * @param result     - the SizeDeltaResult that triggered the alert
  * @param ciRunUrl   - optional link to the CI run (from GITHUB_SERVER_URL + GITHUB_RUN_ID)
@@ -192,7 +194,9 @@ export async function sendSizeAlertWebhook(
   const alertingMetrics = result.metrics.filter((m) => m.alert);
 
   const metricLines = alertingMetrics.map((m) => {
-    const sign = (m.deltaAbsolute ?? 0) >= 0 ? '+' : '';
+    // When deltaAbsolute is null (no prior baseline), we still have alert=true
+    // only for the 0→N case which has a non-null deltaAbsolute; guard anyway.
+    const sign = (m.deltaAbsolute !== null && m.deltaAbsolute >= 0) ? '+' : '';
     const pctStr =
       m.deltaPct !== null
         ? `${sign}${m.deltaPct.toFixed(1)}%`
@@ -207,14 +211,28 @@ export async function sendSizeAlertWebhook(
 
   const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
 
-  const content =
+  const DISCORD_MAX_CONTENT = 2000;
+  let content =
     `⚠️ **SIZE ALERT** — a key CLI wrapper metric changed by >10%\n` +
     metricLines.join('\n') +
     ciLine;
+  if (content.length > DISCORD_MAX_CONTENT) {
+    content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
+  }
 
-  await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  });
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      console.warn(
+        `⚠️  Discord webhook returned ${res.status} — notification may not have been delivered.`,
+      );
+    }
+  } catch (err) {
+    console.warn(`⚠️  Discord webhook failed (notification skipped): ${String(err)}`);
+  }
 }
