@@ -5,7 +5,7 @@
  * set of models and produces a comparison table + stored JSON artifact.
  *
  * Usage:
- *   npx tsx scripts/capture-multi-model.ts
+ *   npx ts-node --esm scripts/capture-multi-model.ts
  *
  * Environment variables:
  *   GITHUB_TOKEN        Required for live refusal probes (GitHub Models API)
@@ -68,10 +68,15 @@ const WORKSPACE_PATH =
     ? '/home/autogent/.autogent'
     : join(homedir(), '.autogent'));
 
-// Parse comma-separated model list from env, falling back to defaults
-const MODELS: string[] = process.env['MODELS']
-  ? process.env['MODELS'].split(',').map((m) => m.trim()).filter(Boolean)
-  : DEFAULT_MODELS;
+// Parse comma-separated model list from env, falling back to defaults.
+// De-duplicate to avoid running (and billing) the same model twice.
+const MODELS: string[] = [
+  ...new Set(
+    process.env['MODELS']
+      ? process.env['MODELS'].split(',').map((m) => m.trim()).filter(Boolean)
+      : DEFAULT_MODELS,
+  ),
+];
 
 // ---------------------------------------------------------------------------
 // Extraction helpers (same logic as capture-autogent-baseline.ts)
@@ -84,7 +89,12 @@ interface ToolDef {
 }
 
 /** Files that are barrel/aggregator files and must not be scanned for tool defs. */
-const SKIP_TOOL_FILES = new Set(['index.js', 'index.ts', 'edit-instructions.js', 'edit-instructions.ts']);
+const SKIP_TOOL_FILES = new Set([
+  'index.js',
+  'index.ts',
+  'edit-instructions.js',
+  'edit-instructions.ts',
+]);
 
 function extractToolDefs(autogentPath: string): ToolDef[] {
   const tools: ToolDef[] = [];
@@ -92,8 +102,9 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
   const distToolsDir = join(autogentPath, 'dist', 'tools', 'builtin');
   if (existsSync(distToolsDir)) {
     try {
-      const files = readdirSync(distToolsDir)
-        .filter((f) => f.endsWith('.js') && !SKIP_TOOL_FILES.has(f));
+      const files = readdirSync(distToolsDir).filter(
+        (f) => f.endsWith('.js') && !SKIP_TOOL_FILES.has(f),
+      );
       for (const file of files) {
         const content = readFileSync(join(distToolsDir, file), 'utf-8');
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
@@ -111,8 +122,9 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
   const srcToolsDir = join(autogentPath, 'src', 'tools', 'builtin');
   if (existsSync(srcToolsDir)) {
     try {
-      const files = readdirSync(srcToolsDir)
-        .filter((f) => f.endsWith('.ts') && !SKIP_TOOL_FILES.has(f));
+      const files = readdirSync(srcToolsDir).filter(
+        (f) => f.endsWith('.ts') && !SKIP_TOOL_FILES.has(f),
+      );
       for (const file of files) {
         const content = readFileSync(join(srcToolsDir, file), 'utf-8');
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
@@ -242,6 +254,11 @@ async function main(): Promise<void> {
   console.log('CLI Wrapper Monitor — Multi-Model Behavioral Comparison');
   console.log('========================================================\n');
 
+  if (MODELS.length === 0) {
+    console.error('No models to sweep. Set MODELS env or check default list.');
+    process.exit(1);
+  }
+
   console.log(`Models to sweep: ${MODELS.join(', ')}`);
   console.log(
     `Refusal probes:  ${
@@ -253,6 +270,9 @@ async function main(): Promise<void> {
     }`,
   );
   console.log('');
+
+  // Validate output dir is writable before running expensive probes
+  mkdirSync(REPORTS_DIR, { recursive: true });
 
   // Extract wrapper content (same for all models)
   const systemPrompt = extractSystemPrompt(AUTOGENT_PATH, WORKSPACE_PATH);
@@ -312,16 +332,19 @@ async function main(): Promise<void> {
     entries.push(entry);
   }
 
+  // Use a single Date instance for both capturedAt and the filename so
+  // they are guaranteed to be identical (avoids clock-tick divergence).
+  const now = new Date();
   const snapshot: MultiModelComparisonSnapshot = {
-    capturedAt: new Date().toISOString(),
+    capturedAt: now.toISOString(),
     monitorVersion,
     models: MODELS,
     entries,
   };
 
-  // Persist results — timestamp includes time to avoid same-day overwrites
-  mkdirSync(REPORTS_DIR, { recursive: true });
-  const tsStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  // Persist results — timestamp includes time to avoid same-day overwrites.
+  // Milliseconds appended to guard against two runs in the same second.
+  const tsStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 23);
   const jsonPath = join(REPORTS_DIR, `multi-model-${tsStr}.json`);
   const mdPath = join(REPORTS_DIR, `multi-model-${tsStr}.md`);
 
