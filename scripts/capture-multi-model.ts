@@ -24,6 +24,7 @@
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
@@ -59,11 +60,13 @@ const DEFAULT_MODELS = ['gpt-4o-mini', 'claude-haiku-4-5', 'gemini-1.5-flash'];
 const AUTOGENT_PATH = process.env['AUTOGENT_PATH'] ?? '/app';
 const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
 
+// Use os.homedir() instead of process.env.HOME so ~ is never left as a
+// literal in the path (Node.js path.join does not expand tilde).
 const WORKSPACE_PATH =
   process.env['WORKSPACE_PATH'] ??
   (existsSync('/home/autogent/.autogent')
     ? '/home/autogent/.autogent'
-    : join(process.env['HOME'] ?? '~', '.autogent'));
+    : join(homedir(), '.autogent'));
 
 // Parse comma-separated model list from env, falling back to defaults
 const MODELS: string[] = process.env['MODELS']
@@ -80,13 +83,17 @@ interface ToolDef {
   parameters?: unknown;
 }
 
+/** Files that are barrel/aggregator files and must not be scanned for tool defs. */
+const SKIP_TOOL_FILES = new Set(['index.js', 'index.ts', 'edit-instructions.js', 'edit-instructions.ts']);
+
 function extractToolDefs(autogentPath: string): ToolDef[] {
   const tools: ToolDef[] = [];
 
   const distToolsDir = join(autogentPath, 'dist', 'tools', 'builtin');
   if (existsSync(distToolsDir)) {
     try {
-      const files = readdirSync(distToolsDir).filter((f) => f.endsWith('.js'));
+      const files = readdirSync(distToolsDir)
+        .filter((f) => f.endsWith('.js') && !SKIP_TOOL_FILES.has(f));
       for (const file of files) {
         const content = readFileSync(join(distToolsDir, file), 'utf-8');
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
@@ -104,9 +111,9 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
   const srcToolsDir = join(autogentPath, 'src', 'tools', 'builtin');
   if (existsSync(srcToolsDir)) {
     try {
-      const files = readdirSync(srcToolsDir).filter((f) => f.endsWith('.ts'));
+      const files = readdirSync(srcToolsDir)
+        .filter((f) => f.endsWith('.ts') && !SKIP_TOOL_FILES.has(f));
       for (const file of files) {
-        if (file === 'index.ts' || file === 'edit-instructions.ts') continue;
         const content = readFileSync(join(srcToolsDir, file), 'utf-8');
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
@@ -146,7 +153,7 @@ function extractSystemPrompt(autogentPath: string, workspacePath: string): strin
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
     const content = readFileSync(candidate, 'utf-8');
-    // Fixed quantifiers: {200,}? means "at least 200, non-greedy"
+    // {200,}? = at least 200 chars, non-greedy (lazy)
     const templateMatch = content.match(/`(You are[\s\S]{200,}?)`/);
     if (templateMatch?.[1]) return templateMatch[1];
     const stringMatch = content.match(/"(You are[^"]{200,})"/);
@@ -220,8 +227,10 @@ async function runModelSweep(
     );
     return { model, contextTax, refusal };
   } catch (err) {
-    console.error(`    ✗ refusal-rate failed for ${model}: ${String(err)}`);
-    return { model, contextTax, refusal: null, error: String(err) };
+    // Truncate safely without splitting Unicode surrogate pairs
+    const errMsg = Array.from(String(err)).slice(0, 80).join('');
+    console.error(`    ✗ refusal-rate failed for ${model}: ${errMsg}`);
+    return { model, contextTax, refusal: null, error: errMsg };
   }
 }
 
@@ -251,6 +260,20 @@ async function main(): Promise<void> {
   console.log(`System prompt: ${systemPrompt.length} chars`);
   console.log(`Tool defs:     ${toolDefs.length} tools`);
 
+  // Warn when extraction found nothing — context-tax metrics will be 0
+  if (systemPrompt.length === 0) {
+    console.warn(
+      `⚠  No system prompt extracted from ${AUTOGENT_PATH} or ${WORKSPACE_PATH}` +
+        ' — context-tax will report 0 chars/tokens.',
+    );
+  }
+  if (toolDefs.length === 0) {
+    console.warn(
+      `⚠  No tool definitions extracted from ${AUTOGENT_PATH}` +
+        ' — toolCount and toolDefinitionsChars will be 0.',
+    );
+  }
+
   // Compute context tax once — model-invariant in static mode
   console.log('\nComputing context tax...');
   let contextTax: ModelContextTax;
@@ -270,7 +293,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Derive monitor version
+  // Derive monitor version (CWD = the monitor repo — intentional)
   let monitorVersion = 'unknown';
   try {
     monitorVersion = execSync('git rev-parse --short HEAD', {

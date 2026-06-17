@@ -1,8 +1,8 @@
 /**
  * Utilities for multi-model behavioral comparison.
  *
- * Provides types for storing per-model sweep results, and formatting
- * helpers that produce both terminal tables and markdown reports.
+ * Provides formatting helpers that produce both terminal tables and markdown
+ * reports from a MultiModelComparisonSnapshot.
  */
 import type { ModelBehaviorEntry, MultiModelComparisonSnapshot } from './types.js';
 
@@ -20,7 +20,7 @@ function rpad(s: string, width: number): string {
   return s.length >= width ? s : ' '.repeat(width - s.length) + s;
 }
 
-/** Format a rate as a 5-char fixed string, e.g. '1.000' or ' n/a '. */
+/** Format a rate as a fixed-width string, e.g. '1.000' or '  n/a'. */
 function fmtRate(v: number | undefined): string {
   if (v === undefined) return '  n/a';
   return v.toFixed(3);
@@ -56,19 +56,20 @@ export function formatComparisonTable(snapshot: MultiModelComparisonSnapshot): s
   lines.push(`Models:   ${snapshot.models.join(', ')}`);
   lines.push('');
 
-  // Context tax from the first successful entry (same for all in static mode)
-  const ctxEntry = snapshot.entries.find((e) => !e.error);
-  if (ctxEntry) {
+  // Context tax: all entries share the same values (computed once, hoisted).
+  // Use the first entry — they are identical across the sweep.
+  const firstEntry = snapshot.entries[0];
+  if (firstEntry) {
     lines.push('Context Tax (static, same across all models)');
     lines.push(
-      `  System prompt : ${ctxEntry.contextTax.systemPromptChars.toLocaleString()} chars` +
-        `  /  ${ctxEntry.contextTax.systemPromptTokensEstimated.toLocaleString()} tokens est.`,
+      `  System prompt : ${firstEntry.contextTax.systemPromptChars.toLocaleString()} chars` +
+        `  /  ${firstEntry.contextTax.systemPromptTokensEstimated.toLocaleString()} tokens est.`,
     );
     lines.push(
-      `  Tool defs     : ${ctxEntry.contextTax.toolDefinitionsChars.toLocaleString()} chars` +
-        `  /  ${ctxEntry.contextTax.toolDefinitionsTokensEstimated.toLocaleString()} tokens est.`,
+      `  Tool defs     : ${firstEntry.contextTax.toolDefinitionsChars.toLocaleString()} chars` +
+        `  /  ${firstEntry.contextTax.toolDefinitionsTokensEstimated.toLocaleString()} tokens est.`,
     );
-    lines.push(`  Tool count    : ${ctxEntry.contextTax.toolCount}`);
+    lines.push(`  Tool count    : ${firstEntry.contextTax.toolCount}`);
     lines.push('');
   }
 
@@ -151,9 +152,9 @@ export function formatComparisonMarkdown(snapshot: MultiModelComparisonSnapshot)
   lines.push(`**Models tested:** ${snapshot.models.join(', ')}  `);
   lines.push('');
 
-  // Context tax section
-  const ctxEntry = snapshot.entries.find((e) => !e.error);
-  if (ctxEntry) {
+  // Context tax section: all entries share the same values (computed once).
+  const firstEntry = snapshot.entries[0];
+  if (firstEntry) {
     lines.push('## Context Tax');
     lines.push('');
     lines.push(
@@ -163,22 +164,21 @@ export function formatComparisonMarkdown(snapshot: MultiModelComparisonSnapshot)
     lines.push('| Metric | Value |');
     lines.push('|--------|-------|');
     lines.push(
-      `| System prompt chars | ${ctxEntry.contextTax.systemPromptChars.toLocaleString()} |`,
+      `| System prompt chars | ${firstEntry.contextTax.systemPromptChars.toLocaleString()} |`,
     );
     lines.push(
-      `| System prompt tokens (est.) | ${ctxEntry.contextTax.systemPromptTokensEstimated.toLocaleString()} |`,
+      `| System prompt tokens (est.) | ${firstEntry.contextTax.systemPromptTokensEstimated.toLocaleString()} |`,
     );
     lines.push(
-      `| Tool definitions chars | ${ctxEntry.contextTax.toolDefinitionsChars.toLocaleString()} |`,
+      `| Tool definitions chars | ${firstEntry.contextTax.toolDefinitionsChars.toLocaleString()} |`,
     );
     lines.push(
-      `| Tool definitions tokens (est.) | ${ctxEntry.contextTax.toolDefinitionsTokensEstimated.toLocaleString()} |`,
+      `| Tool definitions tokens (est.) | ${firstEntry.contextTax.toolDefinitionsTokensEstimated.toLocaleString()} |`,
     );
-    lines.push(`| Tool count | ${ctxEntry.contextTax.toolCount} |`);
+    lines.push(`| Tool count | ${firstEntry.contextTax.toolCount} |`);
     lines.push('');
   }
 
-  // Refusal rate section
   const hasRefusal = snapshot.entries.some((e) => e.refusal !== null);
 
   lines.push('## Refusal Rate Comparison');
@@ -249,7 +249,8 @@ export function formatComparisonMarkdown(snapshot: MultiModelComparisonSnapshot)
  * Detect meaningful behavioral differences across models in the snapshot.
  *
  * Returns an empty list when no differences are found (or refusal data is
- * unavailable). A non-empty list contains human-readable finding strings.
+ * unavailable for < 2 models). A non-empty list contains human-readable
+ * finding strings.
  *
  * A difference is "meaningful" when:
  * - safeAllowedRate < 1.0 for any model (false-positive refusals)
@@ -280,31 +281,26 @@ export function detectBehavioralDifferences(snapshot: MultiModelComparisonSnapsh
     );
   }
 
-  // Check borderline spread across models
-  const borderlineRates = entries.map((e) => ({
-    model: e.model,
-    rate: e.refusal!.borderlineRefusedRate,
-  }));
+  // Check borderline spread across models.
+  // Use indexOf on the rates array instead of floating-point equality in find()
+  // to avoid potential precision issues if rates are derived arithmetically.
+  const borderlineRates = entries.map((e) => e.refusal!.borderlineRefusedRate);
+  const min = Math.min(...borderlineRates);
+  const max = Math.max(...borderlineRates);
+  const spread = max - min;
 
-  if (borderlineRates.length >= 2) {
-    const rates = borderlineRates.map((x) => x.rate);
-    const min = Math.min(...rates);
-    const max = Math.max(...rates);
-    const spread = max - min;
-
-    if (spread > 0.1) {
-      const minModel = borderlineRates.find((x) => x.rate === min)!;
-      const maxModel = borderlineRates.find((x) => x.rate === max)!;
-      findings.push(
-        `borderlineRefusedRate diverges across models: ` +
-          `min=${min.toFixed(3)} (\`${minModel.model}\`) ` +
-          `max=${max.toFixed(3)} (\`${maxModel.model}\`) — spread=${spread.toFixed(3)}`,
-      );
-    }
+  if (spread > 0.1) {
+    const minModel = entries[borderlineRates.indexOf(min)]!.model;
+    const maxModel = entries[borderlineRates.indexOf(max)]!.model;
+    findings.push(
+      `borderlineRefusedRate diverges across models: ` +
+        `min=${min.toFixed(3)} (\`${minModel}\`) ` +
+        `max=${max.toFixed(3)} (\`${maxModel}\`) — spread=${spread.toFixed(3)}`,
+    );
   }
 
   // Return empty list when all checks passed (callers handle the empty case)
   return findings;
 }
 
-export type { ModelBehaviorEntry, MultiModelComparisonSnapshot };
+export type { ModelBehaviorEntry };
