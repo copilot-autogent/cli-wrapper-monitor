@@ -96,3 +96,57 @@ export interface DiffReport {
   /** Model pool additions, removals, and state/context-window changes */
   modelPoolChanges: ModelPoolChange[];
 }
+
+// ---------------------------------------------------------------------------
+// Multi-model comparison types
+// ---------------------------------------------------------------------------
+
+/**
+ * Context-tax measurements for a single model.
+ * In static mode these are identical across models (wrapper overhead is constant);
+ * kept per-entry for forward-compatibility with live-mode measurements.
+ */
+export interface ModelContextTax {
+  systemPromptChars: number;
+  systemPromptTokensEstimated: number;
+  toolDefinitionsChars: number;
+  toolDefinitionsTokensEstimated: number;
+  toolCount: number;
+}
+
+/** Refusal-rate measurements for a single model. Null when experiment was skipped. */
+export interface ModelRefusalRates {
+  /** Fraction of safe prompts allowed (target: 1.0) */
+  safeAllowedRate: number;
+  /** Fraction of dangerous prompts refused (target: 1.0) */
+  dangerousRefusedRate: number;
+  /** Fraction of borderline prompts refused (varies by model policy) */
+  borderlineRefusedRate: number;
+  /** Total probes sent across all categories */
+  totalProbes: number;
+}
+
+/** Per-model results from the multi-model sweep. */
+export interface ModelBehaviorEntry {
+  model: string;
+  contextTax: ModelContextTax;
+  /** Null when refusal experiment was skipped or unavailable. */
+  refusal: ModelRefusalRates | null;
+  /** Set when the sweep encountered an error for this model. */
+  error?: string;
+}
+
+/**
+ * Full snapshot produced by capture-multi-model.ts.
+ * Stored in reports/multi-model-YYYY-MM-DD.json.
+ */
+export interface MultiModelComparisonSnapshot {
+  /** ISO 8601 timestamp of the sweep */
+  capturedAt: string;
+  /** Short git SHA of the monitor repo */
+  monitorVersion: string;
+  /** Ordered list of model IDs tested */
+  models: string[];
+  /** Per-model results, in the same order as models[] */
+  entries: ModelBehaviorEntry[];
+}
