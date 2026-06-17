@@ -214,7 +214,7 @@ export async function sendSizeAlertWebhook(
 
   const DISCORD_MAX_CONTENT = 2000;
   let content =
-    `⚠️ **SIZE ALERT** — a key CLI wrapper metric changed by >10%\n` +
+    `⚠️ **SIZE ALERT** — a key CLI wrapper metric changed by >${SIZE_ALERT_THRESHOLD_PCT}%\n` +
     metricLines.join('\n') +
     ciLine;
   if (content.length > DISCORD_MAX_CONTENT) {
