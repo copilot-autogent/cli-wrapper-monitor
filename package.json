@@ -8,6 +8,7 @@
     "capture": "npx ts-node --esm scripts/capture-autogent-baseline.ts",
     "diff": "npx ts-node --esm scripts/generate-diff-report.ts",
     "trend": "npx ts-node --esm scripts/trend-report.ts",
+    "multi-model": "npx tsx scripts/capture-multi-model.ts",
     "test": "vitest run"
   },
   "dependencies": {
