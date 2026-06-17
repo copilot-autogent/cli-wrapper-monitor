@@ -170,3 +170,70 @@ export function formatSizeDeltaTable(result: SizeDeltaResult): string {
 
   return lines.join('\n');
 }
+
+/**
+ * Send a Discord webhook notification when a SIZE ALERT fires.
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. When the env var is absent
+ * or empty the function returns immediately — no CI failure is produced.
+ * Network errors and non-2xx responses are caught and logged as warnings so
+ * a flaky Discord endpoint never causes a CI failure.
+ *
+ * @param result     - the SizeDeltaResult that triggered the alert
+ * @param ciRunUrl   - optional link to the CI run (from GITHUB_SERVER_URL + GITHUB_RUN_ID)
+ */
+export async function sendSizeAlertWebhook(
+  result: SizeDeltaResult,
+  ciRunUrl?: string,
+): Promise<void> {
+  if (!result.hasAlert) return;
+
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl || !webhookUrl.trim()) return;
+
+  const alertingMetrics = result.metrics.filter((m) => m.alert);
+
+  const metricLines = alertingMetrics.map((m) => {
+    // Use deltaPct to derive sign so the prefix always matches the direction
+    // shown in the percentage string. Fall back to deltaAbsolute for the ∞%
+    // (prevVal=0) case where deltaPct is null but delta is always positive.
+    const sign = (m.deltaPct !== null ? m.deltaPct >= 0 : (m.deltaAbsolute ?? 0) >= 0) ? '+' : '';
+    const pctStr =
+      m.deltaPct !== null
+        ? `${sign}${m.deltaPct.toFixed(1)}%`
+        : '∞%';
+    const prevStr =
+      m.previous !== null
+        ? `${m.previous.toLocaleString('en-US')} ${m.unit}`
+        : '—';
+    const currStr = `${m.current.toLocaleString('en-US')} ${m.unit}`;
+    return `• **${m.label}**: ${prevStr} → ${currStr} (${pctStr})`;
+  });
+
+  const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
+
+  const DISCORD_MAX_CONTENT = 2000;
+  let content =
+    `⚠️ **SIZE ALERT** — a key CLI wrapper metric changed by >${SIZE_ALERT_THRESHOLD_PCT}%\n` +
+    metricLines.join('\n') +
+    ciLine;
+  if (content.length > DISCORD_MAX_CONTENT) {
+    content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
+  }
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      console.warn(
+        `⚠️  Discord webhook returned ${res.status} — notification may not have been delivered.`,
+      );
+    }
+  } catch (err) {
+    console.warn(`⚠️  Discord webhook failed (notification skipped): ${String(err)}`);
+  }
+}

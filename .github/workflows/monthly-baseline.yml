@@ -113,6 +113,7 @@ jobs:
         # and surface the diff in the step summary.
         env:
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run capture
         continue-on-error: true
 

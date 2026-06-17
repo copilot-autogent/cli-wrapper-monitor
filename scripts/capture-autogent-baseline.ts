@@ -26,7 +26,7 @@ import { CopilotClient } from '@github/copilot-sdk';
 import { ExperimentRunner } from '../src/harness/runner.js';
 import { SnapshotStore } from '../src/harness/snapshot.js';
 import { diffSnapshots, formatDiffReport } from '../src/harness/diff.js';
-import { computeSizeDelta, formatSizeDeltaTable } from '../src/harness/size-delta.js';
+import { computeSizeDelta, formatSizeDeltaTable, sendSizeAlertWebhook } from '../src/harness/size-delta.js';
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
@@ -395,6 +395,15 @@ async function main(): Promise<void> {
   console.log(formatSizeDeltaTable(sizeDelta));
 
   if (existingBaseline) {
+    // Send Discord webhook notification when SIZE ALERT fires.
+    // Only meaningful when a prior baseline exists for comparison.
+    // DISCORD_WEBHOOK_URL absent → silent no-op (no CI failure).
+    const ciRunUrl =
+      process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_REPOSITORY'] && process.env['GITHUB_RUN_ID']
+        ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
+        : undefined;
+    await sendSizeAlertWebhook(sizeDelta, ciRunUrl);
+
     const diff = diffSnapshots(existingBaseline, snapshot);
 
     // Emit hash-change warnings before full diff
