@@ -88,14 +88,14 @@ describe('diffSnapshots — hookChanged', () => {
 
 describe('formatDiffReport — hook change', () => {
   it('includes hook-changed warning when hookChanged is true', () => {
-    const baseline = makeSnapshot({ hookSourceHash: 'sha256:aaaabbbbcccc' });
-    const current = makeSnapshot({ hookSourceHash: 'sha256:ddddeeeeffffgg', hookCount: 2 });
+    const baseline = makeSnapshot({ hookSourceHash: 'sha256:aabbccddeeff001122' });
+    const current = makeSnapshot({ hookSourceHash: 'sha256:998877665544332211', hookCount: 2 });
     const diff = diffSnapshots(baseline, current);
     const report = formatDiffReport(diff);
     expect(report).toContain('Hook definitions changed');
-    // formatDiffReport uses slice(0, 8) — full strings are longer, so check prefix
-    expect(report).toContain('sha256:a');
-    expect(report).toContain('sha256:d');
+    // formatDiffReport uses slice(0, 16): 'sha256:' (7) + 9 hex chars
+    expect(report).toContain('sha256:aabbccdde');
+    expect(report).toContain('sha256:998877665');
   });
 
   it('includes count delta when hookCount changes', () => {

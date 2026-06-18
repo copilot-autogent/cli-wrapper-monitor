@@ -119,22 +119,33 @@ interface ToolDef {
 /**
  * Hook handler patterns: the three SDK hook callbacks that govern tool
  * execution behaviour and security posture.
+ *
+ * Patterns cover the most common source forms:
+ *   - Object-literal property:  `onPreToolUse:`
+ *   - Assignment form:          `.onPreToolUse =`
+ *   - Method shorthand:         `onPreToolUse(`
+ *
+ * Note: `hookCount` is a best-effort heuristic based on static pattern
+ * matching. The `hookSourceHash` is the authoritative change signal.
  */
 const HOOK_HANDLER_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-  { name: 'onPreToolUse', pattern: /\bonPreToolUse\s*:/ },
-  { name: 'onPermissionRequest', pattern: /\bonPermissionRequest\s*:/ },
-  { name: 'onPostToolUse', pattern: /\bonPostToolUse\s*:/ },
+  { name: 'onPreToolUse', pattern: /\bonPreToolUse\s*[:(=]/ },
+  { name: 'onPermissionRequest', pattern: /\bonPermissionRequest\s*[:(=]/ },
+  { name: 'onPostToolUse', pattern: /\bonPostToolUse\s*[:(=]/ },
 ];
 
 /**
  * Hook source files to scan (dist paths, falling back to src).
  *
- * Primary candidates:
- *   1. dist/hooks/*.js  — compiled hook implementations
- *   2. dist/session.js  — contains onPermissionRequest assignment
+ * Strategy 1 (dist): requires dist/hooks/ to have at least one .js file.
+ *   - Loads all .js files from dist/hooks/
+ *   - Also loads dist/session.js when present (contains onPermissionRequest)
  *
- * TypeScript source fallback:
- *   src/hooks/*.ts, src/session.ts
+ * Strategy 2 (src fallback): used when dist/hooks/ is absent or empty.
+ *   - Loads all .ts files from src/hooks/
+ *   - Also loads src/session.ts when present
+ *
+ * Returns hookSourceHash: 'unknown' when no source is found or any read fails.
  */
 interface HookIntrospectionResult {
   hookCount: number;
@@ -143,26 +154,28 @@ interface HookIntrospectionResult {
 
 function extractHookDefs(autogentPath: string): HookIntrospectionResult {
   const sourceChunks: string[] = [];
-  const registeredHooks = new Set<string>();
   /** Set to true if any file read fails so we can mark the hash as unreliable. */
   let readError = false;
 
-  /** Read all .js files from a compiled dist directory into sourceChunks. */
-  function loadDistDir(dir: string): void {
-    if (!existsSync(dir)) return;
+  /** Read all .js files from a compiled dist directory. Returns file count loaded. */
+  function loadDistDir(dir: string): number {
+    if (!existsSync(dir)) return 0;
+    let count = 0;
     const files = readdirSync(dir)
       .filter((f) => f.endsWith('.js'))
       .sort();
     for (const file of files) {
       try {
         sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+        count++;
       } catch {
         readError = true;
       }
     }
+    return count;
   }
 
-  /** Read all .ts files from a TypeScript source directory into sourceChunks. */
+  /** Read all .ts files from a TypeScript source directory. */
   function loadSrcDir(dir: string): void {
     if (!existsSync(dir)) return;
     const files = readdirSync(dir)
@@ -187,26 +200,36 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
     }
   }
 
-  // Strategy 1: dist/hooks/ + dist/session.js
+  // Strategy 1: dist/hooks/*.js is the primary source for hook implementations.
+  // Only use dist strategy when hooks dir exists AND contributes .js files —
+  // avoids silently using only dist/session.js (which has onPermissionRequest but
+  // not onPreToolUse/onPostToolUse) when dist/hooks/ is missing.
   const distHooksDir = join(autogentPath, 'dist', 'hooks');
   const distSessionFile = join(autogentPath, 'dist', 'session.js');
-  loadDistDir(distHooksDir);
-  loadFile(distSessionFile);
-
-  // Strategy 2 (fallback): TypeScript source
-  if (sourceChunks.length === 0) {
+  const hooksFilesLoaded = loadDistDir(distHooksDir);
+  if (hooksFilesLoaded > 0) {
+    // dist/hooks/ was present and contributed files — also load session.js
+    loadFile(distSessionFile);
+  } else {
+    // Strategy 2: TypeScript source fallback
+    sourceChunks.length = 0; // discard any partial load
     const srcHooksDir = join(autogentPath, 'src', 'hooks');
     const srcSessionFile = join(autogentPath, 'src', 'session.ts');
     loadSrcDir(srcHooksDir);
     loadFile(srcSessionFile);
   }
 
-  if (sourceChunks.length === 0 || readError) {
+  if (readError) {
+    console.warn('⚠️  Hook source read error — hookSourceHash marked as unknown');
+    return { hookCount: 0, hookSourceHash: 'unknown' };
+  }
+  if (sourceChunks.length === 0) {
     return { hookCount: 0, hookSourceHash: 'unknown' };
   }
 
   // Detect which hook handler types are present across all loaded files
   const allSource = sourceChunks.join('\n');
+  const registeredHooks = new Set<string>();
   for (const { name, pattern } of HOOK_HANDLER_PATTERNS) {
     if (pattern.test(allSource)) {
       registeredHooks.add(name);

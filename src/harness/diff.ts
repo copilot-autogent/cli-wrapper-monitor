@@ -143,8 +143,8 @@ export function formatDiffReport(report: DiffReport): string {
     lines.push(`⚠️  **System prompt changed**: \`${prev}…\` → \`${curr}…\``);
   }
   if (report.hookChanged) {
-    const prev = report.baseline.hookSourceHash?.slice(0, 8) ?? '?';
-    const curr = report.current.hookSourceHash?.slice(0, 8) ?? '?';
+    const prev = report.baseline.hookSourceHash?.slice(0, 16) ?? '?';
+    const curr = report.current.hookSourceHash?.slice(0, 16) ?? '?';
     const prevCount = report.baseline.hookCount ?? '?';
     const currCount = report.current.hookCount ?? '?';
     const countNote = prevCount !== currCount ? ` (count: ${prevCount} → ${currCount})` : '';
