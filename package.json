@@ -7,6 +7,7 @@
     "experiments": "npx ts-node --esm scripts/run-experiments.ts",
     "capture": "npx ts-node --esm scripts/capture-autogent-baseline.ts",
     "diff": "npx ts-node --esm scripts/generate-diff-report.ts",
+    "compare": "npx ts-node --esm scripts/compare-baselines.ts",
     "trend": "npx ts-node --esm scripts/trend-report.ts",
     "multi-model": "npx ts-node --esm scripts/capture-multi-model.ts",
     "test": "vitest run"
