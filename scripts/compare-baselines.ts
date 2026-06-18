@@ -374,7 +374,8 @@ function generateMarkdownReport(
     lines.push("");
   }
 
-  // ── Per-experiment full metric table (sorted for stable output) ──────────
+  // ── Per-experiment full metric table (experiments and metrics sorted for
+  //    stable, deterministic output regardless of JSON key insertion order) ──
   const experimentNames = [
     ...new Set([
       ...Object.keys(snapA.experiments),
@@ -408,25 +409,30 @@ function generateMarkdownReport(
       `|--------|${"-".repeat(dateA.length + 2)}|${"-".repeat(dateB.length + 2)}|-------|`
     );
 
-    for (const [key, mA] of Object.entries(expA.metrics)) {
+    // Sort metric keys for stable output
+    const metricKeys = [
+      ...new Set([
+        ...Object.keys(expA.metrics),
+        ...Object.keys(expB.metrics),
+      ]),
+    ].sort();
+
+    for (const key of metricKeys) {
+      const mA = expA.metrics[key];
       const mB = expB.metrics[key];
-      if (!mB) {
+      if (mA && !mB) {
         lines.push(
           `| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | — | removed |`
         );
-        continue;
-      }
-      const delta =
-        deltaStr(mA.value, mB.value) + severityIcon(mA.value, mB.value);
-      lines.push(
-        `| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | ${mB.value.toLocaleString()} ${mB.unit} | ${delta} |`
-      );
-    }
-
-    for (const [key, mB] of Object.entries(expB.metrics)) {
-      if (!expA.metrics[key]) {
+      } else if (!mA && mB) {
         lines.push(
           `| ${key} | — | ${mB.value.toLocaleString()} ${mB.unit} | new |`
+        );
+      } else if (mA && mB) {
+        const delta =
+          deltaStr(mA.value, mB.value) + severityIcon(mA.value, mB.value);
+        lines.push(
+          `| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | ${mB.value.toLocaleString()} ${mB.unit} | ${delta} |`
         );
       }
     }
