@@ -27,6 +27,8 @@ interface CliArgs {
   output: string | null;
 }
 
+const KNOWN_FLAGS = new Set(["--a", "--b", "--json", "--output"]);
+
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
   let a = "";
@@ -44,7 +46,12 @@ function parseArgs(): CliArgs {
       jsonMode = true;
     } else if (args[i] === "--output" && args[i + 1]) {
       output = args[++i];
-    } else if (!args[i].startsWith("--")) {
+    } else if (args[i].startsWith("--")) {
+      // Consume a value arg if the next token doesn't look like a flag
+      const isValueArg = args[i + 1] && !args[i + 1].startsWith("--");
+      console.warn(`Warning: unrecognized flag "${args[i]}" — ignored.`);
+      if (isValueArg) i++; // skip its value too
+    } else {
       positional.push(args[i]);
     }
   }
@@ -56,7 +63,9 @@ function parseArgs(): CliArgs {
     console.error(
       "Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>]\n" +
         "  file-a  Path to the older (reference) baseline JSON\n" +
-        "  file-b  Path to the newer baseline JSON"
+        "  file-b  Path to the newer baseline JSON\n" +
+        "  --json  Output raw DiffReport JSON instead of Markdown\n" +
+        "  --output <path>  Write report to file"
     );
     process.exit(1);
   }
@@ -69,7 +78,17 @@ function loadSnapshot(path: string): MetricSnapshot {
   if (!existsSync(abs)) {
     throw new Error(`Snapshot not found: ${abs}`);
   }
-  return JSON.parse(readFileSync(abs, "utf-8")) as MetricSnapshot;
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf-8");
+  } catch (err) {
+    throw new Error(`Failed to read ${abs}: ${String(err)}`);
+  }
+  try {
+    return JSON.parse(raw) as MetricSnapshot;
+  } catch (err) {
+    throw new Error(`Invalid JSON in ${abs}: ${String(err)}`);
+  }
 }
 
 /** Format a short date label from an ISO timestamp. */
@@ -81,7 +100,7 @@ function shortDate(iso: string): string {
 function shortHash(hash: string | undefined): string {
   if (!hash || hash === "unknown") return "unknown";
   const hex = hash.replace(/^sha256:/, "");
-  return hex.slice(0, 15) + "\u2026";
+  return hex.slice(0, 15) + "…";
 }
 
 /** Percent-change string, e.g. "+12.3%" or "-5.0%". */
@@ -99,12 +118,12 @@ function deltaStr(a: number, b: number): string {
   return `${sign}${d.toLocaleString()} (${pctStr(a, b)})`;
 }
 
-/** Severity emoji appended to delta based on magnitude. */
+/** Severity emoji appended to delta based on percent magnitude. */
 function severityIcon(a: number, b: number): string {
   if (a === 0) return "";
   const pct = Math.abs(((b - a) / a) * 100);
-  if (pct >= 10) return " \uD83D\uDD34";
-  if (pct >= 5) return " \uD83D\UDFE1";
+  if (pct >= 10) return " 🔴";
+  if (pct >= 5) return " 🟡";
   return "";
 }
 
@@ -118,7 +137,7 @@ function numRow(
   valB: number | undefined,
   unit = ""
 ): string {
-  const na = "\u2014";
+  const na = "—";
   const fmtVal = (v: number) =>
     v.toLocaleString() + (unit ? ` ${unit}` : "");
   const aStr = valA !== undefined ? fmtVal(valA) : na;
@@ -140,6 +159,7 @@ function numRow(
 
 /**
  * Build a Markdown table row for a hash fingerprint field.
+ * Treats undefined and missing as equivalent; "unknown" sentinel is preserved.
  */
 function hashRow(
   label: string,
@@ -149,14 +169,16 @@ function hashRow(
   const sA = shortHash(hA);
   const sB = shortHash(hB);
   let delta: string;
-  if (hA && hB && hA !== "unknown" && hB !== "unknown") {
-    delta = hA === hB ? "\u2705 unchanged" : "\u26A0\uFE0F changed";
-  } else if (!hA && hB) {
+  const knownA = hA && hA !== "unknown";
+  const knownB = hB && hB !== "unknown";
+  if (knownA && knownB) {
+    delta = hA === hB ? "✅ unchanged" : "⚠️ changed";
+  } else if (!knownA && knownB) {
     delta = "new";
-  } else if (hA && !hB) {
+  } else if (knownA && !knownB) {
     delta = "removed";
   } else {
-    delta = "\u2014";
+    delta = "—";
   }
   return `| ${label} | \`${sA}\` | \`${sB}\` | ${delta} |`;
 }
@@ -168,9 +190,16 @@ interface PerToolEntry {
 
 function extractPerTool(snap: MetricSnapshot): PerToolEntry[] {
   const raw = snap.experiments["context-tax"]?.rawData as
-    | { perToolChars?: PerToolEntry[] }
+    | { perToolChars?: unknown[] }
     | undefined;
-  return raw?.perToolChars ?? [];
+  if (!Array.isArray(raw?.perToolChars)) return [];
+  return raw.perToolChars.filter(
+    (e): e is PerToolEntry =>
+      typeof e === "object" &&
+      e !== null &&
+      typeof (e as Record<string, unknown>)["name"] === "string" &&
+      typeof (e as Record<string, unknown>)["chars"] === "number"
+  );
 }
 
 /**
@@ -246,12 +275,8 @@ function generateMarkdownReport(
       "chars"
     )
   );
-  lines.push(
-    numRow("Hook count", snapA.hookCount, snapB.hookCount, "hooks")
-  );
-  lines.push(
-    hashRow("Binary hash", snapA.binaryHash, snapB.binaryHash)
-  );
+  lines.push(numRow("Hook count", snapA.hookCount, snapB.hookCount, "hooks"));
+  lines.push(hashRow("Binary hash", snapA.binaryHash, snapB.binaryHash));
   lines.push(
     hashRow("System prompt hash", snapA.systemPromptHash, snapB.systemPromptHash)
   );
@@ -267,8 +292,8 @@ function generateMarkdownReport(
   if (perToolA.length > 0 || perToolB.length > 0) {
     const namesA = new Set(perToolA.map((t) => t.name));
     const namesB = new Set(perToolB.map((t) => t.name));
-    const added = [...namesB].filter((n) => !namesA.has(n));
-    const removed = [...namesA].filter((n) => !namesB.has(n));
+    const added = [...namesB].filter((n) => !namesA.has(n)).sort();
+    const removed = [...namesA].filter((n) => !namesB.has(n)).sort();
 
     if (added.length > 0) {
       lines.push(`## Added Tools (+${added.length})`);
@@ -306,20 +331,18 @@ function generateMarkdownReport(
       if (change.type === "added" && change.after) {
         const m = change.after;
         lines.push(
-          `- \u2705 **Added**: \`${m.id}\` \u2014 state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`
+          `- ✅ **Added**: \`${m.id}\` — state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`
         );
       } else if (change.type === "removed" && change.before) {
         const m = change.before;
-        lines.push(
-          `- \u274C **Removed**: \`${m.id}\` \u2014 was state: ${m.state}`
-        );
+        lines.push(`- ❌ **Removed**: \`${m.id}\` — was state: ${m.state}`);
       } else if (
         change.type === "state_changed" &&
         change.before &&
         change.after
       ) {
         lines.push(
-          `- \u26A0\uFE0F **State changed**: \`${change.modelId}\` \u2014 ${change.before.state} \u2192 ${change.after.state}`
+          `- ⚠️ **State changed**: \`${change.modelId}\` — ${change.before.state} → ${change.after.state}`
         );
       } else if (
         change.type === "context_window_changed" &&
@@ -327,7 +350,7 @@ function generateMarkdownReport(
         change.after
       ) {
         lines.push(
-          `- \u26A0\uFE0F **Context window**: \`${change.modelId}\` \u2014 ${change.before.contextWindow.toLocaleString()} \u2192 ${change.after.contextWindow.toLocaleString()} tokens`
+          `- ⚠️ **Context window**: \`${change.modelId}\` — ${change.before.contextWindow.toLocaleString()} → ${change.after.contextWindow.toLocaleString()} tokens`
         );
       }
     }
@@ -339,11 +362,13 @@ function generateMarkdownReport(
     lines.push("");
   }
 
-  // ── Per-experiment full metric table ────────────────────────────────────
-  const experimentNames = new Set([
-    ...Object.keys(snapA.experiments),
-    ...Object.keys(snapB.experiments),
-  ]);
+  // ── Per-experiment full metric table (sorted for stable output) ──────────
+  const experimentNames = [
+    ...new Set([
+      ...Object.keys(snapA.experiments),
+      ...Object.keys(snapB.experiments),
+    ]),
+  ].sort();
 
   lines.push(`## Experiment Metrics`);
   lines.push("");
@@ -356,12 +381,12 @@ function generateMarkdownReport(
     lines.push("");
 
     if (!expA) {
-      lines.push(`> \u26A0\uFE0F **New experiment** \u2014 no baseline to compare.`);
+      lines.push(`> ⚠️ **New experiment** — no baseline to compare.`);
       lines.push("");
       continue;
     }
     if (!expB) {
-      lines.push(`> \u26A0\uFE0F **Experiment removed** \u2014 no current data.`);
+      lines.push(`> ⚠️ **Experiment removed** — no current data.`);
       lines.push("");
       continue;
     }
@@ -374,7 +399,9 @@ function generateMarkdownReport(
     for (const [key, mA] of Object.entries(expA.metrics)) {
       const mB = expB.metrics[key];
       if (!mB) {
-        lines.push(`| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | \u2014 | removed |`);
+        lines.push(
+          `| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | — | removed |`
+        );
         continue;
       }
       const delta =
@@ -386,7 +413,9 @@ function generateMarkdownReport(
 
     for (const [key, mB] of Object.entries(expB.metrics)) {
       if (!expA.metrics[key]) {
-        lines.push(`| ${key} | \u2014 | ${mB.value.toLocaleString()} ${mB.unit} | new |`);
+        lines.push(
+          `| ${key} | — | ${mB.value.toLocaleString()} ${mB.unit} | new |`
+        );
       }
     }
 
@@ -398,28 +427,26 @@ function generateMarkdownReport(
   lines.push("");
   if (report.hasRegressions) {
     lines.push(
-      "\uD83D\uDD34 **Regression detected** \u2014 one or more metrics changed by >10%."
+      "🔴 **Regression detected** — one or more metrics changed by >10%."
     );
   } else if (report.changes.some((c) => c.severity === "warning")) {
-    lines.push(
-      "\uD83D\UDFE1 **Warning** \u2014 one or more metrics changed by 5\u201310%."
-    );
+    lines.push("🟡 **Warning** — one or more metrics changed by 5–10%.");
   } else {
     lines.push(
-      "\u2705 **No regression** \u2014 all metric changes within the 5% info threshold."
+      "✅ **No regression** — all metric changes within the 5% info threshold."
     );
   }
   lines.push("");
   lines.push("| Severity | Threshold |");
   lines.push("|----------|-----------|");
-  lines.push("| \u26AA Info | < 5% change |");
-  lines.push("| \uD83D\UDFE1 Warning | 5\u201310% change |");
-  lines.push("| \uD83D\uDD34 Regression | > 10% change |");
+  lines.push("| ⚪ Info | < 5% change |");
+  lines.push("| 🟡 Warning | 5–10% change |");
+  lines.push("| 🔴 Regression | > 10% change |");
   lines.push("");
   lines.push("---");
   lines.push("");
   lines.push(
-    `*Generated by [cli-wrapper-monitor](https://github.com/copilot-autogent/cli-wrapper-monitor) \u2014 compare-baselines*`
+    `*Generated by [cli-wrapper-monitor](https://github.com/copilot-autogent/cli-wrapper-monitor) — compare-baselines*`
   );
 
   return lines.join("\n");
