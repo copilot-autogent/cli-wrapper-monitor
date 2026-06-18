@@ -27,8 +27,6 @@ interface CliArgs {
   output: string | null;
 }
 
-const KNOWN_FLAGS = new Set(["--a", "--b", "--json", "--output"]);
-
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
   let a = "";
@@ -38,19 +36,28 @@ function parseArgs(): CliArgs {
   const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--a" && args[i + 1]) {
+    if (args[i] === "--a" && args[i + 1] && !args[i + 1].startsWith("--")) {
       a = args[++i];
-    } else if (args[i] === "--b" && args[i + 1]) {
+    } else if (
+      args[i] === "--b" &&
+      args[i + 1] &&
+      !args[i + 1].startsWith("--")
+    ) {
       b = args[++i];
     } else if (args[i] === "--json") {
       jsonMode = true;
-    } else if (args[i] === "--output" && args[i + 1]) {
+    } else if (
+      args[i] === "--output" &&
+      args[i + 1] &&
+      !args[i + 1].startsWith("--")
+    ) {
       output = args[++i];
     } else if (args[i].startsWith("--")) {
-      // Consume a value arg if the next token doesn't look like a flag
-      const isValueArg = args[i + 1] && !args[i + 1].startsWith("--");
+      // Unknown flag: warn and skip its value if it looks like a value arg
+      const hasValue =
+        args[i + 1] !== undefined && !args[i + 1].startsWith("--");
       console.warn(`Warning: unrecognized flag "${args[i]}" — ignored.`);
-      if (isValueArg) i++; // skip its value too
+      if (hasValue) i++;
     } else {
       positional.push(args[i]);
     }
@@ -62,9 +69,9 @@ function parseArgs(): CliArgs {
   if (!a || !b) {
     console.error(
       "Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>]\n" +
-        "  file-a  Path to the older (reference) baseline JSON\n" +
-        "  file-b  Path to the newer baseline JSON\n" +
-        "  --json  Output raw DiffReport JSON instead of Markdown\n" +
+        "  file-a           Path to the older (reference) baseline JSON\n" +
+        "  file-b           Path to the newer baseline JSON\n" +
+        "  --json           Output raw DiffReport JSON instead of Markdown\n" +
         "  --output <path>  Write report to file"
     );
     process.exit(1);
@@ -91,9 +98,12 @@ function loadSnapshot(path: string): MetricSnapshot {
   }
 }
 
-/** Format a short date label from an ISO timestamp. */
-function shortDate(iso: string): string {
-  return iso.slice(0, 10);
+/** Format a short date label from a capturedAt field (ISO or fallback). */
+function shortDate(capturedAt: unknown): string {
+  if (typeof capturedAt === "string" && capturedAt.length >= 10) {
+    return capturedAt.slice(0, 10);
+  }
+  return "unknown-date";
 }
 
 /** Abbreviate a sha256:<hex> hash for display. */
@@ -230,7 +240,9 @@ function generateMarkdownReport(
   lines.push(`## Metric Summary`);
   lines.push("");
   lines.push(`| Metric | ${dateA} | ${dateB} | Delta |`);
-  lines.push(`|--------|${"-".repeat(dateA.length + 2)}|${"-".repeat(dateB.length + 2)}|-------|`);
+  lines.push(
+    `|--------|${"-".repeat(dateA.length + 2)}|${"-".repeat(dateB.length + 2)}|-------|`
+  );
 
   const ctxA = snapA.experiments["context-tax"]?.metrics;
   const ctxB = snapB.experiments["context-tax"]?.metrics;
@@ -474,4 +486,9 @@ function main(): void {
   }
 }
 
-main();
+try {
+  main();
+} catch (err) {
+  console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
