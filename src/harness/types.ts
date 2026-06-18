@@ -47,6 +47,10 @@ export interface MetricSnapshot {
   binaryHash?: string;
   /** sha256 fingerprint of the assembled system prompt, or 'unknown' */
   systemPromptHash?: string;
+  /** Number of hook handlers detected (onPreToolUse, onPermissionRequest, onPostToolUse) */
+  hookCount?: number;
+  /** sha256 fingerprint of the concatenated hook source files, or 'unknown' */
+  hookSourceHash?: string;
   /** Available model pool at capture time (absent in older baselines) */
   modelPool?: ModelPool;
   /** Experiment results indexed by experiment name */
@@ -93,6 +97,8 @@ export interface DiffReport {
   binaryChanged: boolean;
   /** True when the assembled system prompt hash changed between snapshots */
   systemPromptChanged: boolean;
+  /** True when the hook source hash changed between snapshots */
+  hookChanged: boolean;
   /** Model pool additions, removals, and state/context-window changes */
   modelPoolChanges: ModelPoolChange[];
 }

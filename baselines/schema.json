@@ -32,6 +32,15 @@
       "type": "string",
       "description": "sha256 fingerprint of the assembled system prompt (SOUL+PLAYBOOK+CONTEXT+USER), prefixed with 'sha256:', or 'unknown'"
     },
+    "hookCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of hook handler types detected (onPreToolUse, onPermissionRequest, onPostToolUse)"
+    },
+    "hookSourceHash": {
+      "type": "string",
+      "description": "sha256 fingerprint of the concatenated hook source files (dist/hooks/ + dist/session.js), prefixed with 'sha256:', or 'unknown'"
+    },
     "experiments": {
       "type": "object",
       "description": "Experiment results, keyed by experiment name",

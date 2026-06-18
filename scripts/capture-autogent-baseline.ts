@@ -117,7 +117,89 @@ interface ToolDef {
 }
 
 /**
- * Attempt to extract tool definitions from the autogent dist build.
+ * Hook handler patterns: the three SDK hook callbacks that govern tool
+ * execution behaviour and security posture.
+ */
+const HOOK_HANDLER_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: 'onPreToolUse', pattern: /\bonPreToolUse\s*:/ },
+  { name: 'onPermissionRequest', pattern: /\bonPermissionRequest\s*:/ },
+  { name: 'onPostToolUse', pattern: /\bonPostToolUse\s*:/ },
+];
+
+/**
+ * Hook source files to scan (dist paths, falling back to src).
+ *
+ * Primary candidates:
+ *   1. dist/hooks/*.js  — compiled hook implementations
+ *   2. dist/session.js  — contains onPermissionRequest assignment
+ *
+ * TypeScript source fallback:
+ *   src/hooks/*.ts, src/session.ts
+ */
+interface HookIntrospectionResult {
+  hookCount: number;
+  hookSourceHash: string;
+}
+
+function extractHookDefs(autogentPath: string): HookIntrospectionResult {
+  const sourceChunks: string[] = [];
+  const registeredHooks = new Set<string>();
+
+  /** Read all .js files from a dist directory into sourceChunks. */
+  function loadDistDir(dir: string): void {
+    if (!existsSync(dir)) return;
+    try {
+      const files = readdirSync(dir)
+        .filter((f) => f.endsWith('.js'))
+        .sort();
+      for (const file of files) {
+        sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  /** Read a single file into sourceChunks if it exists. */
+  function loadFile(filePath: string): void {
+    if (!existsSync(filePath)) return;
+    try {
+      sourceChunks.push(readFileSync(filePath, 'utf-8'));
+    } catch {
+      // fall through
+    }
+  }
+
+  // Strategy 1: dist/hooks/ + dist/session.js
+  const distHooksDir = join(autogentPath, 'dist', 'hooks');
+  const distSessionFile = join(autogentPath, 'dist', 'session.js');
+  loadDistDir(distHooksDir);
+  loadFile(distSessionFile);
+
+  // Strategy 2 (fallback): TypeScript source
+  if (sourceChunks.length === 0) {
+    const srcHooksDir = join(autogentPath, 'src', 'hooks');
+    const srcSessionFile = join(autogentPath, 'src', 'session.ts');
+    loadDistDir(srcHooksDir); // reuses the same readdir+filter logic
+    loadFile(srcSessionFile);
+  }
+
+  if (sourceChunks.length === 0) {
+    return { hookCount: 0, hookSourceHash: 'unknown' };
+  }
+
+  // Detect which hook handler types are present across all loaded files
+  const allSource = sourceChunks.join('\n');
+  for (const { name, pattern } of HOOK_HANDLER_PATTERNS) {
+    if (pattern.test(allSource)) {
+      registeredHooks.add(name);
+    }
+  }
+
+  const hookSourceHash = 'sha256:' + sha256(allSource);
+  return { hookCount: registeredHooks.size, hookSourceHash };
+}
+
  * Looks for *.js files in dist/tools/builtin/ that export tool metadata.
  *
  * Falls back to parsing the TypeScript source with a simple regex when
@@ -286,6 +368,9 @@ async function main(): Promise<void> {
       ? extractSystemPrompt(AUTOGENT_PATH, WORKSPACE_PATH)
       : '';
   const toolDefs = autogentExists ? extractToolDefs(AUTOGENT_PATH) : [];
+  const { hookCount, hookSourceHash } = autogentExists
+    ? extractHookDefs(AUTOGENT_PATH)
+    : { hookCount: 0, hookSourceHash: 'unknown' };
 
   console.log(`System prompt extracted: ${systemPrompt.length} chars`);
   console.log(`Tool definitions extracted: ${toolDefs.length} tools`);
@@ -294,6 +379,7 @@ async function main(): Promise<void> {
       `  Tools: ${toolDefs.map((t) => t.name).join(', ')}`,
     );
   }
+  console.log(`Hook definitions extracted: ${hookCount} handlers`);
   if (SKIP_MODEL_POOL) {
     console.log('Model pool capture: skipped (SKIP_MODEL_POOL=true)');
   } else {
@@ -319,6 +405,7 @@ async function main(): Promise<void> {
   const systemPromptHash = computeSystemPromptHash(systemPrompt);
   console.log(`Binary hash:        ${binaryHash}`);
   console.log(`System prompt hash: ${systemPromptHash}`);
+  console.log(`Hook source hash:   ${hookSourceHash}`);
   console.log('');
 
   const store = new SnapshotStore(BASELINES_DIR);
@@ -351,6 +438,8 @@ async function main(): Promise<void> {
   // Attach fingerprints to the snapshot
   snapshot.binaryHash = binaryHash;
   snapshot.systemPromptHash = systemPromptHash;
+  snapshot.hookCount = hookCount;
+  snapshot.hookSourceHash = hookSourceHash;
 
   // Capture model pool
   if (!SKIP_MODEL_POOL) {
@@ -417,7 +506,15 @@ async function main(): Promise<void> {
       const curr = snapshot.systemPromptHash?.slice(0, 16) ?? '?';
       console.warn(`⚠️  System prompt changed: ${prev}… → ${curr}…`);
     }
-    if (diff.binaryChanged || diff.systemPromptChanged) {
+    if (diff.hookChanged) {
+      const prev = existingBaseline.hookSourceHash?.slice(0, 16) ?? '?';
+      const curr = snapshot.hookSourceHash?.slice(0, 16) ?? '?';
+      const prevCount = existingBaseline.hookCount ?? '?';
+      const currCount = snapshot.hookCount ?? '?';
+      const countNote = prevCount !== currCount ? ` (count: ${prevCount} → ${currCount})` : '';
+      console.warn(`🚨  Hook definitions changed: ${prev}… → ${curr}…${countNote}`);
+    }
+    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged) {
       console.warn('');
     }
 
