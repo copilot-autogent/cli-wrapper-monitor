@@ -117,7 +117,132 @@ interface ToolDef {
 }
 
 /**
+ * Hook handler patterns: the three SDK hook callbacks that govern tool
+ * execution behaviour and security posture.
+ *
+ * Patterns cover the most common source forms:
+ *   - Object-literal property:  `onPreToolUse:`
+ *   - Assignment form:          `.onPreToolUse =`
+ *   - Method shorthand:         `onPreToolUse(`
+ *
+ * Note: `hookCount` is a best-effort heuristic based on static pattern
+ * matching. The `hookSourceHash` is the authoritative change signal.
+ */
+const HOOK_HANDLER_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: 'onPreToolUse', pattern: /\bonPreToolUse\s*[:(=]/ },
+  { name: 'onPermissionRequest', pattern: /\bonPermissionRequest\s*[:(=]/ },
+  { name: 'onPostToolUse', pattern: /\bonPostToolUse\s*[:(=]/ },
+];
+
+/**
+ * Hook source files to scan (dist paths, falling back to src).
+ *
+ * Strategy 1 (dist): requires dist/hooks/ to have at least one .js file.
+ *   - Loads all .js files from dist/hooks/
+ *   - Also loads dist/session.js when present (contains onPermissionRequest)
+ *
+ * Strategy 2 (src fallback): used when dist/hooks/ is absent or empty.
+ *   - Loads all .ts files from src/hooks/
+ *   - Also loads src/session.ts when present
+ *
+ * Returns hookSourceHash: 'unknown' when no source is found or any read fails.
+ */
+interface HookIntrospectionResult {
+  hookCount: number;
+  hookSourceHash: string;
+}
+
+function extractHookDefs(autogentPath: string): HookIntrospectionResult {
+  const sourceChunks: string[] = [];
+  /** Set to true if any file read fails so we can mark the hash as unreliable. */
+  let readError = false;
+
+  /** Read all .js files from a compiled dist directory. Returns file count loaded. */
+  function loadDistDir(dir: string): number {
+    if (!existsSync(dir)) return 0;
+    let count = 0;
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.js'))
+      .sort();
+    for (const file of files) {
+      try {
+        sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+        count++;
+      } catch {
+        readError = true;
+      }
+    }
+    return count;
+  }
+
+  /** Read all .ts files from a TypeScript source directory. */
+  function loadSrcDir(dir: string): void {
+    if (!existsSync(dir)) return;
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .sort();
+    for (const file of files) {
+      try {
+        sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+      } catch {
+        readError = true;
+      }
+    }
+  }
+
+  /** Read a single file into sourceChunks if it exists. */
+  function loadFile(filePath: string): void {
+    if (!existsSync(filePath)) return;
+    try {
+      sourceChunks.push(readFileSync(filePath, 'utf-8'));
+    } catch {
+      readError = true;
+    }
+  }
+
+  // Strategy 1: dist/hooks/*.js is the primary source for hook implementations.
+  // Only use dist strategy when hooks dir exists AND contributes .js files —
+  // avoids silently using only dist/session.js (which has onPermissionRequest but
+  // not onPreToolUse/onPostToolUse) when dist/hooks/ is missing.
+  const distHooksDir = join(autogentPath, 'dist', 'hooks');
+  const distSessionFile = join(autogentPath, 'dist', 'session.js');
+  const hooksFilesLoaded = loadDistDir(distHooksDir);
+  if (hooksFilesLoaded > 0) {
+    // dist/hooks/ was present and contributed files — also load session.js
+    loadFile(distSessionFile);
+  } else {
+    // Strategy 2: TypeScript source fallback
+    sourceChunks.length = 0; // discard any partial load
+    const srcHooksDir = join(autogentPath, 'src', 'hooks');
+    const srcSessionFile = join(autogentPath, 'src', 'session.ts');
+    loadSrcDir(srcHooksDir);
+    loadFile(srcSessionFile);
+  }
+
+  if (readError) {
+    console.warn('⚠️  Hook source read error — hookSourceHash marked as unknown');
+    return { hookCount: 0, hookSourceHash: 'unknown' };
+  }
+  if (sourceChunks.length === 0) {
+    return { hookCount: 0, hookSourceHash: 'unknown' };
+  }
+
+  // Detect which hook handler types are present across all loaded files
+  const allSource = sourceChunks.join('\n');
+  const registeredHooks = new Set<string>();
+  for (const { name, pattern } of HOOK_HANDLER_PATTERNS) {
+    if (pattern.test(allSource)) {
+      registeredHooks.add(name);
+    }
+  }
+
+  const hookSourceHash = 'sha256:' + sha256(allSource);
+  return { hookCount: registeredHooks.size, hookSourceHash };
+}
+
+/**
  * Attempt to extract tool definitions from the autogent dist build.
+ *
  * Looks for *.js files in dist/tools/builtin/ that export tool metadata.
  *
  * Falls back to parsing the TypeScript source with a simple regex when
@@ -286,6 +411,9 @@ async function main(): Promise<void> {
       ? extractSystemPrompt(AUTOGENT_PATH, WORKSPACE_PATH)
       : '';
   const toolDefs = autogentExists ? extractToolDefs(AUTOGENT_PATH) : [];
+  const { hookCount, hookSourceHash } = autogentExists
+    ? extractHookDefs(AUTOGENT_PATH)
+    : { hookCount: 0, hookSourceHash: 'unknown' };
 
   console.log(`System prompt extracted: ${systemPrompt.length} chars`);
   console.log(`Tool definitions extracted: ${toolDefs.length} tools`);
@@ -294,6 +422,7 @@ async function main(): Promise<void> {
       `  Tools: ${toolDefs.map((t) => t.name).join(', ')}`,
     );
   }
+  console.log(`Hook definitions extracted: ${hookCount} handlers`);
   if (SKIP_MODEL_POOL) {
     console.log('Model pool capture: skipped (SKIP_MODEL_POOL=true)');
   } else {
@@ -319,6 +448,7 @@ async function main(): Promise<void> {
   const systemPromptHash = computeSystemPromptHash(systemPrompt);
   console.log(`Binary hash:        ${binaryHash}`);
   console.log(`System prompt hash: ${systemPromptHash}`);
+  console.log(`Hook source hash:   ${hookSourceHash}`);
   console.log('');
 
   const store = new SnapshotStore(BASELINES_DIR);
@@ -351,6 +481,8 @@ async function main(): Promise<void> {
   // Attach fingerprints to the snapshot
   snapshot.binaryHash = binaryHash;
   snapshot.systemPromptHash = systemPromptHash;
+  snapshot.hookCount = hookCount;
+  snapshot.hookSourceHash = hookSourceHash;
 
   // Capture model pool
   if (!SKIP_MODEL_POOL) {
@@ -417,7 +549,15 @@ async function main(): Promise<void> {
       const curr = snapshot.systemPromptHash?.slice(0, 16) ?? '?';
       console.warn(`⚠️  System prompt changed: ${prev}… → ${curr}…`);
     }
-    if (diff.binaryChanged || diff.systemPromptChanged) {
+    if (diff.hookChanged) {
+      const prev = existingBaseline.hookSourceHash?.slice(0, 16) ?? '?';
+      const curr = snapshot.hookSourceHash?.slice(0, 16) ?? '?';
+      const prevCount = existingBaseline.hookCount ?? '?';
+      const currCount = snapshot.hookCount ?? '?';
+      const countNote = prevCount !== currCount ? ` (count: ${prevCount} → ${currCount})` : '';
+      console.warn(`🚨  Hook definitions changed: ${prev}… → ${curr}…${countNote}`);
+    }
+    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged) {
       console.warn('');
     }
 

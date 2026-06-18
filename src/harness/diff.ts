@@ -99,6 +99,13 @@ export function diffSnapshots(
     current.systemPromptHash !== 'unknown' &&
     baseline.systemPromptHash !== current.systemPromptHash;
 
+  const hookChanged =
+    baseline.hookSourceHash !== undefined &&
+    current.hookSourceHash !== undefined &&
+    baseline.hookSourceHash !== 'unknown' &&
+    current.hookSourceHash !== 'unknown' &&
+    baseline.hookSourceHash !== current.hookSourceHash;
+
   const modelPoolChanges = diffModelPool(baseline.modelPool, current.modelPool);
 
   return {
@@ -108,6 +115,7 @@ export function diffSnapshots(
     hasRegressions: changes.some((c) => c.severity === 'regression'),
     binaryChanged,
     systemPromptChanged,
+    hookChanged,
     modelPoolChanges,
   };
 }
@@ -134,7 +142,15 @@ export function formatDiffReport(report: DiffReport): string {
     const curr = report.current.systemPromptHash?.slice(0, 8) ?? '?';
     lines.push(`⚠️  **System prompt changed**: \`${prev}…\` → \`${curr}…\``);
   }
-  if (report.binaryChanged || report.systemPromptChanged) {
+  if (report.hookChanged) {
+    const prev = report.baseline.hookSourceHash?.slice(0, 16) ?? '?';
+    const curr = report.current.hookSourceHash?.slice(0, 16) ?? '?';
+    const prevCount = report.baseline.hookCount ?? '?';
+    const currCount = report.current.hookCount ?? '?';
+    const countNote = prevCount !== currCount ? ` (count: ${prevCount} → ${currCount})` : '';
+    lines.push(`🚨  **Hook definitions changed**: \`${prev}…\` → \`${curr}…\`${countNote}`);
+  }
+  if (report.binaryChanged || report.systemPromptChanged || report.hookChanged) {
     lines.push('');
   }
 
