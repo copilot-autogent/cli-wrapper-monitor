@@ -144,19 +144,36 @@ interface HookIntrospectionResult {
 function extractHookDefs(autogentPath: string): HookIntrospectionResult {
   const sourceChunks: string[] = [];
   const registeredHooks = new Set<string>();
+  /** Set to true if any file read fails so we can mark the hash as unreliable. */
+  let readError = false;
 
-  /** Read all .js files from a dist directory into sourceChunks. */
+  /** Read all .js files from a compiled dist directory into sourceChunks. */
   function loadDistDir(dir: string): void {
     if (!existsSync(dir)) return;
-    try {
-      const files = readdirSync(dir)
-        .filter((f) => f.endsWith('.js'))
-        .sort();
-      for (const file of files) {
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.js'))
+      .sort();
+    for (const file of files) {
+      try {
         sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+      } catch {
+        readError = true;
       }
-    } catch {
-      // fall through
+    }
+  }
+
+  /** Read all .ts files from a TypeScript source directory into sourceChunks. */
+  function loadSrcDir(dir: string): void {
+    if (!existsSync(dir)) return;
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .sort();
+    for (const file of files) {
+      try {
+        sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+      } catch {
+        readError = true;
+      }
     }
   }
 
@@ -166,7 +183,7 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
     try {
       sourceChunks.push(readFileSync(filePath, 'utf-8'));
     } catch {
-      // fall through
+      readError = true;
     }
   }
 
@@ -180,11 +197,11 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
   if (sourceChunks.length === 0) {
     const srcHooksDir = join(autogentPath, 'src', 'hooks');
     const srcSessionFile = join(autogentPath, 'src', 'session.ts');
-    loadDistDir(srcHooksDir); // reuses the same readdir+filter logic
+    loadSrcDir(srcHooksDir);
     loadFile(srcSessionFile);
   }
 
-  if (sourceChunks.length === 0) {
+  if (sourceChunks.length === 0 || readError) {
     return { hookCount: 0, hookSourceHash: 'unknown' };
   }
 
@@ -200,6 +217,9 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
   return { hookCount: registeredHooks.size, hookSourceHash };
 }
 
+/**
+ * Attempt to extract tool definitions from the autogent dist build.
+ *
  * Looks for *.js files in dist/tools/builtin/ that export tool metadata.
  *
  * Falls back to parsing the TypeScript source with a simple regex when

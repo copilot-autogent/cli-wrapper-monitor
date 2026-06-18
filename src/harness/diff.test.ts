@@ -74,6 +74,12 @@ describe('diffSnapshots — hookChanged', () => {
     const current = makeSnapshot({ hookSourceHash: undefined, hookCount: undefined });
     expect(diffSnapshots(baseline, current).hookChanged).toBe(false);
   });
+
+  it('is false when hookSourceHash is "unknown" on both snapshots', () => {
+    const baseline = makeSnapshot({ hookSourceHash: 'unknown' });
+    const current = makeSnapshot({ hookSourceHash: 'unknown' });
+    expect(diffSnapshots(baseline, current).hookChanged).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
