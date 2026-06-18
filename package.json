@@ -9,6 +9,7 @@
     "diff": "npx ts-node --esm scripts/generate-diff-report.ts",
     "compare": "npx ts-node --esm scripts/compare-baselines.ts",
     "trend": "npx ts-node --esm scripts/trend-report.ts",
+    "chart": "npx ts-node --esm scripts/generate-chart.ts",
     "multi-model": "npx ts-node --esm scripts/capture-multi-model.ts",
     "test": "vitest run"
   },

@@ -18,6 +18,14 @@ Snapshot-based regression testing scoped to the **Copilot CLI/SDK wrapper layer 
 
 This is **not** a benchmark or leaderboard. It's a regression detector.
 
+## Historical Trend
+
+System prompt size and tool count over time, generated from all accumulated baseline snapshots:
+
+![Historical trend chart: system prompt size and tool count over time](./chart.svg)
+
+_Chart regenerated automatically on each monthly baseline capture. Source: [`scripts/generate-chart.ts`](./scripts/generate-chart.ts)_
+
 ## Focus Areas
 
 ### 1. Context Tax
