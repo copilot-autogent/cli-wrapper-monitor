@@ -148,11 +148,14 @@ jobs:
       # 7. Regenerate trend chart then commit baselines and reports
       # ------------------------------------------------------------------ #
       - name: Regenerate trend chart
+        # continue-on-error so a chart-script failure does not prevent
+        # the baseline data from being committed in the step below.
+        continue-on-error: true
         run: |
           # Remove transient pre-capture snapshot before charting so it
           # does not appear as a spurious data point in chart.svg.
           rm -f baselines/pre-capture.json
-          npm run chart -- --output chart.svg
+          npm run chart
 
       - name: Commit results
         run: |

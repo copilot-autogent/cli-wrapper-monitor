@@ -65,35 +65,25 @@ function loadDataPoints(dir: string): DataPoint[] {
     // partial captures) rather than silently plotting a misleading zero.
     if (systemPromptChars == null || toolCount == null) continue;
 
+    const ts = typeof snap.capturedAt === "string" ? snap.capturedAt : String(snap.capturedAt);
+    const parsedDate = new Date(ts);
+    if (isNaN(parsedDate.getTime())) {
+      console.warn(`Skipping ${f}: invalid capturedAt "${ts}"`);
+      continue;
+    }
+
     points.push({
-      date: new Date(snap.capturedAt),
-      label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
+      date: parsedDate,
+      label: ts.slice(0, 10),
       systemPromptChars,
       toolCount,
     });
   }
 
-  // Include latest.json only when its capturedAt is genuinely newer than
-  // all dated files — it is the rolling "current state" pointer and is
-  // excluded when it duplicates an already-loaded monthly snapshot.
-  const latestPath = join(absDir, "latest.json");
-  if (existsSync(latestPath)) {
-    const snap = JSON.parse(readFileSync(latestPath, "utf-8")) as MetricSnapshot;
-    const exp = snap.experiments?.["context-tax"];
-    if (exp && !seen.has(snap.capturedAt)) {
-      const m = exp.metrics;
-      const systemPromptChars = m["systemPromptChars"]?.value;
-      const toolCount = m["toolCount"]?.value;
-      if (systemPromptChars != null && toolCount != null) {
-        points.push({
-          date: new Date(snap.capturedAt),
-          label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
-          systemPromptChars,
-          toolCount,
-        });
-      }
-    }
-  }
+  // `latest.json` is the rolling "current state" pointer and changes
+  // timestamp when it advances, which would make historical chart diffs
+  // non-reproducible. Exclude it — dated baseline files are the canonical
+  // historical record.
 
   return points.sort((a, b) => a.date.getTime() - b.date.getTime());
 }
@@ -275,13 +265,13 @@ function generateSVG(points: DataPoint[]): string {
     const boxW = Math.max(...textLines.map((l) => l.length)) * charWidth + 16;
     const boxH = textLines.length * lineH + 10;
 
-    // Position box above the dot with some offset
+    // Position box above the dot with some offset; clamp to chart bounds
     let boxX = px - boxW / 2;
-    const boxY = py - boxH - 18;
+    let boxY = py - boxH - 18;
 
-    // Clamp to chart bounds
     if (boxX < ML + 2) boxX = ML + 2;
     if (boxX + boxW > ML + PW - 2) boxX = ML + PW - 2 - boxW;
+    if (boxY < MT + 2) boxY = MT + 2;
 
     // Connector line
     push(
@@ -327,7 +317,7 @@ function generateSVG(points: DataPoint[]): string {
   );
 
   push(`</svg>`);
-  return lines.join("\n");
+  return lines.join("\n") + "\n";
 }
 
 function main(): void {
@@ -340,7 +330,7 @@ function main(): void {
   const points = loadDataPoints("baselines");
   console.log(`Loaded ${points.length} data points`);
   for (const p of points) {
-    console.log(`  ${p.label}  prompt=${p.systemPromptChars.toLocaleString()} chars  tools=${p.toolCount}`);
+    console.log(`  ${p.label}  prompt=${fmtNum(p.systemPromptChars)} chars  tools=${p.toolCount}`);
   }
 
   const svg = generateSVG(points);
