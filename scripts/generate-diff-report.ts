@@ -1,6 +1,17 @@
 #!/usr/bin/env npx ts-node --esm
 /**
  * Generate a markdown diff report comparing two baseline snapshots.
+ *
+ * Usage:
+ *   npx ts-node --esm scripts/generate-diff-report.ts [--baseline <path>] [--current <path>] [--output <path>]
+ *
+ * Defaults:
+ *   --baseline   baselines/latest.json
+ *   --current    baselines/latest.json
+ *   --output     stdout
+ *
+ * Note: possibleCauses reflects the window at the time the current snapshot was
+ * captured. For non-consecutive baseline pairs the provenance section is best-effort.
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
@@ -100,7 +111,7 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
       const sev = severity(baseMetric.value, currMetric.value);
       if (sev === "🔴") hasRegression = true;
       if (sev === "🟡") hasWarning = true;
-      lines.push(`| ${key} | ${formatValue(baseMetric.value, baseMetric.unit)} | ${formatValue(currMetric.value, currMetric.value)} | ${pct(baseMetric.value, currMetric.value)} | ${sev} |`);
+      lines.push(`| ${key} | ${formatValue(baseMetric.value, baseMetric.unit)} | ${formatValue(currMetric.value, currMetric.unit)} | ${pct(baseMetric.value, currMetric.value)} | ${sev} |`);
     }
     for (const [key, currMetric] of Object.entries(currExp.metrics)) {
       if (!baseExp.metrics[key]) lines.push(`| ${key} | — | ${formatValue(currMetric.value, currMetric.unit)} | new | ⚪ |`);
@@ -111,7 +122,7 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
   // ── Possible causes (provenance linking) ────────────────────────────────
   if (currentSnap.possibleCauses && currentSnap.possibleCauses.length > 0) {
     lines.push("## Possible Causes", "",
-      "Autogent PRs merged between these baselines that touched monitored paths:", "");
+      "Autogent PRs from the current snapshot's capture window that touched monitored paths:", "");
     for (const cause of currentSnap.possibleCauses) {
       const url = "https://github.com/" + cause.pr.replace("#", "/pull/");
       lines.push("- [`" + cause.pr + "`](" + url + ") — **" + cause.title + "** (merged " + cause.mergedAt + ") `[" + cause.touchedPaths.join(", ") + "]`");

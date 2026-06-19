@@ -1,6 +1,22 @@
 #!/usr/bin/env npx ts-node --esm
 /**
  * Compare two baseline JSON snapshots and output a structured diff report.
+ *
+ * Usage:
+ *   npx ts-node --esm scripts/compare-baselines.ts <baseline-a> <baseline-b> [options]
+ *   npx ts-node --esm scripts/compare-baselines.ts --a <path> --b <path> [options]
+ *
+ * Options:
+ *   --json          Output raw DiffReport as JSON instead of Markdown
+ *   --output <path> Write report to file instead of stdout
+ *
+ * Examples:
+ *   npm run compare -- baselines/2026-05-20.json baselines/2026-06-03.json
+ *   npm run compare -- baselines/2026-06-03.json baselines/latest.json --output reports/jun3-to-latest.md
+ *
+ * Note: possibleCauses in the report reflects the window captured at snapshot B's
+ * creation time. For non-consecutive comparisons, the provenance section is
+ * best-effort and may not cover the full A→B window.
  */
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
@@ -28,7 +44,14 @@ function parseArgs(): CliArgs {
   }
   if (!a && positional[0]) a = positional[0];
   if (!b && positional[1]) b = positional[1];
-  if (!a || !b) { console.error("Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>]"); process.exit(1); }
+  if (!a || !b) {
+    console.error("Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>]\n" +
+      "  file-a           Path to the older (reference) baseline JSON\n" +
+      "  file-b           Path to the newer baseline JSON\n" +
+      "  --json           Output raw DiffReport JSON instead of Markdown\n" +
+      "  --output <path>  Write report to file");
+    process.exit(1);
+  }
   return { a, b, json: jsonMode, output };
 }
 
@@ -154,9 +177,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
       removed.forEach((name) => { const chars = perToolA.find((t) => t.name === name)?.chars ?? 0; lines.push(`- \`${name}\` (was ${chars} chars)`); });
       lines.push("");
     }
-    if (added.length === 0 && removed.length === 0) {
-      lines.push(`## Tool Changes`, "", `> Tool set unchanged (${namesA.size} tools).`, "");
-    }
+    if (added.length === 0 && removed.length === 0) lines.push(`## Tool Changes`, "", `> Tool set unchanged (${namesA.size} tools).`, "");
   }
 
   if (report.modelPoolChanges.length > 0) {
@@ -168,9 +189,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
       else if (change.type === "context_window_changed" && change.before && change.after) lines.push(`- ⚠️ **Context window**: \`${change.modelId}\` — ${change.before.contextWindow.toLocaleString()} → ${change.after.contextWindow.toLocaleString()} tokens`);
     }
     lines.push("");
-  } else if (snapA.modelPool || snapB.modelPool) {
-    lines.push(`## Model Pool Changes`, "", "> No model pool changes detected.", "");
-  }
+  } else if (snapA.modelPool || snapB.modelPool) lines.push(`## Model Pool Changes`, "", "> No model pool changes detected.", "");
 
   const experimentNames = [...new Set([...Object.keys(snapA.experiments), ...Object.keys(snapB.experiments)])].sort();
   lines.push(`## Experiment Metrics`, "");
@@ -193,7 +212,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
   // ── Possible causes (provenance linking) ────────────────────────────────
   if (snapB.possibleCauses && snapB.possibleCauses.length > 0) {
     lines.push("## Possible Causes", "",
-      "Autogent PRs merged between these baselines that touched monitored paths:", "");
+      "Autogent PRs from snapshot B's capture window that touched monitored paths:", "");
     for (const cause of snapB.possibleCauses) {
       const url = "https://github.com/" + cause.pr.replace("#", "/pull/");
       lines.push("- [`" + cause.pr + "`](" + url + ") — **" + cause.title + "** (merged " + cause.mergedAt + ") `[" + cause.touchedPaths.join(", ") + "]`");
