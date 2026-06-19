@@ -218,6 +218,22 @@ describe('formatComparisonMarkdown', () => {
     const snap = makeSnapshot([{ model: 'bad-model', error: 'rate limited' }]);
     const md = formatComparisonMarkdown(snap);
     expect(md).toContain('❌ error');
+    expect(md).not.toContain('SKIP_REFUSAL');
+    // Table header must be present even for all-error snapshots
+    expect(md).toContain('| Model |');
+  });
+
+  it('handles mixed errored and successful entries', () => {
+    const snap = makeSnapshot([
+      { model: 'good-model', safe: 1.0, dangerous: 1.0, borderline: 0.5 },
+      { model: 'bad-model', error: 'connection timeout' },
+    ]);
+    const md = formatComparisonMarkdown(snap);
+    expect(md).toContain('❌ error');
+    // Both models must appear as table rows (pipe-delimited with backtick name)
+    expect(md).toContain('| `good-model`');
+    expect(md).toContain('| `bad-model`');
+    expect(md).not.toContain('SKIP_REFUSAL');
   });
 
   it('shows skipped message when no refusal data', () => {

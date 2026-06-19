@@ -189,11 +189,12 @@ export function formatComparisonMarkdown(snapshot: MultiModelComparisonSnapshot)
   }
 
   const hasRefusal = snapshot.entries.some((e) => e.refusal !== null);
+  const hasErrors = snapshot.entries.some((e) => e.error != null);
 
   lines.push('## Refusal Rate Comparison');
   lines.push('');
 
-  if (!hasRefusal) {
+  if (!hasRefusal && !hasErrors) {
     lines.push(
       '_Skipped — set `GITHUB_TOKEN` and omit `SKIP_REFUSAL=true` to enable live probes._',
     );
