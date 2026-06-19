@@ -61,7 +61,7 @@ async function ghGet<T>(path: string, token: string, timeoutMs = 10_000): Promis
  * Fetch autogent PRs merged between `since` and `until` that touch at least one
  * of PROVENANCE_PATHS.
  *
- * @param since  ISO 8601 timestamp — lower bound (exclusive, typically prevBaseline.capturedAt)
+ * @param since  ISO 8601 timestamp — lower bound (inclusive, typically prevBaseline.capturedAt)
  * @param until  ISO 8601 timestamp — upper bound (inclusive, typically now)
  * @param token  GitHub token; falls back to GITHUB_TOKEN / GH_TOKEN env vars
  * @returns      Matched PR entries sorted by mergedAt descending; empty on error/no-token
@@ -78,13 +78,15 @@ export async function fetchProvenanceLinks(
     process.env['GITHUB_API_TOKEN'];
   if (!tok) return [];
 
-  // GitHub date search uses YYYY-MM-DD
+  // GitHub date search uses YYYY-MM-DD; use >= so same-day captures are included
   const sinceDate = since.slice(0, 10);
   const untilDate = until.slice(0, 10);
 
-  // Fetch merged PRs in the autogent repo within the date range
+  // Fetch merged PRs in the autogent repo within the date range.
+  // per_page=50 is best-effort; intervals with >50 merged PRs may silently
+  // miss candidates (acceptable for provenance use-case per issue spec).
   const q = encodeURIComponent(
-    `repo:JackywithaWhiteDog/autogent is:pr is:merged merged:>${sinceDate} merged:<=${untilDate}`,
+    `repo:JackywithaWhiteDog/autogent is:pr is:merged merged:>=${sinceDate} merged:<=${untilDate}`,
   );
 
   let items: GitHubSearchItem[];
@@ -103,6 +105,7 @@ export async function fetchProvenanceLinks(
   for (const item of items) {
     let files: GitHubPRFile[];
     try {
+      // per_page=100 is best-effort; very large PRs (>100 files) may be missed
       files = await ghGet<GitHubPRFile[]>(
         `/repos/JackywithaWhiteDog/autogent/pulls/${item.number}/files?per_page=100`,
         tok,
@@ -116,7 +119,9 @@ export async function fetchProvenanceLinks(
     );
 
     if (touched.length > 0) {
-      const mergedAt = (item.pull_request?.merged_at ?? '').slice(0, 10);
+      // merged_at is included in search/issues responses for PR items;
+      // fall back to untilDate as an approximation if somehow absent.
+      const mergedAt = (item.pull_request?.merged_at ?? untilDate).slice(0, 10);
       results.push({
         pr: `JackywithaWhiteDog/autogent#${item.number}`,
         title: item.title,

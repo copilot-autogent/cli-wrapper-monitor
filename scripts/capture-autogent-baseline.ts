@@ -186,7 +186,7 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
       .sort();
     for (const file of files) {
       try {
-        sourceChunks.push(readFileSync(join(file), 'utf-8'));
+        sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
       } catch {
         readError = true;
       }
@@ -337,7 +337,7 @@ function extractSystemPrompt(autogentPath: string, workspacePath: string): strin
     const content = readFileSync(candidate, 'utf-8');
     const templateMatch = content.match(/`(You are[\s\S]{200,?}?)`/);
     if (templateMatch) return templateMatch[1];
-    const stringMatch = content.match(/"(You are[^"{200,?})"/);
+    const stringMatch = content.match(/"(You are[^"]{200,?})"/);
     if (stringMatch) return stringMatch[1];
   }
 
@@ -506,7 +506,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── Provenance linking ───────────────────────────────────────────────────
+  // ── Provenance linking ─────────────────────────────────────────────────────
   // Query autogent PRs merged between the previous baseline date and now that
   // touched src/workspace/, src/tools/builtin/, or src/hooks/. Embed matched
   // PRs in the snapshot so reports can explain observed deltas.
