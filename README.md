@@ -24,7 +24,7 @@ System prompt size and tool count over time, generated from all accumulated base
 
 ![Historical trend chart: system prompt size and tool count over time](./chart.svg)
 
-_Chart regenerated automatically on each monthly baseline capture. Source: [`scripts/generate-chart.ts`](./scripts/generate-chart.ts)_
+_Chart regenerated automatically on each monthly baseline capture. To update manually after adding a baseline: `npm run chart`. Source: [`scripts/generate-chart.ts`](./scripts/generate-chart.ts)_
 
 ## Focus Areas
 

@@ -59,27 +59,39 @@ function loadDataPoints(dir: string): DataPoint[] {
     seen.add(snap.capturedAt);
 
     const m = exp.metrics;
+    const systemPromptChars = m["systemPromptChars"]?.value;
+    const toolCount = m["toolCount"]?.value;
+    // Skip baselines that lack the key metrics (e.g. schema-drifted or
+    // partial captures) rather than silently plotting a misleading zero.
+    if (systemPromptChars == null || toolCount == null) continue;
+
     points.push({
       date: new Date(snap.capturedAt),
       label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
-      systemPromptChars: m["systemPromptChars"]?.value ?? 0,
-      toolCount: m["toolCount"]?.value ?? 0,
+      systemPromptChars,
+      toolCount,
     });
   }
 
-  // Include latest.json if not already covered
+  // Include latest.json only when its capturedAt is genuinely newer than
+  // all dated files — it is the rolling "current state" pointer and is
+  // excluded when it duplicates an already-loaded monthly snapshot.
   const latestPath = join(absDir, "latest.json");
   if (existsSync(latestPath)) {
     const snap = JSON.parse(readFileSync(latestPath, "utf-8")) as MetricSnapshot;
     const exp = snap.experiments?.["context-tax"];
     if (exp && !seen.has(snap.capturedAt)) {
       const m = exp.metrics;
-      points.push({
-        date: new Date(snap.capturedAt),
-        label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
-        systemPromptChars: m["systemPromptChars"]?.value ?? 0,
-        toolCount: m["toolCount"]?.value ?? 0,
-      });
+      const systemPromptChars = m["systemPromptChars"]?.value;
+      const toolCount = m["toolCount"]?.value;
+      if (systemPromptChars != null && toolCount != null) {
+        points.push({
+          date: new Date(snap.capturedAt),
+          label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
+          systemPromptChars,
+          toolCount,
+        });
+      }
     }
   }
 
