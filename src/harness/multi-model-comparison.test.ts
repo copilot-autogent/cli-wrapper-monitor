@@ -219,6 +219,8 @@ describe('formatComparisonMarkdown', () => {
     const md = formatComparisonMarkdown(snap);
     expect(md).toContain('❌ error');
     expect(md).not.toContain('SKIP_REFUSAL');
+    // Table header must be present even for all-error snapshots
+    expect(md).toContain('| Model |');
   });
 
   it('handles mixed errored and successful entries', () => {
@@ -228,8 +230,9 @@ describe('formatComparisonMarkdown', () => {
     ]);
     const md = formatComparisonMarkdown(snap);
     expect(md).toContain('❌ error');
-    expect(md).toContain('`good-model`');
-    expect(md).toContain('`bad-model`');
+    // Both models must appear as table rows (pipe-delimited with backtick name)
+    expect(md).toContain('| `good-model`');
+    expect(md).toContain('| `bad-model`');
     expect(md).not.toContain('SKIP_REFUSAL');
   });
 
