@@ -21,22 +21,29 @@ interface DataPoint {
   label: string;
   systemPromptChars: number;
   toolCount: number;
-  note?: string;
 }
 
-// Key events derived from baseline notes and known project history
-const EVENT_LABELS: Record<string, string> = {
-  "2026-05-31": "Untruncation fix\n(+108% prompt)",
-  "2026-06-03": "Tool count\n−50%",
-  "2026-06-16": "autogent#571\nPLAYBOOK migration",
-};
+// Key events derived from baseline notes and known project history.
+// series: "prompt" → annotation anchors to the prompt data point
+//         "tools"  → annotation anchors to the tool-count data point
+const EVENT_LABELS: Array<{ dateStr: string; label: string; series: "prompt" | "tools" }> = [
+  { dateStr: "2026-05-31", label: "Untruncation fix\n(+108% prompt)", series: "prompt" },
+  { dateStr: "2026-06-03", label: "Tool count\n\u221250%", series: "tools" },
+  { dateStr: "2026-06-16", label: "autogent#571\nPLAYBOOK migration", series: "prompt" },
+];
 
 function loadDataPoints(dir: string): DataPoint[] {
   const absDir = resolve(dir);
   if (!existsSync(absDir)) throw new Error(`Directory not found: ${absDir}`);
 
   const files = readdirSync(absDir)
-    .filter((f) => f.endsWith(".json") && f !== "schema.json" && f !== "latest.json")
+    .filter(
+      (f) =>
+        f.endsWith(".json") &&
+        f !== "schema.json" &&
+        f !== "latest.json" &&
+        !f.startsWith("pre-capture")
+    )
     .sort();
 
   const seen = new Set<string>();
@@ -44,19 +51,19 @@ function loadDataPoints(dir: string): DataPoint[] {
 
   for (const f of files) {
     const snap = JSON.parse(readFileSync(join(absDir, f), "utf-8")) as MetricSnapshot;
-    if (seen.has(snap.capturedAt)) continue;
-    seen.add(snap.capturedAt);
 
     const exp = snap.experiments?.["context-tax"];
     if (!exp) continue;
 
+    if (seen.has(snap.capturedAt)) continue;
+    seen.add(snap.capturedAt);
+
     const m = exp.metrics;
     points.push({
       date: new Date(snap.capturedAt),
-      label: snap.capturedAt.slice(0, 10),
+      label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
       systemPromptChars: m["systemPromptChars"]?.value ?? 0,
       toolCount: m["toolCount"]?.value ?? 0,
-      note: (snap as Record<string, unknown>)["note"] as string | undefined,
     });
   }
 
@@ -64,17 +71,15 @@ function loadDataPoints(dir: string): DataPoint[] {
   const latestPath = join(absDir, "latest.json");
   if (existsSync(latestPath)) {
     const snap = JSON.parse(readFileSync(latestPath, "utf-8")) as MetricSnapshot;
-    if (!seen.has(snap.capturedAt)) {
-      const exp = snap.experiments?.["context-tax"];
-      if (exp) {
-        const m = exp.metrics;
-        points.push({
-          date: new Date(snap.capturedAt),
-          label: snap.capturedAt.slice(0, 10),
-          systemPromptChars: m["systemPromptChars"]?.value ?? 0,
-          toolCount: m["toolCount"]?.value ?? 0,
-        });
-      }
+    const exp = snap.experiments?.["context-tax"];
+    if (exp && !seen.has(snap.capturedAt)) {
+      const m = exp.metrics;
+      points.push({
+        date: new Date(snap.capturedAt),
+        label: typeof snap.capturedAt === "string" ? snap.capturedAt.slice(0, 10) : String(snap.capturedAt).slice(0, 10),
+        systemPromptChars: m["systemPromptChars"]?.value ?? 0,
+        toolCount: m["toolCount"]?.value ?? 0,
+      });
     }
   }
 
@@ -82,7 +87,18 @@ function loadDataPoints(dir: string): DataPoint[] {
 }
 
 function niceMax(rawMax: number, step: number): number {
+  if (rawMax === 0 || step === 0) return step > 0 ? step : 1;
   return Math.ceil(rawMax / step) * step;
+}
+
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function fmtNum(v: number): string {
+  // Locale-independent formatting: 56963 → "56,963"
+  const s = Math.round(v).toString();
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 function generateSVG(points: DataPoint[]): string {
@@ -155,7 +171,6 @@ function generateSVG(points: DataPoint[]): string {
 
   // ── Right Y-axis labels (tool count) ──────────────────────────────────────
   const toolTicks = toolsMax <= 10 ? toolsMax : 5;
-  const toolStep = toolsMax / toolTicks;
   for (let i = 0; i <= toolTicks; i++) {
     const y = MT + (PH * i) / toolTicks;
     const v = toolsMax * (1 - i / toolTicks);
@@ -227,7 +242,7 @@ function generateSVG(points: DataPoint[]): string {
     push(
       `<circle cx="${x}" cy="${yOfPrompt(p.systemPromptChars).toFixed(1)}" r="5" ` +
       `fill="#2980b9" stroke="#fff" stroke-width="2">` +
-      `<title>${p.label}: ${p.systemPromptChars.toLocaleString()} chars</title></circle>`,
+      `<title>${p.label}: ${fmtNum(p.systemPromptChars)} chars</title></circle>`,
       `<circle cx="${x}" cy="${yOfTools(p.toolCount).toFixed(1)}" r="5" ` +
       `fill="#e67e22" stroke="#fff" stroke-width="2">` +
       `<title>${p.label}: ${p.toolCount} tools</title></circle>`
@@ -235,12 +250,13 @@ function generateSVG(points: DataPoint[]): string {
   }
 
   // ── Event annotations ─────────────────────────────────────────────────────
-  for (const [dateStr, annLabel] of Object.entries(EVENT_LABELS)) {
+  for (const { dateStr, label: annLabel, series } of EVENT_LABELS) {
     const match = points.find((p) => p.label === dateStr);
     if (!match) continue;
 
     const px = xOf(match.date);
-    const py = yOfPrompt(match.systemPromptChars);
+    // Anchor Y to the series the annotation describes
+    const py = series === "tools" ? yOfTools(match.toolCount) : yOfPrompt(match.systemPromptChars);
     const textLines = annLabel.split("\n");
     const charWidth = 6.5;
     const lineH = 14;
@@ -271,7 +287,7 @@ function generateSVG(points: DataPoint[]): string {
       const ty = boxY + 9 + i * lineH;
       push(
         `<text x="${(boxX + boxW / 2).toFixed(1)}" y="${ty.toFixed(1)}" ` +
-        `text-anchor="middle" font-size="9.5" fill="#6c3483">${textLines[i]}</text>`
+        `text-anchor="middle" font-size="9.5" fill="#6c3483">${xmlEscape(textLines[i])}</text>`
       );
     }
   }

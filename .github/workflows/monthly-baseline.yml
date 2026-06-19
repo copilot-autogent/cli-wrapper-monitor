@@ -148,13 +148,14 @@ jobs:
       # 7. Regenerate trend chart then commit baselines and reports
       # ------------------------------------------------------------------ #
       - name: Regenerate trend chart
-        run: npm run chart -- --output chart.svg
+        run: |
+          # Remove transient pre-capture snapshot before charting so it
+          # does not appear as a spurious data point in chart.svg.
+          rm -f baselines/pre-capture.json
+          npm run chart -- --output chart.svg
 
       - name: Commit results
         run: |
-          # Clean up the temporary pre-capture snapshot before committing
-          rm -f baselines/pre-capture.json
-
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
