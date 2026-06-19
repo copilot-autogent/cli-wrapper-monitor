@@ -33,6 +33,20 @@ export interface ModelPool {
   models: ModelPoolEntry[];
 }
 
+/**
+ * A single autogent PR matched as a possible cause for a baseline delta.
+ * Embedded in MetricSnapshot.possibleCauses when provenance linking is enabled.
+ */
+export interface ProvenanceLinkEntry {
+  /** e.g. "JackywithaWhiteDog/autogent#612" */
+  pr: string;
+  title: string;
+  /** ISO date of merge, e.g. "2026-06-15" */
+  mergedAt: string;
+  /** Which of the provenance-relevant path prefixes were touched by this PR */
+  touchedPaths: string[];
+}
+
 /** A complete snapshot of all experiment results at a point in time */
 export interface MetricSnapshot {
   /** ISO 8601 timestamp */
@@ -53,6 +67,13 @@ export interface MetricSnapshot {
   hookSourceHash?: string;
   /** Available model pool at capture time (absent in older baselines) */
   modelPool?: ModelPool;
+  /**
+   * Autogent PRs that touched provenance-relevant paths (src/workspace/,
+   * src/tools/builtin/, src/hooks/) between the previous baseline and this one.
+   * Absent when no previous baseline exists, provenance linking is disabled,
+   * or no matching PRs were found.
+   */
+  possibleCauses?: ProvenanceLinkEntry[];
   /** Experiment results indexed by experiment name */
   experiments: Record<string, ExperimentResult>;
 }
