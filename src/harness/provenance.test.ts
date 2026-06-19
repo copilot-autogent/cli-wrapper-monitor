@@ -14,15 +14,12 @@ describe('fetchProvenanceLinks', () => {
   });
 
   afterEach(() => {
-    // Restore env
     for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) {
-        delete process.env[k];
-      } else {
-        process.env[k] = v;
-      }
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     }
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('returns [] when no token is available', async () => {
@@ -62,20 +59,14 @@ describe('fetchProvenanceLinks', () => {
 
   it('returns [] when no PRs match provenance paths', async () => {
     const mockFetch = vi.fn();
-    // Search API returns one PR
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         items: [
-          {
-            number: 100,
-            title: 'Fix docs',
-            pull_request: { merged_at: '2026-06-10T12:00:00Z' },
-          },
+          { number: 100, title: 'Fix docs', pull_request: { merged_at: '2026-06-10T12:00:00Z' } },
         ],
       }),
     });
-    // Files for PR #100: doesn't touch provenance paths
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => [{ filename: 'README.md' }, { filename: 'docs/foo.md' }],
@@ -96,11 +87,7 @@ describe('fetchProvenanceLinks', () => {
       ok: true,
       json: async () => ({
         items: [
-          {
-            number: 612,
-            title: 'Add tool: verify_deploy',
-            pull_request: { merged_at: '2026-06-15T10:00:00Z' },
-          },
+          { number: 612, title: 'Add tool: verify_deploy', pull_request: { merged_at: '2026-06-15T10:00:00Z' } },
         ],
       }),
     });
@@ -134,11 +121,7 @@ describe('fetchProvenanceLinks', () => {
       ok: true,
       json: async () => ({
         items: [
-          {
-            number: 700,
-            title: 'Big refactor',
-            pull_request: { merged_at: '2026-06-17T08:00:00Z' },
-          },
+          { number: 700, title: 'Big refactor', pull_request: { merged_at: '2026-06-17T08:00:00Z' } },
         ],
       }),
     });
@@ -170,22 +153,12 @@ describe('fetchProvenanceLinks', () => {
       ok: true,
       json: async () => ({
         items: [
-          {
-            number: 501,
-            title: 'Fix A',
-            pull_request: { merged_at: '2026-06-10T00:00:00Z' },
-          },
-          {
-            number: 502,
-            title: 'Fix B',
-            pull_request: { merged_at: '2026-06-11T00:00:00Z' },
-          },
+          { number: 501, title: 'Fix A', pull_request: { merged_at: '2026-06-10T00:00:00Z' } },
+          { number: 502, title: 'Fix B', pull_request: { merged_at: '2026-06-11T00:00:00Z' } },
         ],
       }),
     });
-    // PR 501 files: network error
     mockFetch.mockRejectedValueOnce(new Error('timeout'));
-    // PR 502 files: touches hooks
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => [{ filename: 'src/hooks/index.ts' }],

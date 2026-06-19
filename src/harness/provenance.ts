@@ -78,21 +78,22 @@ export async function fetchProvenanceLinks(
     process.env['GITHUB_API_TOKEN'];
   if (!tok) return [];
 
-  // GitHub date search uses YYYY-MM-DD; use >= so same-day captures are included
+  // Use YYYY-MM-DD..YYYY-MM-DD range syntax (documented GitHub search range qualifier)
   const sinceDate = since.slice(0, 10);
   const untilDate = until.slice(0, 10);
 
   // Fetch merged PRs in the autogent repo within the date range.
   // per_page=50 is best-effort; intervals with >50 merged PRs may silently
   // miss candidates (acceptable for provenance use-case per issue spec).
+  // Sorted by merged ascending so the oldest (most likely causal) PRs are kept.
   const q = encodeURIComponent(
-    `repo:JackywithaWhiteDog/autogent is:pr is:merged merged:>=${sinceDate} merged:<=${untilDate}`,
+    `repo:JackywithaWhiteDog/autogent is:pr is:merged merged:${sinceDate}..${untilDate}`,
   );
 
   let items: GitHubSearchItem[];
   try {
     const result = await ghGet<GitHubSearchResult>(
-      `/search/issues?q=${q}&per_page=50&sort=updated&order=desc`,
+      `/search/issues?q=${q}&per_page=50&sort=updated&order=asc`,
       tok,
     );
     items = result.items ?? [];
