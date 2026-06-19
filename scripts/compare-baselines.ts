@@ -110,7 +110,7 @@ function shortDate(capturedAt: unknown): string {
 function shortHash(hash: string | undefined): string {
   if (!hash || hash === "unknown") return "unknown";
   const hex = hash.replace(/^sha256:/, "");
-  return hex.slice(0, 15) + "…";
+  return hex.slice(0, 15) + "\u2026";
 }
 
 /** Percent-change string, e.g. "+12.3%" or "-5.0%". */
@@ -132,8 +132,8 @@ function deltaStr(a: number, b: number): string {
 function severityIcon(a: number, b: number): string {
   if (a === 0) return "";
   const pct = Math.abs(((b - a) / a) * 100);
-  if (pct >= 10) return " 🔴";
-  if (pct >= 5) return " 🟡";
+  if (pct >= 10) return " \uD83D\uDD34";
+  if (pct >= 5) return " \uD83D\DFE1";
   return "";
 }
 
@@ -147,7 +147,7 @@ function numRow(
   valB: number | undefined,
   unit = ""
 ): string {
-  const na = "—";
+  const na = "\u2014";
   const fmtVal = (v: number) =>
     v.toLocaleString() + (unit ? ` ${unit}` : "");
   const aStr = valA !== undefined ? fmtVal(valA) : na;
@@ -182,13 +182,13 @@ function hashRow(
   const knownA = hA && hA !== "unknown";
   const knownB = hB && hB !== "unknown";
   if (knownA && knownB) {
-    delta = hA === hB ? "✅ unchanged" : "⚠️ changed";
+    delta = hA === hB ? "\u2705 unchanged" : "\u26A0\uFE0F changed";
   } else if (!knownA && knownB) {
     delta = "new";
   } else if (knownA && !knownB) {
     delta = "removed";
   } else {
-    delta = "—";
+    delta = "\u2014";
   }
   return `| ${label} | \`${sA}\` | \`${sB}\` | ${delta} |`;
 }
@@ -343,18 +343,18 @@ function generateMarkdownReport(
       if (change.type === "added" && change.after) {
         const m = change.after;
         lines.push(
-          `- ✅ **Added**: \`${m.id}\` — state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`
+          `- \u2705 **Added**: \`${m.id}\` \u2014 state: ${m.state}, ctx: ${m.contextWindow.toLocaleString()} tokens`
         );
       } else if (change.type === "removed" && change.before) {
         const m = change.before;
-        lines.push(`- ❌ **Removed**: \`${m.id}\` — was state: ${m.state}`);
+        lines.push(`- \u274C **Removed**: \`${m.id}\` \u2014 was state: ${m.state}`);
       } else if (
         change.type === "state_changed" &&
         change.before &&
         change.after
       ) {
         lines.push(
-          `- ⚠️ **State changed**: \`${change.modelId}\` — ${change.before.state} → ${change.after.state}`
+          `- \u26A0\uFE0F **State changed**: \`${change.modelId}\` \u2014 ${change.before.state} \u2192 ${change.after.state}`
         );
       } else if (
         change.type === "context_window_changed" &&
@@ -362,7 +362,7 @@ function generateMarkdownReport(
         change.after
       ) {
         lines.push(
-          `- ⚠️ **Context window**: \`${change.modelId}\` — ${change.before.contextWindow.toLocaleString()} → ${change.after.contextWindow.toLocaleString()} tokens`
+          `- \u26A0\uFE0F **Context window**: \`${change.modelId}\` \u2014 ${change.before.contextWindow.toLocaleString()} \u2192 ${change.after.contextWindow.toLocaleString()} tokens`
         );
       }
     }
@@ -394,12 +394,12 @@ function generateMarkdownReport(
     lines.push("");
 
     if (!expA) {
-      lines.push(`> ⚠️ **New experiment** — no baseline to compare.`);
+      lines.push(`> \u26A0\uFE0F **New experiment** \u2014 no baseline to compare.`);
       lines.push("");
       continue;
     }
     if (!expB) {
-      lines.push(`> ⚠️ **Experiment removed** — no current data.`);
+      lines.push(`> \u26A0\uFE0F **Experiment removed** \u2014 no current data.`);
       lines.push("");
       continue;
     }
@@ -422,11 +422,11 @@ function generateMarkdownReport(
       const mB = expB.metrics[key];
       if (mA && !mB) {
         lines.push(
-          `| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | — | removed |`
+          `| ${key} | ${mA.value.toLocaleString()} ${mA.unit} | \u2014 | removed |`
         );
       } else if (!mA && mB) {
         lines.push(
-          `| ${key} | — | ${mB.value.toLocaleString()} ${mB.unit} | new |`
+          `| ${key} | \u2014 | ${mB.value.toLocaleString()} ${mB.unit} | new |`
         );
       } else if (mA && mB) {
         const delta =
@@ -440,31 +440,50 @@ function generateMarkdownReport(
     lines.push("");
   }
 
+  // ── Possible causes (provenance linking) ────────────────────────────────
+  if (snapB.possibleCauses && snapB.possibleCauses.length > 0) {
+    lines.push(`## Possible Causes`);
+    lines.push("");
+    lines.push(
+      "Autogent PRs merged between these baselines that touched monitored paths:"
+    );
+    lines.push("");
+    for (const cause of snapB.possibleCauses) {
+      const repoPath = cause.pr.replace("#", "/pull/");
+      const url = `https://github.com/${repoPath}`;
+      const paths = cause.touchedPaths.join(", ");
+      lines.push(
+        `- [\`${cause.pr}\`](${url}) \u2014 **${cause.title}** (merged ${cause.mergedAt}) \`[${paths}]\``
+      );
+    }
+    lines.push("");
+  }
+
   // ── Overall assessment ───────────────────────────────────────────────────
   lines.push("---");
   lines.push("");
   if (report.hasRegressions) {
     lines.push(
-      "🔴 **Regression detected** — one or more metrics changed by >10%."
+      "\uD83D\uDD34 **Regression detected** \u2014 one or more metrics changed by >10%."
     );
   } else if (report.changes.some((c) => c.severity === "warning")) {
-    lines.push("🟡 **Warning** — one or more metrics changed by 5–10%.");
+    lines.push("\uD83D\DFE1 **Warning** \u2014 one or more metrics changed by 5\u201310%.");
   } else {
     lines.push(
-      "✅ **No regression** — all metric changes within the 5% info threshold."
+      "\u2705 **No regression** \u2014 all metric changes within the 5% info threshold."
     );
   }
   lines.push("");
   lines.push("| Severity | Threshold |");
-  lines.push("|----------|-----------|");
-  lines.push("| ⚪ Info | < 5% change |");
-  lines.push("| 🟡 Warning | 5–10% change |");
-  lines.push("| 🔴 Regression | > 10% change |");
+  lines.push("|----------|-----------|")
+  lines.push("| \u26AA Info | < 5% change |");
+  lines.push("| \uD83D\DFE1 Warning | 5\u201310% change |");
+  lines.push("| \uD83D\uDD34 Regression | > 10% change |");
   lines.push("");
   lines.push("---");
   lines.push("");
   lines.push(
-    `*Generated by [cli-wrapper-monitor](https://github.com/copilot-autogent/cli-wrapper-monitor) — compare-baselines*`
+    `*Generated by [cli-wrapper-monitor](https://github.com/copilot-autogent/cli-wrapper-monitor) \u2014 compare-baselines*`
   );
 
   return lines.join("\n");

@@ -17,6 +17,7 @@
  *   LIVE_MODE=true GITHUB_TOKEN=<token> npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_REFUSAL=true npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_MODEL_POOL=true npx tsx scripts/capture-autogent-baseline.ts
+ *   SKIP_PROVENANCE=true npx tsx scripts/capture-autogent-baseline.ts
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -31,6 +32,7 @@ import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
 import type { ModelPool } from '../src/harness/types.js';
+import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASELINES_DIR = join(__dirname, '../baselines');
@@ -39,6 +41,7 @@ const AUTOGENT_PATH = process.env['AUTOGENT_PATH'] ?? '/app';
 const LIVE_MODE = process.env['LIVE_MODE'] === 'true';
 const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
 const SKIP_MODEL_POOL = process.env['SKIP_MODEL_POOL'] === 'true';
+const SKIP_PROVENANCE = process.env['SKIP_PROVENANCE'] === 'true';
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -183,7 +186,7 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
       .sort();
     for (const file of files) {
       try {
-        sourceChunks.push(readFileSync(join(dir, file), 'utf-8'));
+        sourceChunks.push(readFileSync(join(file), 'utf-8'));
       } catch {
         readError = true;
       }
@@ -334,7 +337,7 @@ function extractSystemPrompt(autogentPath: string, workspacePath: string): strin
     const content = readFileSync(candidate, 'utf-8');
     const templateMatch = content.match(/`(You are[\s\S]{200,?}?)`/);
     if (templateMatch) return templateMatch[1];
-    const stringMatch = content.match(/"(You are[^"]{200,?})"/);
+    const stringMatch = content.match(/"(You are[^"{200,?})"/);
     if (stringMatch) return stringMatch[1];
   }
 
@@ -503,7 +506,34 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('');
+  // ── Provenance linking ───────────────────────────────────────────────────
+  // Query autogent PRs merged between the previous baseline date and now that
+  // touched src/workspace/, src/tools/builtin/, or src/hooks/. Embed matched
+  // PRs in the snapshot so reports can explain observed deltas.
+  // Requires GITHUB_TOKEN (or GH_TOKEN). Silent no-op when token absent.
+  if (existingBaseline && !SKIP_PROVENANCE) {
+    console.log('Linking provenance...');
+    const causes = await fetchProvenanceLinks(
+      existingBaseline.capturedAt,
+      snapshot.capturedAt,
+    );
+    if (causes.length > 0) {
+      snapshot.possibleCauses = causes;
+      console.log(`Provenance: ${causes.length} matched PR(s):`);
+      for (const c of causes) {
+        console.log(`  ${c.pr}: "${c.title}" (${c.mergedAt}) [${c.touchedPaths.join(', ')}]`);
+      }
+    } else {
+      console.log('Provenance: no matched autogent PRs in date range');
+    }
+    console.log('');
+  } else if (!existingBaseline) {
+    console.log('Provenance linking: skipped (no prior baseline)');
+    console.log('');
+  } else {
+    console.log('Provenance linking: skipped (SKIP_PROVENANCE=true)');
+    console.log('');
+  }
 
   const savedPath = store.save(snapshot);
   console.log(`Snapshot saved: ${savedPath}`);

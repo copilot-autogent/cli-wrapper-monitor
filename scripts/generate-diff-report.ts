@@ -13,7 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { resolve, join } from "path";
-import type { MetricSnapshot, ExperimentSnapshot } from "../src/harness/types.js";
+import type { MetricSnapshot } from "../src/harness/types.js";
 
 interface CliArgs {
   baseline: string;
@@ -64,9 +64,9 @@ function pct(a: number, b: number): string {
 function severity(a: number, b: number): string {
   if (a === 0) return "";
   const change = Math.abs(((b - a) / a) * 100);
-  if (change < 5) return "⚪";
-  if (change < 10) return "🟡";
-  return "🔴";
+  if (change < 5) return "\u26AA";
+  if (change < 10) return "\uD83D\DFE1";
+  return "\uD83D\uDD34";
 }
 
 function formatValue(value: number, unit: string): string {
@@ -79,14 +79,14 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
   const baseDate = new Date(baselineSnap.capturedAt).toISOString().slice(0, 10);
   const currDate = new Date(currentSnap.capturedAt).toISOString().slice(0, 10);
 
-  lines.push(`# CLI Wrapper Monitor — Diff Report`);
+  lines.push(`# CLI Wrapper Monitor \u2014 Diff Report`);
   lines.push(``);
   lines.push(`| | Value |`);
   lines.push(`|---|---|`);
   lines.push(`| **Baseline** | ${baseDate} (v${baselineSnap.monitorVersion}) |`);
   lines.push(`| **Current** | ${currDate} (v${currentSnap.monitorVersion}) |`);
-  lines.push(`| **Model** | ${baselineSnap.model} → ${currentSnap.model} |`);
-  lines.push(`| **SDK** | ${baselineSnap.sdkVersion} → ${currentSnap.sdkVersion} |`);
+  lines.push(`| **Model** | ${baselineSnap.model} \u2192 ${currentSnap.model} |`);
+  lines.push(`| **SDK** | ${baselineSnap.sdkVersion} \u2192 ${currentSnap.sdkVersion} |`);
   lines.push(``);
 
   // Hash fingerprint change warnings
@@ -105,17 +105,17 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
     baselineSnap.systemPromptHash !== currentSnap.systemPromptHash;
 
   if (binaryChanged || systemPromptChanged) {
-    lines.push(`## ⚠️ Fingerprint Changes`);
+    lines.push(`## \u26A0\uFE0F Fingerprint Changes`);
     lines.push(``);
     if (binaryChanged) {
       const prev = baselineSnap.binaryHash!.slice(0, 15);
       const curr = currentSnap.binaryHash!.slice(0, 15);
-      lines.push(`- **CLI binary changed**: \`${prev}…\` → \`${curr}…\``);
+      lines.push(`- **CLI binary changed**: \`${prev}\u2026\` \u2192 \`${curr}\u2026\``);
     }
     if (systemPromptChanged) {
       const prev = baselineSnap.systemPromptHash!.slice(0, 15);
       const curr = currentSnap.systemPromptHash!.slice(0, 15);
-      lines.push(`- **System prompt changed**: \`${prev}…\` → \`${curr}…\``);
+      lines.push(`- **System prompt changed**: \`${prev}\u2026\` \u2192 \`${curr}\u2026\``);
     }
     lines.push(``);
   }
@@ -130,14 +130,14 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
   let hasWarning = false;
 
   for (const expName of experimentNames) {
-    const baseExp: ExperimentSnapshot | undefined = baselineSnap.experiments[expName];
-    const currExp: ExperimentSnapshot | undefined = currentSnap.experiments[expName];
+    const baseExp = baselineSnap.experiments[expName];
+    const currExp = currentSnap.experiments[expName];
 
     lines.push(`## ${expName}`);
     lines.push(``);
 
     if (!baseExp) {
-      lines.push(`> ⚠️ **New experiment** — no baseline to compare against.`);
+      lines.push(`> \u26A0\uFE0F **New experiment** \u2014 no baseline to compare against.`);
       lines.push(``);
       if (currExp) {
         lines.push(`| Metric | Current | Unit |`);
@@ -150,7 +150,7 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
     }
 
     if (!currExp) {
-      lines.push(`> ⚠️ **Experiment removed** — no current data.`);
+      lines.push(`> \u26A0\uFE0F **Experiment removed** \u2014 no current data.`);
       lines.push(``);
       continue;
     }
@@ -161,15 +161,15 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
     for (const [key, baseMetric] of Object.entries(baseExp.metrics)) {
       const currMetric = currExp.metrics[key];
       if (!currMetric) {
-        lines.push(`| ${key} | ${formatValue(baseMetric.value, baseMetric.unit)} | — | removed | ⚠️ |`);
+        lines.push(`| ${key} | ${formatValue(baseMetric.value, baseMetric.unit)} | \u2014 | removed | \u26A0\uFE0F |`);
         continue;
       }
 
       const change = pct(baseMetric.value, currMetric.value);
       const sev = severity(baseMetric.value, currMetric.value);
 
-      if (sev === "🔴") hasRegression = true;
-      if (sev === "🟡") hasWarning = true;
+      if (sev === "\uD83D\uDD34") hasRegression = true;
+      if (sev === "\uD83D\DFE1") hasWarning = true;
 
       lines.push(
         `| ${key} | ${formatValue(baseMetric.value, baseMetric.unit)} | ${formatValue(currMetric.value, currMetric.unit)} | ${change} | ${sev} |`
@@ -179,10 +179,29 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
     // New metrics in current not in baseline
     for (const [key, currMetric] of Object.entries(currExp.metrics)) {
       if (!baseExp.metrics[key]) {
-        lines.push(`| ${key} | — | ${formatValue(currMetric.value, currMetric.unit)} | new | ⚪ |`);
+        lines.push(`| ${key} | \u2014 | ${formatValue(currMetric.value, currMetric.unit)} | new | \u26AA |`);
       }
     }
 
+    lines.push(``);
+  }
+
+  // ── Possible causes (provenance linking) ────────────────────────────────
+  if (currentSnap.possibleCauses && currentSnap.possibleCauses.length > 0) {
+    lines.push(`## Possible Causes`);
+    lines.push(``);
+    lines.push(
+      "Autogent PRs merged between these baselines that touched monitored paths:"
+    );
+    lines.push(``);
+    for (const cause of currentSnap.possibleCauses) {
+      const repoPath = cause.pr.replace("#", "/pull/");
+      const url = `https://github.com/${repoPath}`;
+      const paths = cause.touchedPaths.join(", ");
+      lines.push(
+        `- [\`${cause.pr}\`](${url}) \u2014 **${cause.title}** (merged ${cause.mergedAt}) \`[${paths}]\``
+      );
+    }
     lines.push(``);
   }
 
@@ -190,18 +209,18 @@ function generateDiffReport(baselineSnap: MetricSnapshot, currentSnap: MetricSna
   lines.push(`## Summary`);
   lines.push(``);
   if (hasRegression) {
-    lines.push(`🔴 **Regression detected** — one or more metrics changed by >10%.`);
+    lines.push(`\uD83D\uDD34 **Regression detected** \u2014 one or more metrics changed by >10%.`);
   } else if (hasWarning) {
-    lines.push(`🟡 **Warning** — one or more metrics changed by 5–10%.`);
+    lines.push(`\uD83D\DFE1 **Warning** \u2014 one or more metrics changed by 5\u201310%.`);
   } else {
-    lines.push(`✅ **No regression** — all metric changes are within the 5% info threshold.`);
+    lines.push(`\u2705 **No regression** \u2014 all metric changes are within the 5% info threshold.`);
   }
   lines.push(``);
   lines.push(`| Severity | Threshold |`);
   lines.push(`|----------|-----------|`);
-  lines.push(`| ⚪ Info | < 5% change |`);
-  lines.push(`| 🟡 Warning | 5–10% change |`);
-  lines.push(`| 🔴 Regression | > 10% change |`);
+  lines.push(`| \u26AA Info | < 5% change |`);
+  lines.push(`| \uD83D\DFE1 Warning | 5\u201310% change |`);
+  lines.push(`| \uD83D\uDD34 Regression | > 10% change |`);
   lines.push(``);
   lines.push(`---`);
   lines.push(``);
@@ -215,7 +234,7 @@ function main(): void {
 
   if (baseline === current) {
     console.warn(
-      "⚠️  Baseline and current point to the same file. Run a new snapshot first (npm run experiments), then pass --current path/to/new-snapshot.json."
+      "\u26A0\uFE0F  Baseline and current point to the same file. Run a new snapshot first (npm run experiments), then pass --current path/to/new-snapshot.json."
     );
     console.warn(`   Baseline: ${baseline}`);
     console.warn(`   Current:  ${current}`);
