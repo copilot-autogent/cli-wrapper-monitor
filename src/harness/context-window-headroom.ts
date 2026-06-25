@@ -33,16 +33,17 @@ export function computeContextWindowHeadroom(
   return modelPool.models.map((model) => {
     const cw = model.contextWindow;
 
-    // contextWindow === 0 means the SDK did not report the window size.
-    // We cannot compute headroom, and it would be misleading to show the model
-    // as 'ok' with negative headroomTokens. Treat as 'unknown'.
-    if (cw === 0) {
+    // contextWindow === 0 (or invalid: negative, NaN, Infinity) means the SDK
+    // did not report the window size. We cannot compute headroom, and it would
+    // be misleading to show the model as 'ok' with negative headroomTokens.
+    // Treat as 'unknown'.
+    if (!(cw > 0) || !isFinite(cw)) {
       return {
         modelId: model.id,
         state: model.state,
-        contextWindow: 0,
+        contextWindow: cw,
         systemPromptTokens,
-        headroomTokens: -systemPromptTokens,
+        headroomTokens: cw > 0 ? cw - systemPromptTokens : -systemPromptTokens,
         promptFillPct: 0,
         status: 'unknown' as HeadroomStatus,
       };

@@ -47,7 +47,7 @@ export interface ContextWindowHeadroomEntry {
   systemPromptTokens: number;
   /** contextWindow - systemPromptTokens; negative when contextWindow is 0 (unknown) */
   headroomTokens: number;
-  /** (systemPromptTokens / contextWindow) * 100, rounded to 1 decimal; 0 when contextWindow is 0 */
+  /** (systemPromptTokens / contextWindow) * 100, rounded to 2 decimal places; 0 when contextWindow is 0 */
   promptFillPct: number;
   /**
    * 'ok' ≤50%, 'high-fill' >50%, 'overflow-risk' >90%.

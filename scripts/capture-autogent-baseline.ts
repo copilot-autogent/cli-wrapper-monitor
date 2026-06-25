@@ -505,7 +505,9 @@ async function main(): Promise<void> {
       console.log(`  Enabled: ${enabled}  Total: ${modelPool.models.length}`);
 
       // Compute context window headroom now that we have both the model pool
-      // and the context-tax token count.
+      // and the context-tax token count. This is safe here because
+      // runner.runAll() (which populates snapshot.experiments) runs before
+      // the model pool capture block, so the context-tax metrics are available.
       const systemPromptTokens = extractSystemPromptTokens(snapshot);
       if (systemPromptTokens > 0) {
         snapshot.contextWindowHeadroom = computeContextWindowHeadroom(
