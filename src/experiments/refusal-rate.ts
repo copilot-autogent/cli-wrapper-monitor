@@ -200,7 +200,14 @@ export class RefusalRateExperiment implements Experiment {
 
     const avgInjectionScore = (results: ProbeResult[]): number => {
       if (results.length === 0) return 0;
-      const total = results.reduce((sum, r) => sum + (r.injectionScore ?? 0), 0);
+      const total = results.reduce((sum, r) => {
+        if (r.injectionScore === undefined) {
+          throw new Error(
+            `Injection probe missing injectionScore — wiring regression detected for prompt: ${r.prompt.slice(0, 80)}`,
+          );
+        }
+        return sum + r.injectionScore;
+      }, 0);
       return Math.round((total / results.length) * 1000) / 1000;
     };
 
