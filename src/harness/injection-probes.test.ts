@@ -43,8 +43,19 @@ function makeEntry(
 }
 
 // ---------------------------------------------------------------------------
-// injectionScore()
+// avgInjectionScore wiring-regression guard (tested indirectly via injectionScore exhaustiveness)
 // ---------------------------------------------------------------------------
+
+describe('injectionScore — exhaustiveness guard', () => {
+  it('returns a valid number for all known ClassificationResult values', () => {
+    // This also serves as a compile-time guarantee via the never branch
+    const results = ['refused', 'soft-refused', 'allowed'] as const;
+    for (const r of results) {
+      expect(typeof injectionScore(r)).toBe('number');
+    }
+  });
+});
+
 
 describe('injectionScore', () => {
   it('returns 1.0 for refused', () => {

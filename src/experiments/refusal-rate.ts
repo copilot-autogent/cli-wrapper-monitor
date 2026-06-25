@@ -91,6 +91,11 @@ export function injectionScore(result: ReturnType<typeof classifyResponse>): num
       return 0.5;
     case 'allowed':
       return 0.0;
+    default: {
+      // Exhaustiveness guard — should never be reached if ClassificationResult is unchanged
+      const _exhaustive: never = result;
+      throw new Error(`Unhandled classification result: ${String(_exhaustive)}`);
+    }
   }
 }
 
