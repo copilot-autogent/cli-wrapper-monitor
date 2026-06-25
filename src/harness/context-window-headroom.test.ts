@@ -65,11 +65,11 @@ describe('computeContextWindowHeadroom', () => {
     expect(entry.headroomTokens).toBe(200_000 - 45_887);
   });
 
-  it('computes promptFillPct correctly (rounded to 1 decimal)', () => {
+  it('computes promptFillPct correctly (rounded to 2 decimal places)', () => {
     const pool = makePool([{ id: 'model', contextWindow: 200_000 }]);
     const [entry] = computeContextWindowHeadroom(pool, 45_887);
-    // 45887 / 200000 * 100 = 22.9435 → 22.9
-    expect(entry.promptFillPct).toBe(22.9);
+    // 45887 / 200000 * 100 = 22.9435 → 22.94 (2dp)
+    expect(entry.promptFillPct).toBe(22.94);
   });
 
   it('assigns status ok for ≤50% fill', () => {
@@ -168,7 +168,7 @@ describe('formatHeadroomTable', () => {
     const pool = makePool([{ id: 'model', contextWindow: 200_000 }]);
     const entries = computeContextWindowHeadroom(pool, 45_887);
     const table = formatHeadroomTable(entries);
-    expect(table).toContain('22.9%');
+    expect(table).toContain('22.94%');
   });
 
   it('shows OK status for low-fill model', () => {
@@ -258,11 +258,18 @@ describe('detectFirstTimeCrossings', () => {
     expect(detectFirstTimeCrossings(current, undefined)).toHaveLength(0);
   });
 
-  it('returns flagged model when no previous snapshot exists', () => {
+  it('returns empty when previous is undefined (first run after rollout)', () => {
+    // No prior headroom data → avoid alerting on all currently-flagged models.
     const current = [makeEntry('small', 'high-fill')];
-    const crossings = detectFirstTimeCrossings(current, undefined);
+    expect(detectFirstTimeCrossings(current, undefined)).toHaveLength(0);
+  });
+
+  it('returns flagged model when previous is an empty array (pool known, model is new)', () => {
+    const current = [makeEntry('new-model', 'high-fill')];
+    const previous: ContextWindowHeadroomEntry[] = [];
+    const crossings = detectFirstTimeCrossings(current, previous);
     expect(crossings).toHaveLength(1);
-    expect(crossings[0].modelId).toBe('small');
+    expect(crossings[0].modelId).toBe('new-model');
   });
 
   it('returns flagged model not present in previous snapshot', () => {
@@ -442,7 +449,7 @@ describe('sendHeadroomAlertWebhook', () => {
     await sendHeadroomAlertWebhook([makeCrossing('model', 64_000, 71.7)]);
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
-    expect(body.content).toContain('71.7%');
+    expect(body.content).toContain('71.70%');
   });
 
   it('POST body includes CI run URL when provided', async () => {
@@ -478,7 +485,7 @@ describe('sendHeadroomAlertWebhook', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('truncates content at 2000 chars when many crossings', async () => {
+  it('truncates content at 2000 code points when many crossings', async () => {
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     const crossings = Array.from({ length: 50 }, (_, i) =>
       makeCrossing(`model-${'x'.repeat(60)}-${i}`, 64_000, 71.7),
@@ -486,6 +493,6 @@ describe('sendHeadroomAlertWebhook', () => {
     await sendHeadroomAlertWebhook(crossings, 'https://github.com/' + 'x'.repeat(1000));
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
-    expect(body.content.length).toBeLessThanOrEqual(2000);
+    expect([...body.content].length).toBeLessThanOrEqual(2000);
   });
 });

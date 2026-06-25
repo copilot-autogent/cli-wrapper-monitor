@@ -49,9 +49,11 @@ export function computeContextWindowHeadroom(
     }
 
     const headroomTokens = cw - systemPromptTokens;
-    // Use raw percentage for threshold comparisons; round separately for display.
+    // Use raw percentage for threshold comparisons; round to 2 decimal places
+    // for display so boundary cases (e.g. 90.04% vs 89.96%) are visibly
+    // distinguishable even though both round to "90.0%" at 1 decimal place.
     const rawFillPct = (systemPromptTokens / cw) * 100;
-    const promptFillPct = Math.round(rawFillPct * 10) / 10;
+    const promptFillPct = Math.round(rawFillPct * 100) / 100;
 
     let status: HeadroomStatus;
     if (rawFillPct > HEADROOM_OVERFLOW_RISK_PCT) {
@@ -116,7 +118,7 @@ export function formatHeadroomTable(entries: ContextWindowHeadroomEntry[]): stri
     const model = e.modelId.padEnd(C1);
     const cw = e.contextWindow.toLocaleString('en-US').padEnd(C2);
     const tokens = e.systemPromptTokens.toLocaleString('en-US').padEnd(C3);
-    const fill = `${e.promptFillPct.toFixed(1)}%`.padEnd(C4);
+    const fill = `${e.promptFillPct.toFixed(2)}%`.padEnd(C4);
     const status = STATUS_LABEL[e.status];
     lines.push(`  ${model}  ${cw}  ${tokens}  ${fill}  ${status}`);
   }
@@ -154,6 +156,15 @@ export function formatHeadroomTable(entries: ContextWindowHeadroomEntry[]): stri
  * in the previous snapshot (or didn't exist there), but IS now flagged
  * ('high-fill' or 'overflow-risk').
  *
+ * When `previous` is `undefined` (no prior headroom data exists, e.g. first
+ * run after rollout or the prior baseline pre-dates this feature), returns an
+ * empty array.  This avoids a spam burst where all currently-flagged models
+ * appear as "new crossings" after the feature is first deployed.
+ *
+ * When `previous` is a defined array (even empty), newly-added pool models
+ * that are already flagged ARE included — they represent a genuine transition
+ * into a dangerous state.
+ *
  * Only enabled models (state === 'enabled') are included: disabled and
  * unconfigured models have no operational impact and would produce noisy alerts.
  */
@@ -161,8 +172,11 @@ export function detectFirstTimeCrossings(
   current: ContextWindowHeadroomEntry[],
   previous: ContextWindowHeadroomEntry[] | undefined,
 ): ContextWindowHeadroomEntry[] {
+  // No prior headroom data → first run after rollout; do not alert.
+  if (previous === undefined) return [];
+
   const prevMap = new Map<string, HeadroomStatus>(
-    (previous ?? []).map((e) => [e.modelId, e.status]),
+    previous.map((e) => [e.modelId, e.status]),
   );
 
   return current.filter((e) => {
@@ -171,7 +185,7 @@ export function detectFirstTimeCrossings(
     const isFlagged = e.status === 'high-fill' || e.status === 'overflow-risk';
     if (!isFlagged) return false;
     const prevStatus = prevMap.get(e.modelId);
-    // Newly crossed = was 'ok'/'unknown' before OR didn't exist in previous baseline.
+    // Newly crossed = was 'ok'/'unknown' before OR is a new model in the pool.
     return prevStatus === undefined || prevStatus === 'ok' || prevStatus === 'unknown';
   });
 }
@@ -209,7 +223,7 @@ export async function sendHeadroomAlertWebhook(
 
   const modelLines = crossings.map((e) => {
     const label = e.status === 'overflow-risk' ? '🚨 OVERFLOW RISK' : '⚠️  HIGH FILL';
-    return `• **${e.modelId}**: ${e.contextWindow.toLocaleString('en-US')} ctx / ${e.systemPromptTokens.toLocaleString('en-US')} prompt = **${e.promptFillPct.toFixed(1)}%** ${label}`;
+    return `• **${e.modelId}**: ${e.contextWindow.toLocaleString('en-US')} ctx / ${e.systemPromptTokens.toLocaleString('en-US')} prompt = **${e.promptFillPct.toFixed(2)}%** ${label}`;
   });
 
   const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
@@ -219,8 +233,10 @@ export async function sendHeadroomAlertWebhook(
     `⚠️ **HEADROOM ALERT** — system prompt now exceeds 50% of context window for ${crossings.length} model(s)\n` +
     modelLines.join('\n') +
     ciLine;
-  if (content.length > DISCORD_MAX_CONTENT) {
-    content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
+  // Truncate on Unicode code-point boundaries to avoid splitting surrogate pairs
+  // (emoji like 🚨/⚠️ are represented as surrogate pairs in UTF-16 strings).
+  if ([...content].length > DISCORD_MAX_CONTENT) {
+    content = [...content].slice(0, DISCORD_MAX_CONTENT - 1).join('') + '…';
   }
 
   try {
