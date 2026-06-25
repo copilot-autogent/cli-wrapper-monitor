@@ -202,7 +202,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
       }
     }
     lines.push("");
-  } else if (snapA.toolSchemas !== undefined || snapB.toolSchemas !== undefined) {
+  } else if (snapA.toolSchemas !== undefined && snapB.toolSchemas !== undefined) {
     lines.push(`## Tool Schema Changes`, "", "> No tool schema changes detected.", "");
   }
 
