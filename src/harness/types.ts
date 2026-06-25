@@ -34,20 +34,25 @@ export interface ModelPool {
 }
 
 /** Fill-status tiers for a model's context window headroom */
-export type HeadroomStatus = 'ok' | 'high-fill' | 'overflow-risk';
+export type HeadroomStatus = 'ok' | 'high-fill' | 'overflow-risk' | 'unknown';
 
 /** Context window headroom computed for a single model */
 export interface ContextWindowHeadroomEntry {
   modelId: string;
-  /** Total context window size in tokens */
+  /** policy.state from the model pool: 'enabled' | 'disabled' | 'unconfigured' */
+  state: string;
+  /** Total context window size in tokens; 0 means context window size is unavailable */
   contextWindow: number;
   /** System prompt token count used for this measurement */
   systemPromptTokens: number;
-  /** contextWindow - systemPromptTokens */
+  /** contextWindow - systemPromptTokens; negative when contextWindow is 0 (unknown) */
   headroomTokens: number;
-  /** (systemPromptTokens / contextWindow) * 100, rounded to 1 decimal */
+  /** (systemPromptTokens / contextWindow) * 100, rounded to 1 decimal; 0 when contextWindow is 0 */
   promptFillPct: number;
-  /** 'ok' ≤50%, 'high-fill' >50%, 'overflow-risk' >90% */
+  /**
+   * 'ok' ≤50%, 'high-fill' >50%, 'overflow-risk' >90%.
+   * 'unknown' when contextWindow is 0 (size unavailable from the SDK).
+   */
   status: HeadroomStatus;
 }
 

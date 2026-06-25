@@ -7,9 +7,10 @@
  * Thresholds:
  *   promptFillPct > 90%  → 'overflow-risk'  🚨
  *   promptFillPct > 50%  → 'high-fill'      ⚠️
+ *   contextWindow === 0  → 'unknown'        ❓  (SDK did not report window size)
  *   otherwise            → 'ok'             ✅
  *
- * The SIZE ALERT webhook fires when any model NEW crosses the >50% threshold
+ * HEADROOM ALERT fires when any *enabled* model newly crosses the >50% threshold
  * compared to the previous baseline snapshot.
  */
 import type { ModelPool, ContextWindowHeadroomEntry, HeadroomStatus, MetricSnapshot } from './types.js';
@@ -31,9 +32,25 @@ export function computeContextWindowHeadroom(
 ): ContextWindowHeadroomEntry[] {
   return modelPool.models.map((model) => {
     const cw = model.contextWindow;
+
+    // contextWindow === 0 means the SDK did not report the window size.
+    // We cannot compute headroom, and it would be misleading to show the model
+    // as 'ok' with negative headroomTokens. Treat as 'unknown'.
+    if (cw === 0) {
+      return {
+        modelId: model.id,
+        state: model.state,
+        contextWindow: 0,
+        systemPromptTokens,
+        headroomTokens: -systemPromptTokens,
+        promptFillPct: 0,
+        status: 'unknown' as HeadroomStatus,
+      };
+    }
+
     const headroomTokens = cw - systemPromptTokens;
     // Use raw percentage for threshold comparisons; round separately for display.
-    const rawFillPct = cw > 0 ? (systemPromptTokens / cw) * 100 : 0;
+    const rawFillPct = (systemPromptTokens / cw) * 100;
     const promptFillPct = Math.round(rawFillPct * 10) / 10;
 
     let status: HeadroomStatus;
@@ -47,6 +64,7 @@ export function computeContextWindowHeadroom(
 
     return {
       modelId: model.id,
+      state: model.state,
       contextWindow: cw,
       systemPromptTokens,
       headroomTokens,
@@ -60,6 +78,7 @@ const STATUS_LABEL: Record<HeadroomStatus, string> = {
   ok: '✅ OK',
   'high-fill': '⚠️  HIGH FILL',
   'overflow-risk': '🚨 OVERFLOW RISK',
+  unknown: '❓ UNKNOWN',
 };
 
 /**
@@ -128,10 +147,15 @@ export function formatHeadroomTable(entries: ContextWindowHeadroomEntry[]): stri
 }
 
 /**
- * Return models that newly crossed the >50% fill threshold compared to a
- * prior snapshot.  "Newly crossed" means the model was NOT flagged (status
- * was 'ok') in the previous snapshot (or didn't exist there), but IS now
- * flagged ('high-fill' or 'overflow-risk').
+ * Return *enabled* models that newly crossed the >50% fill threshold compared
+ * to a prior snapshot.
+ *
+ * "Newly crossed" means the model was NOT flagged (status was 'ok' or 'unknown')
+ * in the previous snapshot (or didn't exist there), but IS now flagged
+ * ('high-fill' or 'overflow-risk').
+ *
+ * Only enabled models (state === 'enabled') are included: disabled and
+ * unconfigured models have no operational impact and would produce noisy alerts.
  */
 export function detectFirstTimeCrossings(
   current: ContextWindowHeadroomEntry[],
@@ -142,11 +166,13 @@ export function detectFirstTimeCrossings(
   );
 
   return current.filter((e) => {
+    // Only alert for enabled models to avoid noise from disabled/unconfigured entries.
+    if (e.state !== 'enabled') return false;
     const isFlagged = e.status === 'high-fill' || e.status === 'overflow-risk';
     if (!isFlagged) return false;
     const prevStatus = prevMap.get(e.modelId);
-    // Newly crossed = was 'ok' before OR didn't exist in previous baseline
-    return prevStatus === undefined || prevStatus === 'ok';
+    // Newly crossed = was 'ok'/'unknown' before OR didn't exist in previous baseline.
+    return prevStatus === undefined || prevStatus === 'ok' || prevStatus === 'unknown';
   });
 }
 

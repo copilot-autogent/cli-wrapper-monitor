@@ -14,10 +14,10 @@ import type { ContextWindowHeadroomEntry, ModelPool, MetricSnapshot } from './ty
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makePool(models: Array<{ id: string; contextWindow: number }>): ModelPool {
+function makePool(models: Array<{ id: string; contextWindow: number; state?: string }>): ModelPool {
   return {
     capturedAt: '2026-01-01T00:00:00.000Z',
-    models: models.map((m) => ({ id: m.id, state: 'enabled', contextWindow: m.contextWindow })),
+    models: models.map((m) => ({ id: m.id, state: m.state ?? 'enabled', contextWindow: m.contextWindow })),
   };
 }
 
@@ -93,11 +93,13 @@ describe('computeContextWindowHeadroom', () => {
     expect(entry.promptFillPct).toBeGreaterThan(90);
   });
 
-  it('handles zero context window without throwing', () => {
+  it('handles zero context window: returns unknown status', () => {
     const pool = makePool([{ id: 'broken-model', contextWindow: 0 }]);
     expect(() => computeContextWindowHeadroom(pool, 45_887)).not.toThrow();
     const [entry] = computeContextWindowHeadroom(pool, 45_887);
     expect(entry.promptFillPct).toBe(0);
+    expect(entry.status).toBe('unknown');
+    expect(entry.headroomTokens).toBe(-45_887);
   });
 
   it('attaches systemPromptTokens from the argument onto every entry', () => {
@@ -109,6 +111,16 @@ describe('computeContextWindowHeadroom', () => {
     for (const e of entries) {
       expect(e.systemPromptTokens).toBe(45_887);
     }
+  });
+
+  it('propagates state from the model pool entry', () => {
+    const pool = makePool([
+      { id: 'enabled-model', contextWindow: 200_000, state: 'enabled' },
+      { id: 'disabled-model', contextWindow: 128_000, state: 'disabled' },
+    ]);
+    const entries = computeContextWindowHeadroom(pool, 45_887);
+    expect(entries.find((e) => e.modelId === 'enabled-model')?.state).toBe('enabled');
+    expect(entries.find((e) => e.modelId === 'disabled-model')?.state).toBe('disabled');
   });
 
   it('marks exactly 50% fill as ok (not high-fill)', () => {
@@ -227,10 +239,12 @@ describe('formatHeadroomTable', () => {
 describe('detectFirstTimeCrossings', () => {
   function makeEntry(
     modelId: string,
-    status: 'ok' | 'high-fill' | 'overflow-risk',
+    status: 'ok' | 'high-fill' | 'overflow-risk' | 'unknown',
+    state = 'enabled',
   ): ContextWindowHeadroomEntry {
     return {
       modelId,
+      state,
       contextWindow: 200_000,
       systemPromptTokens: 45_887,
       headroomTokens: 154_113,
@@ -263,6 +277,18 @@ describe('detectFirstTimeCrossings', () => {
     const current = [makeEntry('small', 'high-fill')];
     const previous = [makeEntry('small', 'high-fill')];
     const crossings = detectFirstTimeCrossings(current, previous);
+    expect(crossings).toHaveLength(0);
+  });
+
+  it('does NOT alert for disabled models that cross the threshold', () => {
+    const current = [makeEntry('disabled-small', 'high-fill', 'disabled')];
+    const crossings = detectFirstTimeCrossings(current, undefined);
+    expect(crossings).toHaveLength(0);
+  });
+
+  it('does NOT alert for unconfigured models that cross the threshold', () => {
+    const current = [makeEntry('unconfigured', 'overflow-risk', 'unconfigured')];
+    const crossings = detectFirstTimeCrossings(current, undefined);
     expect(crossings).toHaveLength(0);
   });
 
@@ -337,10 +363,12 @@ describe('sendHeadroomAlertWebhook', () => {
     contextWindow: number,
     fill: number,
     status: 'high-fill' | 'overflow-risk' = 'high-fill',
+    state = 'enabled',
   ): ContextWindowHeadroomEntry {
     const systemPromptTokens = Math.round((contextWindow * fill) / 100);
     return {
       modelId,
+      state,
       contextWindow,
       systemPromptTokens,
       headroomTokens: contextWindow - systemPromptTokens,
