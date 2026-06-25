@@ -262,30 +262,60 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
 function extractToolDefs(autogentPath: string): ToolDef[] {
   const tools: ToolDef[] = [];
 
-  /** Extract an inline JSON object following a pattern like `parameters: {…}` from JS source. */
-  function extractParametersJson(content: string): unknown | undefined {
-    const idx = content.indexOf('parameters:');
-    if (idx === -1) return undefined;
-    // Walk forward to find the opening brace
-    let start = idx + 'parameters:'.length;
-    while (start < content.length && content[start] !== '{') start++;
-    if (start >= content.length) return undefined;
-    // Walk forward counting braces to find the matching close
-    let depth = 0;
-    let end = start;
-    for (; end < content.length; end++) {
-      if (content[end] === '{') depth++;
-      else if (content[end] === '}') {
-        depth--;
-        if (depth === 0) break;
+  /** Extract required parameter names and property names from JS/TS source content.
+   *
+   * Uses targeted regex extraction rather than JSON.parse, which breaks on
+   * compiled JS object literals with unquoted keys, single-quote strings,
+   * and trailing commas. String-aware brace counting prevents `{`/`}` inside
+   * schema descriptions from desync-ing the depth counter.
+   */
+  function extractParamInfo(content: string): { required: string[]; propNames: string[] } {
+    // Extract required array: `required: ["a", "b"]` or `required: ['a', 'b']`
+    const requiredMatch = content.match(/\brequired\s*:\s*\[([^\]]*)\]/);
+    const required: string[] = [];
+    if (requiredMatch) {
+      for (const m of requiredMatch[1].matchAll(/['"]([^'"]+)['"]/g)) {
+        required.push(m[1]);
       }
     }
-    if (depth !== 0) return undefined;
-    try {
-      return JSON.parse(content.slice(start, end + 1)) as unknown;
-    } catch {
-      return undefined;
+
+    // Extract top-level property names from `properties: { name: { ... }, ... }`
+    const propNames: string[] = [];
+    const propsSearch = content.search(/\bproperties\s*:/);
+    if (propsSearch !== -1) {
+      const braceStart = content.indexOf('{', propsSearch);
+      if (braceStart !== -1) {
+        let depth = 0;
+        let i = braceStart;
+        let inString = false;
+        let strChar = '';
+        while (i < content.length) {
+          const ch = content[i];
+          if (inString) {
+            if (ch === strChar && content[i - 1] !== '\\') inString = false;
+          } else if (ch === '"' || ch === "'") {
+            inString = true;
+            strChar = ch;
+          } else if (ch === '{') {
+            depth++;
+          } else if (ch === '}') {
+            depth--;
+            if (depth === 0) break;
+          } else if (depth === 1) {
+            // At depth 1 inside properties, match bare identifier keys: `name:`
+            const slice = content.slice(i);
+            const keyMatch = slice.match(/^([a-zA-Z_$][\w$]*)\s*:/);
+            if (keyMatch && keyMatch[1] !== 'type' && keyMatch[1] !== 'description' && keyMatch[1] !== 'default') {
+              propNames.push(keyMatch[1]);
+              i += keyMatch[0].length - 1;
+            }
+          }
+          i++;
+        }
+      }
     }
+
+    return { required: required.sort(), propNames: propNames.sort() };
   }
 
   // Strategy 1: read from dist/tools/builtin/
@@ -299,10 +329,11 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
         if (nameMatch && descMatch) {
+          const { required, propNames } = extractParamInfo(content);
           tools.push({
             name: nameMatch[1],
             description: descMatch[1],
-            parameters: extractParametersJson(content),
+            parameters: { required, propNames },
           });
         }
       }
@@ -325,10 +356,11 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
         if (nameMatch && descMatch) {
+          const { required, propNames } = extractParamInfo(content);
           tools.push({
             name: nameMatch[1],
             description: descMatch[1],
-            parameters: extractParametersJson(content),
+            parameters: { required, propNames },
           });
         }
       }
@@ -351,13 +383,15 @@ function buildToolSchemas(
   const schemas: Record<string, ToolParamSchema> = {};
 
   for (const tool of tools) {
-    const params = tool.parameters as Record<string, unknown> | undefined;
-    const properties = (params?.['properties'] as Record<string, unknown> | undefined) ?? {};
-    const required = Array.isArray(params?.['required'])
-      ? (params!['required'] as string[]).slice().sort()
-      : [];
+    // Parameters are now stored as { required: string[]; propNames: string[] }
+    // from the regex-based extractor in extractToolDefs.
+    const params = tool.parameters as { required?: string[]; propNames?: string[] } | undefined;
+    const required = params?.required ?? [];
+    const propNames = params?.propNames ?? [];
+
+    // Union all known param names (required + all property names from propNames)
+    const allParamNames = [...new Set([...required, ...propNames])].sort();
     const requiredSet = new Set(required);
-    const allParamNames = Object.keys(properties).sort();
     const optionalParams = allParamNames.filter((p) => !requiredSet.has(p));
 
     schemas[tool.name] = {

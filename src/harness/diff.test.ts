@@ -164,6 +164,14 @@ describe('diffToolSchemas', () => {
     expect(diffToolSchemas(undefined, undefined)).toEqual([]);
   });
 
+  it('returns empty array when baseline is undefined (no spam against old baselines)', () => {
+    expect(diffToolSchemas(undefined, { bash: makeSchema() })).toEqual([]);
+  });
+
+  it('returns empty array when current is undefined', () => {
+    expect(diffToolSchemas({ bash: makeSchema() }, undefined)).toEqual([]);
+  });
+
   it('returns empty array when schemas are identical', () => {
     const schema = makeSchema();
     expect(diffToolSchemas({ bash: schema }, { bash: schema })).toEqual([]);

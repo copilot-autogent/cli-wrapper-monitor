@@ -39,14 +39,21 @@ export function diffModelPool(
   return changes;
 }
 
-/** Diff two tool schema maps, returning per-tool change records. */
+/** Diff two tool schema maps, returning per-tool change records.
+ *
+ * Returns an empty array when either map is absent — prevents spurious
+ * add/remove spam when comparing against older baselines that pre-date
+ * schema tracking.
+ */
 export function diffToolSchemas(
   baseline: Record<string, ToolParamSchema> | undefined,
   current: Record<string, ToolParamSchema> | undefined,
 ): ToolSchemaChange[] {
-  if (!baseline && !current) return [];
-  const baseMap = new Map(Object.entries(baseline ?? {}));
-  const currMap = new Map(Object.entries(current ?? {}));
+  // Don't diff when either side lacks schema data — avoids false churn
+  // against pre-feature baselines (every tool would appear as added/removed).
+  if (!baseline || !current) return [];
+  const baseMap = new Map(Object.entries(baseline));
+  const currMap = new Map(Object.entries(current));
   const changes: ToolSchemaChange[] = [];
 
   // Removed tools
@@ -144,8 +151,6 @@ export function diffSnapshots(
   const toolSchemaChanged =
     baseline.toolSchemaHash !== undefined &&
     current.toolSchemaHash !== undefined &&
-    baseline.toolSchemaHash !== 'unknown' &&
-    current.toolSchemaHash !== 'unknown' &&
     baseline.toolSchemaHash !== current.toolSchemaHash;
 
   const toolSchemaChanges = diffToolSchemas(baseline.toolSchemas, current.toolSchemas);
@@ -253,7 +258,7 @@ export function formatDiffReport(report: DiffReport): string {
     }
   }
 
-  // Tool schema changes
+  // Tool schema changes (only shown when BOTH snapshots have schema data)
   if (report.toolSchemaChanges.length > 0) {
     lines.push('', '## Tool Schema Changes', '');
     for (const change of report.toolSchemaChanges) {
@@ -284,7 +289,7 @@ export function formatDiffReport(report: DiffReport): string {
         );
       }
     }
-  } else if (report.baseline.toolSchemas !== undefined || report.current.toolSchemas !== undefined) {
+  } else if (report.baseline.toolSchemas !== undefined && report.current.toolSchemas !== undefined) {
     lines.push('', '## Tool Schema Changes', '', '> No tool schema changes detected.', '');
   }
 
