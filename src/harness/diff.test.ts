@@ -141,3 +141,199 @@ describe('diffSnapshots — other hash tracking', () => {
     expect(diffSnapshots(baseline, current).systemPromptChanged).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// diffToolSchemas
+// ---------------------------------------------------------------------------
+
+import { diffToolSchemas } from './diff.js';
+import type { ToolParamSchema } from './types.js';
+
+function makeSchema(overrides: Partial<ToolParamSchema> = {}): ToolParamSchema {
+  return {
+    parameterCount: 2,
+    requiredParams: ['command'],
+    optionalParams: ['description'],
+    descriptionHash: 'abcdef1234567890',
+    ...overrides,
+  };
+}
+
+describe('diffToolSchemas', () => {
+  it('returns empty array when both maps are undefined', () => {
+    expect(diffToolSchemas(undefined, undefined)).toEqual([]);
+  });
+
+  it('returns empty array when baseline is undefined (no spam against old baselines)', () => {
+    expect(diffToolSchemas(undefined, { bash: makeSchema() })).toEqual([]);
+  });
+
+  it('returns empty array when current is undefined', () => {
+    expect(diffToolSchemas({ bash: makeSchema() }, undefined)).toEqual([]);
+  });
+
+  it('returns empty array when schemas are identical', () => {
+    const schema = makeSchema();
+    expect(diffToolSchemas({ bash: schema }, { bash: schema })).toEqual([]);
+  });
+
+  it('detects added tool', () => {
+    const result = diffToolSchemas({}, { bash: makeSchema() });
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('added');
+    expect(result[0].toolName).toBe('bash');
+    expect(result[0].after).toBeDefined();
+  });
+
+  it('detects removed tool', () => {
+    const result = diffToolSchemas({ bash: makeSchema() }, {});
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('removed');
+    expect(result[0].toolName).toBe('bash');
+    expect(result[0].before).toBeDefined();
+  });
+
+  it('detects added parameter', () => {
+    const before = makeSchema({ parameterCount: 1, requiredParams: ['command'], optionalParams: [] });
+    const after = makeSchema({ parameterCount: 2, requiredParams: ['command'], optionalParams: ['mode'] });
+    const result = diffToolSchemas({ bash: before }, { bash: after });
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('params_changed');
+    expect(result[0].addedParams).toEqual(['mode']);
+    expect(result[0].removedParams).toEqual([]);
+  });
+
+  it('detects removed parameter', () => {
+    const before = makeSchema({ parameterCount: 2, requiredParams: ['command'], optionalParams: ['mode'] });
+    const after = makeSchema({ parameterCount: 1, requiredParams: ['command'], optionalParams: [] });
+    const result = diffToolSchemas({ bash: before }, { bash: after });
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('params_changed');
+    expect(result[0].removedParams).toEqual(['mode']);
+    expect(result[0].addedParams).toEqual([]);
+  });
+
+  it('detects description change', () => {
+    const before = makeSchema({ descriptionHash: 'aaaaaaaaaaaa' });
+    const after = makeSchema({ descriptionHash: 'bbbbbbbbbbbb' });
+    const result = diffToolSchemas({ bash: before }, { bash: after });
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('description_changed');
+    expect(result[0].toolName).toBe('bash');
+  });
+
+  it('does NOT flag description change when params also changed', () => {
+    // params_changed takes priority over description_changed
+    const before = makeSchema({ optionalParams: [], descriptionHash: 'aaaa' });
+    const after = makeSchema({ optionalParams: ['extra'], descriptionHash: 'bbbb' });
+    const result = diffToolSchemas({ bash: before }, { bash: after });
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe('params_changed');
+  });
+
+  it('handles multiple tools with mixed changes', () => {
+    const result = diffToolSchemas(
+      { bash: makeSchema(), grep: makeSchema() },
+      { bash: makeSchema({ descriptionHash: 'changed' }), view: makeSchema() },
+    );
+    const types = new Set(result.map((r) => r.type));
+    expect(types).toContain('description_changed'); // bash
+    expect(types).toContain('removed');             // grep
+    expect(types).toContain('added');               // view
+    expect(result).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// diffSnapshots — toolSchemaChanged
+// ---------------------------------------------------------------------------
+
+describe('diffSnapshots — toolSchemaChanged', () => {
+  it('is false when tool schema hashes are identical', () => {
+    const snap = makeSnapshot({ toolSchemaHash: 'sha256:same', toolSchemas: {} });
+    expect(diffSnapshots(snap, snap).toolSchemaChanged).toBe(false);
+  });
+
+  it('is true when tool schema hashes differ', () => {
+    const baseline = makeSnapshot({ toolSchemaHash: 'sha256:aaaa', toolSchemas: {} });
+    const current = makeSnapshot({ toolSchemaHash: 'sha256:bbbb', toolSchemas: {} });
+    expect(diffSnapshots(baseline, current).toolSchemaChanged).toBe(true);
+  });
+
+  it('is false when either hash is absent', () => {
+    const baseline = makeSnapshot({ toolSchemaHash: undefined });
+    const current = makeSnapshot({ toolSchemaHash: 'sha256:bbbb' });
+    expect(diffSnapshots(baseline, current).toolSchemaChanged).toBe(false);
+  });
+
+  it('populates toolSchemaChanges from schema maps', () => {
+    const baseline = makeSnapshot({
+      toolSchemaHash: 'sha256:aaaa',
+      toolSchemas: { bash: makeSchema() },
+    });
+    const current = makeSnapshot({
+      toolSchemaHash: 'sha256:bbbb',
+      toolSchemas: { bash: makeSchema(), view: makeSchema() },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.toolSchemaChanges).toHaveLength(1);
+    expect(diff.toolSchemaChanges[0].type).toBe('added');
+    expect(diff.toolSchemaChanges[0].toolName).toBe('view');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatDiffReport — tool schema change rendering
+// ---------------------------------------------------------------------------
+
+describe('formatDiffReport — tool schema changes', () => {
+  it('renders added tool', () => {
+    const baseline = makeSnapshot({ toolSchemas: {} });
+    const current = makeSnapshot({ toolSchemas: { bash: makeSchema() } });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Added tool');
+    expect(report).toContain('bash');
+  });
+
+  it('renders removed tool', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchema() } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Removed tool');
+    expect(report).toContain('bash');
+  });
+
+  it('renders params changed', () => {
+    const before = makeSchema({ optionalParams: [] });
+    const after = makeSchema({ optionalParams: ['mode'], parameterCount: 3 });
+    const baseline = makeSnapshot({ toolSchemas: { bash: before } });
+    const current = makeSnapshot({ toolSchemas: { bash: after } });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Params changed');
+    expect(report).toContain('mode');
+  });
+
+  it('renders description changed', () => {
+    const before = makeSchema({ descriptionHash: 'aabbccdd11223344' });
+    const after = makeSchema({ descriptionHash: 'eeff99887766554433221100' });
+    const baseline = makeSnapshot({ toolSchemas: { bash: before } });
+    const current = makeSnapshot({ toolSchemas: { bash: after } });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Description changed');
+    expect(report).toContain('aabbccdd');
+    expect(report).toContain('eeff9988');
+  });
+
+  it('renders "no changes" when schemas present but identical', () => {
+    const schema = { bash: makeSchema() };
+    const baseline = makeSnapshot({ toolSchemas: schema });
+    const current = makeSnapshot({ toolSchemas: schema });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('No tool schema changes detected');
+  });
+});

@@ -1,3 +1,18 @@
+/**
+ * Captured parameter-level schema for a single tool definition.
+ * Enables detection of parameter additions, removals, and description drift.
+ */
+export interface ToolParamSchema {
+  /** Total number of parameters (required + optional) */
+  parameterCount: number;
+  /** Names of required parameters, sorted alphabetically */
+  requiredParams: string[];
+  /** Names of optional parameters, sorted alphabetically */
+  optionalParams: string[];
+  /** sha256 of the tool description string; changes when description text changes */
+  descriptionHash: string;
+}
+
 /** A single measured metric value */
 export interface MetricValue {
   value: number;
@@ -102,6 +117,18 @@ export interface MetricSnapshot {
    * or no matching PRs were found.
    */
   possibleCauses?: ProvenanceLinkEntry[];
+  /**
+   * Per-tool parameter schemas captured at baseline time.
+   * Keys are tool names; values describe parameter counts, names, and description fingerprint.
+   * Absent in older baselines that pre-date schema tracking.
+   */
+  toolSchemas?: Record<string, ToolParamSchema>;
+  /**
+   * sha256 fingerprint over all tool schemas (canonical JSON, sorted by tool name).
+   * Changes iff any tool definition changed (params, description, etc.).
+   * Absent in older baselines.
+   */
+  toolSchemaHash?: string;
   /** Experiment results indexed by experiment name */
   experiments: Record<string, ExperimentResult>;
 }
@@ -136,6 +163,20 @@ export interface MetricChange {
   severity: 'info' | 'warning' | 'regression';
 }
 
+/** A parameter-level change for a single tool between two snapshots */
+export interface ToolSchemaChange {
+  toolName: string;
+  type: 'added' | 'removed' | 'params_changed' | 'description_changed';
+  /** Schema from the baseline snapshot (absent for 'added' tools) */
+  before?: ToolParamSchema;
+  /** Schema from the current snapshot (absent for 'removed' tools) */
+  after?: ToolParamSchema;
+  /** Parameter names added (present in after, absent in before) */
+  addedParams?: string[];
+  /** Parameter names removed (present in before, absent in after) */
+  removedParams?: string[];
+}
+
 /** Full comparison between a baseline and current snapshot */
 export interface DiffReport {
   baseline: MetricSnapshot;
@@ -150,6 +191,10 @@ export interface DiffReport {
   hookChanged: boolean;
   /** Model pool additions, removals, and state/context-window changes */
   modelPoolChanges: ModelPoolChange[];
+  /** True when toolSchemaHash changed between snapshots */
+  toolSchemaChanged: boolean;
+  /** Per-tool schema changes: added/removed tools and parameter/description diffs */
+  toolSchemaChanges: ToolSchemaChange[];
 }
 
 // ---------------------------------------------------------------------------

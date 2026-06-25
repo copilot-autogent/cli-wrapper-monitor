@@ -41,6 +41,17 @@
       "type": "string",
       "description": "sha256 fingerprint of the concatenated hook source files (dist/hooks/ + dist/session.js), prefixed with 'sha256:', or 'unknown'"
     },
+    "toolSchemas": {
+      "type": "object",
+      "description": "Per-tool parameter schemas. Keys are tool names. Absent in older baselines.",
+      "additionalProperties": {
+        "$ref": "#/$defs/ToolParamSchema"
+      }
+    },
+    "toolSchemaHash": {
+      "type": "string",
+      "description": "sha256 fingerprint over all tool schemas (canonical JSON sorted by name), prefixed with 'sha256:'. Changes iff any tool definition changed. Absent in older baselines."
+    },
     "experiments": {
       "type": "object",
       "description": "Experiment results, keyed by experiment name",
@@ -95,6 +106,32 @@
         "description": {
           "type": "string",
           "description": "What this metric measures"
+        }
+      }
+    },
+    "ToolParamSchema": {
+      "type": "object",
+      "required": ["parameterCount", "requiredParams", "optionalParams", "descriptionHash"],
+      "additionalProperties": false,
+      "properties": {
+        "parameterCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of parameters (required + optional)"
+        },
+        "requiredParams": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of required parameters, sorted alphabetically"
+        },
+        "optionalParams": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of optional parameters, sorted alphabetically"
+        },
+        "descriptionHash": {
+          "type": "string",
+          "description": "sha256 hex digest of the tool description string; changes when description text changes"
         }
       }
     }

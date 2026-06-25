@@ -38,7 +38,7 @@ import {
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
-import type { ModelPool } from '../src/harness/types.js';
+import type { ModelPool, ToolParamSchema } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -254,12 +254,142 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
  * Attempt to extract tool definitions from the autogent dist build.
  *
  * Looks for *.js files in dist/tools/builtin/ that export tool metadata.
+ * Also attempts to extract the `parameters` JSON schema from each file.
  *
  * Falls back to parsing the TypeScript source with a simple regex when
  * the dist directory isn't available.
  */
 function extractToolDefs(autogentPath: string): ToolDef[] {
   const tools: ToolDef[] = [];
+
+  /** Extract required parameter names and property names from JS/TS source content.
+   *
+   * Uses targeted regex extraction rather than JSON.parse, which breaks on
+   * compiled JS object literals with unquoted keys, single-quote strings,
+   * and trailing commas. String-aware brace counting prevents `{`/`}` inside
+   * schema descriptions from desync-ing the depth counter.
+   *
+   * Scopes both searches to within the `parameters:` block to avoid matching
+   * `required:` or `properties:` from description text or nested schemas.
+   */
+  function extractParamInfo(content: string): { required: string[]; propNames: string[] } {
+    // Find the `parameters:` block. Skip if not present (tool has no params).
+    const paramsIdx = content.search(/\bparameters\s*:/);
+    if (paramsIdx === -1) return { required: [], propNames: [] };
+    const paramsBraceStart = content.indexOf('{', paramsIdx);
+    if (paramsBraceStart === -1) return { required: [], propNames: [] };
+
+    // Extract the full parameters block with string-aware brace counting.
+    // Handles escaped backslashes correctly: count consecutive backslashes before
+    // the quote to determine if the quote is escaped (odd count = escaped).
+    const paramsBlock = extractBlock(content, paramsBraceStart);
+
+    // Extract required array: `required: ["a", "b"]` scoped to paramsBlock
+    const required: string[] = [];
+    const requiredMatch = paramsBlock.match(/\brequired\s*:\s*\[([^\]]*)\]/);
+    if (requiredMatch) {
+      for (const m of requiredMatch[1].matchAll(/['"]([^'"]+)['"]/g)) {
+        required.push(m[1]);
+      }
+    }
+
+    // Extract property names from the `properties:` block inside paramsBlock
+    const propNames: string[] = [];
+    const propsSearch = paramsBlock.search(/\bproperties\s*:/);
+    if (propsSearch !== -1) {
+      const propsBraceStart = paramsBlock.indexOf('{', propsSearch);
+      if (propsBraceStart !== -1) {
+        const propsBlock = extractBlock(paramsBlock, propsBraceStart);
+        // Walk the properties block at depth 1 to find top-level keys.
+        // Matches both bare `name:` and quoted `"name":` / `'name':` keys.
+        let depth = 0;
+        let i = 0;
+        let inString = false;
+        let strChar = '';
+        while (i < propsBlock.length) {
+          const ch = propsBlock[i];
+          if (inString) {
+            if (ch === strChar && !isEscaped(propsBlock, i)) inString = false;
+          } else if (ch === '"' || ch === "'") {
+            if (depth === 1) {
+              // Quoted key: `"keyName":` or `'keyName':`
+              const keyEnd = findStringEnd(propsBlock, i + 1, ch);
+              if (keyEnd !== -1) {
+                const keyName = propsBlock.slice(i + 1, keyEnd);
+                const afterKey = propsBlock.slice(keyEnd + 1).trimStart();
+                if (afterKey.startsWith(':') && /^[a-zA-Z_$][\w$]*$/.test(keyName)) {
+                  propNames.push(keyName);
+                }
+                i = keyEnd;
+              } else {
+                inString = true;
+                strChar = ch;
+              }
+            } else {
+              inString = true;
+              strChar = ch;
+            }
+          } else if (ch === '{') {
+            depth++;
+          } else if (ch === '}') {
+            depth--;
+            if (depth < 0) break;
+          } else if (depth === 1) {
+            // Bare identifier key: `name:`
+            const slice = propsBlock.slice(i);
+            const keyMatch = slice.match(/^([a-zA-Z_$][\w$]*)\s*:/);
+            if (keyMatch) {
+              propNames.push(keyMatch[1]);
+              i += keyMatch[0].length - 1;
+            }
+          }
+          i++;
+        }
+      }
+    }
+
+    return { required: required.sort(), propNames: propNames.sort() };
+  }
+
+  /** Extract a brace-delimited block starting at `start` (the opening `{`). */
+  function extractBlock(content: string, start: number): string {
+    let depth = 0;
+    let i = start;
+    let inString = false;
+    let strChar = '';
+    while (i < content.length) {
+      const ch = content[i];
+      if (inString) {
+        if (ch === strChar && !isEscaped(content, i)) inString = false;
+      } else if (ch === '"' || ch === "'") {
+        inString = true;
+        strChar = ch;
+      } else if (ch === '{') {
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0) return content.slice(start, i + 1);
+      }
+      i++;
+    }
+    return content.slice(start); // unterminated block, return rest
+  }
+
+  /** True when the character at `pos` is preceded by an odd number of backslashes. */
+  function isEscaped(content: string, pos: number): boolean {
+    let count = 0;
+    let j = pos - 1;
+    while (j >= 0 && content[j] === '\\') { count++; j--; }
+    return count % 2 === 1;
+  }
+
+  /** Find the closing quote for a string starting at `from`, where `quoteChar` is `"` or `'`. */
+  function findStringEnd(content: string, from: number, quoteChar: string): number {
+    for (let i = from; i < content.length; i++) {
+      if (content[i] === quoteChar && !isEscaped(content, i)) return i;
+    }
+    return -1;
+  }
 
   // Strategy 1: read from dist/tools/builtin/
   const distToolsDir = join(autogentPath, 'dist', 'tools', 'builtin');
@@ -272,7 +402,12 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
         if (nameMatch && descMatch) {
-          tools.push({ name: nameMatch[1], description: descMatch[1] });
+          const { required, propNames } = extractParamInfo(content);
+          tools.push({
+            name: nameMatch[1],
+            description: descMatch[1],
+            parameters: { required, propNames },
+          });
         }
       }
       if (tools.length > 0) {
@@ -294,7 +429,12 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
         if (nameMatch && descMatch) {
-          tools.push({ name: nameMatch[1], description: descMatch[1] });
+          const { required, propNames } = extractParamInfo(content);
+          tools.push({
+            name: nameMatch[1],
+            description: descMatch[1],
+            parameters: { required, propNames },
+          });
         }
       }
     } catch {
@@ -303,6 +443,46 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
   }
 
   return tools;
+}
+
+/**
+ * Build per-tool ToolParamSchema records from a list of extracted tool definitions.
+ * Returns a map keyed by tool name, and the sha256 hash of the whole schema set
+ * (canonical JSON sorted by name). Both are used as change signals in diff reports.
+ */
+function buildToolSchemas(
+  tools: ToolDef[],
+): { schemas: Record<string, ToolParamSchema>; hash: string } {
+  const schemas: Record<string, ToolParamSchema> = {};
+
+  for (const tool of tools) {
+    // Parameters are now stored as { required: string[]; propNames: string[] }
+    // from the regex-based extractor in extractToolDefs.
+    const params = tool.parameters as { required?: string[]; propNames?: string[] } | undefined;
+    const required = params?.required ?? [];
+    const propNames = params?.propNames ?? [];
+
+    // Union all known param names (required + all property names from propNames)
+    const allParamNames = [...new Set([...required, ...propNames])].sort();
+    // Only report required params that are actually present in the parameter list
+    const filteredRequired = required.filter((p) => allParamNames.includes(p));
+    const requiredSet = new Set(filteredRequired);
+    const optionalParams = allParamNames.filter((p) => !requiredSet.has(p));
+
+    schemas[tool.name] = {
+      parameterCount: allParamNames.length,
+      requiredParams: filteredRequired,
+      optionalParams,
+      descriptionHash: sha256(tool.description),
+    };
+  }
+
+  // Sort by name for a canonical, stable JSON representation (binary compare for locale stability)
+  const sorted = Object.fromEntries(
+    Object.entries(schemas).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  const hash = 'sha256:' + sha256(JSON.stringify(sorted));
+  return { schemas, hash };
 }
 
 /**
@@ -424,6 +604,7 @@ async function main(): Promise<void> {
   const { hookCount, hookSourceHash } = autogentExists
     ? extractHookDefs(AUTOGENT_PATH)
     : { hookCount: 0, hookSourceHash: 'unknown' };
+  const { schemas: toolSchemas, hash: toolSchemaHash } = buildToolSchemas(toolDefs);
 
   console.log(`System prompt extracted: ${systemPrompt.length} chars`);
   console.log(`Tool definitions extracted: ${toolDefs.length} tools`);
@@ -432,6 +613,7 @@ async function main(): Promise<void> {
       `  Tools: ${toolDefs.map((t) => t.name).join(', ')}`,
     );
   }
+  console.log(`Tool schema hash:   ${toolSchemaHash}`);
   console.log(`Hook definitions extracted: ${hookCount} handlers`);
   if (SKIP_MODEL_POOL) {
     console.log('Model pool capture: skipped (SKIP_MODEL_POOL=true)');
@@ -493,6 +675,10 @@ async function main(): Promise<void> {
   snapshot.systemPromptHash = systemPromptHash;
   snapshot.hookCount = hookCount;
   snapshot.hookSourceHash = hookSourceHash;
+  if (Object.keys(toolSchemas).length > 0) {
+    snapshot.toolSchemas = toolSchemas;
+    snapshot.toolSchemaHash = toolSchemaHash;
+  }
 
   // Capture model pool
   if (!SKIP_MODEL_POOL) {
@@ -625,7 +811,25 @@ async function main(): Promise<void> {
       const countNote = prevCount !== currCount ? ` (count: ${prevCount} → ${currCount})` : '';
       console.warn(`🚨  Hook definitions changed: ${prev}… → ${curr}…${countNote}`);
     }
-    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged) {
+    if (diff.toolSchemaChanged) {
+      const prev = existingBaseline.toolSchemaHash?.slice(0, 16) ?? '?';
+      const curr = snapshot.toolSchemaHash?.slice(0, 16) ?? '?';
+      console.warn(`⚠️  Tool schemas changed: ${prev}… → ${curr}…`);
+      for (const change of diff.toolSchemaChanges) {
+        if (change.type === 'added') {
+          console.log(`  + tool added: ${change.toolName}`);
+        } else if (change.type === 'removed') {
+          console.warn(`  - tool removed: ${change.toolName}`);
+        } else if (change.type === 'params_changed') {
+          const added = change.addedParams?.map((p) => `+${p}`).join(', ') ?? '';
+          const removed = change.removedParams?.map((p) => `-${p}`).join(', ') ?? '';
+          console.warn(`  ~ params changed: ${change.toolName} [${[added, removed].filter(Boolean).join(', ')}]`);
+        } else if (change.type === 'description_changed') {
+          console.warn(`  ~ description changed: ${change.toolName}`);
+        }
+      }
+    }
+    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged || diff.toolSchemaChanged) {
       console.warn('');
     }
 

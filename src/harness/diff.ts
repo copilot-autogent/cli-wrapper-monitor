@@ -1,4 +1,4 @@
-import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange } from './types.js';
+import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, ToolParamSchema, ToolSchemaChange } from './types.js';
 
 const WARNING_THRESHOLD_PCT = 5;
 const REGRESSION_THRESHOLD_PCT = 10;
@@ -39,10 +39,52 @@ export function diffModelPool(
   return changes;
 }
 
-/**
- * Compare two snapshots and return a diff report.
- * Only metrics present in both snapshots are compared.
+/** Diff two tool schema maps, returning per-tool change records.
+ *
+ * Returns an empty array when either map is absent — prevents spurious
+ * add/remove spam when comparing against older baselines that pre-date
+ * schema tracking.
  */
+export function diffToolSchemas(
+  baseline: Record<string, ToolParamSchema> | undefined,
+  current: Record<string, ToolParamSchema> | undefined,
+): ToolSchemaChange[] {
+  // Don't diff when either side lacks schema data — avoids false churn
+  // against pre-feature baselines (every tool would appear as added/removed).
+  if (!baseline || !current) return [];
+  const baseMap = new Map(Object.entries(baseline));
+  const currMap = new Map(Object.entries(current));
+  const changes: ToolSchemaChange[] = [];
+
+  // Removed tools
+  for (const [name, before] of baseMap) {
+    if (!currMap.has(name)) {
+      changes.push({ toolName: name, type: 'removed', before });
+    }
+  }
+
+  // Added tools and changed tools
+  for (const [name, after] of currMap) {
+    const before = baseMap.get(name);
+    if (!before) {
+      changes.push({ toolName: name, type: 'added', after });
+      continue;
+    }
+    const allBefore = new Set([...before.requiredParams, ...before.optionalParams]);
+    const allAfter = new Set([...after.requiredParams, ...after.optionalParams]);
+    const addedParams = [...allAfter].filter((p) => !allBefore.has(p)).sort();
+    const removedParams = [...allBefore].filter((p) => !allAfter.has(p)).sort();
+    if (addedParams.length > 0 || removedParams.length > 0) {
+      changes.push({ toolName: name, type: 'params_changed', before, after, addedParams, removedParams });
+    } else if (before.descriptionHash !== after.descriptionHash) {
+      changes.push({ toolName: name, type: 'description_changed', before, after });
+    }
+  }
+
+  return changes;
+}
+
+
 export function diffSnapshots(
   baseline: MetricSnapshot,
   current: MetricSnapshot,
@@ -106,6 +148,13 @@ export function diffSnapshots(
     current.hookSourceHash !== 'unknown' &&
     baseline.hookSourceHash !== current.hookSourceHash;
 
+  const toolSchemaChanged =
+    baseline.toolSchemaHash !== undefined &&
+    current.toolSchemaHash !== undefined &&
+    baseline.toolSchemaHash !== current.toolSchemaHash;
+
+  const toolSchemaChanges = diffToolSchemas(baseline.toolSchemas, current.toolSchemas);
+
   const modelPoolChanges = diffModelPool(baseline.modelPool, current.modelPool);
 
   return {
@@ -117,6 +166,8 @@ export function diffSnapshots(
     systemPromptChanged,
     hookChanged,
     modelPoolChanges,
+    toolSchemaChanged,
+    toolSchemaChanges,
   };
 }
 
@@ -205,6 +256,41 @@ export function formatDiffReport(report: DiffReport): string {
         );
       }
     }
+  }
+
+  // Tool schema changes (only shown when BOTH snapshots have schema data)
+  if (report.toolSchemaChanges.length > 0) {
+    lines.push('', '## Tool Schema Changes', '');
+    for (const change of report.toolSchemaChanges) {
+      if (change.type === 'added') {
+        const s = change.after!;
+        lines.push(
+          `✅ **Added tool**: \`${change.toolName}\` — ` +
+            `${s.parameterCount} params (required: [${s.requiredParams.join(', ')}])`,
+        );
+      } else if (change.type === 'removed') {
+        const s = change.before!;
+        lines.push(
+          `❌ **Removed tool**: \`${change.toolName}\` — ` +
+            `was ${s.parameterCount} params (required: [${s.requiredParams.join(', ')}])`,
+        );
+      } else if (change.type === 'params_changed') {
+        const added = change.addedParams ?? [];
+        const removed = change.removedParams ?? [];
+        const parts: string[] = [];
+        if (added.length > 0) parts.push(`+ added: [${added.join(', ')}]`);
+        if (removed.length > 0) parts.push(`- removed: [${removed.join(', ')}]`);
+        lines.push(`⚠️  **Params changed**: \`${change.toolName}\` — ${parts.join('; ')}`);
+      } else if (change.type === 'description_changed') {
+        const prev = change.before!.descriptionHash.slice(0, 8);
+        const curr = change.after!.descriptionHash.slice(0, 8);
+        lines.push(
+          `⚠️  **Description changed**: \`${change.toolName}\` — hash: \`${prev}…\` → \`${curr}…\``,
+        );
+      }
+    }
+  } else if (report.baseline.toolSchemas !== undefined && report.current.toolSchemas !== undefined) {
+    lines.push('', '## Tool Schema Changes', '', '> No tool schema changes detected.', '');
   }
 
   return lines.join('\n');

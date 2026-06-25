@@ -159,6 +159,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
     hashRow("Binary hash", snapA.binaryHash, snapB.binaryHash),
     hashRow("System prompt hash", snapA.systemPromptHash, snapB.systemPromptHash),
     hashRow("Hook source hash", snapA.hookSourceHash, snapB.hookSourceHash),
+    hashRow("Tool schema hash", snapA.toolSchemaHash, snapB.toolSchemaHash),
     "");
 
   const perToolA = extractPerTool(snapA), perToolB = extractPerTool(snapB);
@@ -178,6 +179,31 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
       lines.push("");
     }
     if (added.length === 0 && removed.length === 0) lines.push(`## Tool Changes`, "", `> Tool set unchanged (${namesA.size} tools).`, "");
+  }
+
+  // Tool schema changes (parameter-level diffs)
+  if (report.toolSchemaChanges.length > 0) {
+    lines.push(`## Tool Schema Changes`, "");
+    for (const change of report.toolSchemaChanges) {
+      if (change.type === "added") {
+        const s = change.after!;
+        lines.push(`- ✅ **Added tool**: \`${change.toolName}\` — ${s.parameterCount} params (required: [${s.requiredParams.join(", ")}])`);
+      } else if (change.type === "removed") {
+        const s = change.before!;
+        lines.push(`- ❌ **Removed tool**: \`${change.toolName}\` — was ${s.parameterCount} params (required: [${s.requiredParams.join(", ")}])`);
+      } else if (change.type === "params_changed") {
+        const addedP = (change.addedParams ?? []).map((p) => `+ \`${p}\``).join(", ");
+        const removedP = (change.removedParams ?? []).map((p) => `- \`${p}\``).join(", ");
+        lines.push(`- ⚠️ **Params changed**: \`${change.toolName}\` — ${[addedP, removedP].filter(Boolean).join("; ")}`);
+      } else if (change.type === "description_changed") {
+        const prev = change.before!.descriptionHash.slice(0, 8);
+        const curr = change.after!.descriptionHash.slice(0, 8);
+        lines.push(`- ⚠️ **Description changed**: \`${change.toolName}\` — hash: \`${prev}…\` → \`${curr}…\``);
+      }
+    }
+    lines.push("");
+  } else if (snapA.toolSchemas !== undefined && snapB.toolSchemas !== undefined) {
+    lines.push(`## Tool Schema Changes`, "", "> No tool schema changes detected.", "");
   }
 
   if (report.modelPoolChanges.length > 0) {
