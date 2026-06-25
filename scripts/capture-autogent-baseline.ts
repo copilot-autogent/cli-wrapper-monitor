@@ -28,6 +28,13 @@ import { ExperimentRunner } from '../src/harness/runner.js';
 import { SnapshotStore } from '../src/harness/snapshot.js';
 import { diffSnapshots, formatDiffReport } from '../src/harness/diff.js';
 import { computeSizeDelta, formatSizeDeltaTable, sendSizeAlertWebhook } from '../src/harness/size-delta.js';
+import {
+  computeContextWindowHeadroom,
+  formatHeadroomTable,
+  detectFirstTimeCrossings,
+  extractSystemPromptTokens,
+  sendHeadroomAlertWebhook,
+} from '../src/harness/context-window-headroom.js';
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
@@ -496,6 +503,16 @@ async function main(): Promise<void> {
       console.log(`Model pool captured: ${modelPool.models.length} models`);
       const enabled = modelPool.models.filter((m) => m.state === 'enabled').length;
       console.log(`  Enabled: ${enabled}  Total: ${modelPool.models.length}`);
+
+      // Compute context window headroom now that we have both the model pool
+      // and the context-tax token count.
+      const systemPromptTokens = extractSystemPromptTokens(snapshot);
+      if (systemPromptTokens > 0) {
+        snapshot.contextWindowHeadroom = computeContextWindowHeadroom(
+          modelPool,
+          systemPromptTokens,
+        );
+      }
     } else if (existingBaseline?.modelPool) {
       // The previous baseline had a model pool but this capture failed.
       // Warn explicitly so operators know the monitor was blind this run.
@@ -556,15 +573,34 @@ async function main(): Promise<void> {
   const sizeDelta = computeSizeDelta(snapshot, existingBaseline);
   console.log(formatSizeDeltaTable(sizeDelta));
 
+  // Context window headroom table (emitted whenever headroom was computed)
+  if (snapshot.contextWindowHeadroom && snapshot.contextWindowHeadroom.length > 0) {
+    console.log(formatHeadroomTable(snapshot.contextWindowHeadroom));
+  }
+
+  const ciRunUrl =
+    process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_REPOSITORY'] && process.env['GITHUB_RUN_ID']
+      ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
+      : undefined;
+
   if (existingBaseline) {
     // Send Discord webhook notification when SIZE ALERT fires.
     // Only meaningful when a prior baseline exists for comparison.
     // DISCORD_WEBHOOK_URL absent → silent no-op (no CI failure).
-    const ciRunUrl =
-      process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_REPOSITORY'] && process.env['GITHUB_RUN_ID']
-        ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
-        : undefined;
     await sendSizeAlertWebhook(sizeDelta, ciRunUrl);
+
+    // Fire HEADROOM ALERT when any model newly crosses the >50% fill threshold.
+    const headroomCrossings = detectFirstTimeCrossings(
+      snapshot.contextWindowHeadroom ?? [],
+      existingBaseline.contextWindowHeadroom,
+    );
+    if (headroomCrossings.length > 0) {
+      console.warn(
+        `⚠️  ${headroomCrossings.length} model(s) newly crossed the 50% headroom threshold: ` +
+          headroomCrossings.map((e) => e.modelId).join(', '),
+      );
+    }
+    await sendHeadroomAlertWebhook(headroomCrossings, ciRunUrl);
 
     const diff = diffSnapshots(existingBaseline, snapshot);
 

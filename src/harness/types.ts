@@ -33,6 +33,24 @@ export interface ModelPool {
   models: ModelPoolEntry[];
 }
 
+/** Fill-status tiers for a model's context window headroom */
+export type HeadroomStatus = 'ok' | 'high-fill' | 'overflow-risk';
+
+/** Context window headroom computed for a single model */
+export interface ContextWindowHeadroomEntry {
+  modelId: string;
+  /** Total context window size in tokens */
+  contextWindow: number;
+  /** System prompt token count used for this measurement */
+  systemPromptTokens: number;
+  /** contextWindow - systemPromptTokens */
+  headroomTokens: number;
+  /** (systemPromptTokens / contextWindow) * 100, rounded to 1 decimal */
+  promptFillPct: number;
+  /** 'ok' ≤50%, 'high-fill' >50%, 'overflow-risk' >90% */
+  status: HeadroomStatus;
+}
+
 /**
  * A single autogent PR matched as a possible cause for a baseline delta.
  * Embedded in MetricSnapshot.possibleCauses when provenance linking is enabled.
@@ -67,6 +85,11 @@ export interface MetricSnapshot {
   hookSourceHash?: string;
   /** Available model pool at capture time (absent in older baselines) */
   modelPool?: ModelPool;
+  /**
+   * Per-model context window headroom relative to the current system prompt.
+   * Absent when modelPool was not captured or the context-tax experiment failed.
+   */
+  contextWindowHeadroom?: ContextWindowHeadroomEntry[];
   /**
    * Autogent PRs that touched provenance-relevant paths (src/workspace/,
    * src/tools/builtin/, src/hooks/) between the previous baseline and this one.
