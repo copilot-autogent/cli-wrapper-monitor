@@ -38,7 +38,7 @@ import {
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
-import type { ModelPool } from '../src/harness/types.js';
+import type { ModelPool, ToolParamSchema } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -254,12 +254,39 @@ function extractHookDefs(autogentPath: string): HookIntrospectionResult {
  * Attempt to extract tool definitions from the autogent dist build.
  *
  * Looks for *.js files in dist/tools/builtin/ that export tool metadata.
+ * Also attempts to extract the `parameters` JSON schema from each file.
  *
  * Falls back to parsing the TypeScript source with a simple regex when
  * the dist directory isn't available.
  */
 function extractToolDefs(autogentPath: string): ToolDef[] {
   const tools: ToolDef[] = [];
+
+  /** Extract an inline JSON object following a pattern like `parameters: {…}` from JS source. */
+  function extractParametersJson(content: string): unknown | undefined {
+    const idx = content.indexOf('parameters:');
+    if (idx === -1) return undefined;
+    // Walk forward to find the opening brace
+    let start = idx + 'parameters:'.length;
+    while (start < content.length && content[start] !== '{') start++;
+    if (start >= content.length) return undefined;
+    // Walk forward counting braces to find the matching close
+    let depth = 0;
+    let end = start;
+    for (; end < content.length; end++) {
+      if (content[end] === '{') depth++;
+      else if (content[end] === '}') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth !== 0) return undefined;
+    try {
+      return JSON.parse(content.slice(start, end + 1)) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
 
   // Strategy 1: read from dist/tools/builtin/
   const distToolsDir = join(autogentPath, 'dist', 'tools', 'builtin');
@@ -272,7 +299,11 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
         if (nameMatch && descMatch) {
-          tools.push({ name: nameMatch[1], description: descMatch[1] });
+          tools.push({
+            name: nameMatch[1],
+            description: descMatch[1],
+            parameters: extractParametersJson(content),
+          });
         }
       }
       if (tools.length > 0) {
@@ -294,7 +325,11 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
         const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
         const descMatch = content.match(/description:\s*["']([^"']+)["']/);
         if (nameMatch && descMatch) {
-          tools.push({ name: nameMatch[1], description: descMatch[1] });
+          tools.push({
+            name: nameMatch[1],
+            description: descMatch[1],
+            parameters: extractParametersJson(content),
+          });
         }
       }
     } catch {
@@ -303,6 +338,42 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
   }
 
   return tools;
+}
+
+/**
+ * Build per-tool ToolParamSchema records from a list of extracted tool definitions.
+ * Returns a map keyed by tool name, and the sha256 hash of the whole schema set
+ * (canonical JSON sorted by name). Both are used as change signals in diff reports.
+ */
+function buildToolSchemas(
+  tools: ToolDef[],
+): { schemas: Record<string, ToolParamSchema>; hash: string } {
+  const schemas: Record<string, ToolParamSchema> = {};
+
+  for (const tool of tools) {
+    const params = tool.parameters as Record<string, unknown> | undefined;
+    const properties = (params?.['properties'] as Record<string, unknown> | undefined) ?? {};
+    const required = Array.isArray(params?.['required'])
+      ? (params!['required'] as string[]).slice().sort()
+      : [];
+    const requiredSet = new Set(required);
+    const allParamNames = Object.keys(properties).sort();
+    const optionalParams = allParamNames.filter((p) => !requiredSet.has(p));
+
+    schemas[tool.name] = {
+      parameterCount: allParamNames.length,
+      requiredParams: required,
+      optionalParams,
+      descriptionHash: sha256(tool.description),
+    };
+  }
+
+  // Sort by name for a canonical, stable JSON representation
+  const sorted = Object.fromEntries(
+    Object.entries(schemas).sort(([a], [b]) => a.localeCompare(b)),
+  );
+  const hash = 'sha256:' + sha256(JSON.stringify(sorted));
+  return { schemas, hash };
 }
 
 /**
@@ -424,6 +495,7 @@ async function main(): Promise<void> {
   const { hookCount, hookSourceHash } = autogentExists
     ? extractHookDefs(AUTOGENT_PATH)
     : { hookCount: 0, hookSourceHash: 'unknown' };
+  const { schemas: toolSchemas, hash: toolSchemaHash } = buildToolSchemas(toolDefs);
 
   console.log(`System prompt extracted: ${systemPrompt.length} chars`);
   console.log(`Tool definitions extracted: ${toolDefs.length} tools`);
@@ -432,6 +504,7 @@ async function main(): Promise<void> {
       `  Tools: ${toolDefs.map((t) => t.name).join(', ')}`,
     );
   }
+  console.log(`Tool schema hash:   ${toolSchemaHash}`);
   console.log(`Hook definitions extracted: ${hookCount} handlers`);
   if (SKIP_MODEL_POOL) {
     console.log('Model pool capture: skipped (SKIP_MODEL_POOL=true)');
@@ -493,6 +566,10 @@ async function main(): Promise<void> {
   snapshot.systemPromptHash = systemPromptHash;
   snapshot.hookCount = hookCount;
   snapshot.hookSourceHash = hookSourceHash;
+  if (Object.keys(toolSchemas).length > 0) {
+    snapshot.toolSchemas = toolSchemas;
+    snapshot.toolSchemaHash = toolSchemaHash;
+  }
 
   // Capture model pool
   if (!SKIP_MODEL_POOL) {
@@ -625,7 +702,25 @@ async function main(): Promise<void> {
       const countNote = prevCount !== currCount ? ` (count: ${prevCount} → ${currCount})` : '';
       console.warn(`🚨  Hook definitions changed: ${prev}… → ${curr}…${countNote}`);
     }
-    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged) {
+    if (diff.toolSchemaChanged) {
+      const prev = existingBaseline.toolSchemaHash?.slice(0, 16) ?? '?';
+      const curr = snapshot.toolSchemaHash?.slice(0, 16) ?? '?';
+      console.warn(`⚠️  Tool schemas changed: ${prev}… → ${curr}…`);
+      for (const change of diff.toolSchemaChanges) {
+        if (change.type === 'added') {
+          console.log(`  + tool added: ${change.toolName}`);
+        } else if (change.type === 'removed') {
+          console.warn(`  - tool removed: ${change.toolName}`);
+        } else if (change.type === 'params_changed') {
+          const added = change.addedParams?.map((p) => `+${p}`).join(', ') ?? '';
+          const removed = change.removedParams?.map((p) => `-${p}`).join(', ') ?? '';
+          console.warn(`  ~ params changed: ${change.toolName} [${[added, removed].filter(Boolean).join(', ')}]`);
+        } else if (change.type === 'description_changed') {
+          console.warn(`  ~ description changed: ${change.toolName}`);
+        }
+      }
+    }
+    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged || diff.toolSchemaChanged) {
       console.warn('');
     }
 
