@@ -306,8 +306,9 @@ async function main(): Promise<void> {
 
   // Await webhook so it completes before any process.exit — especially important
   // on BREAKING runs where we exit immediately after.
-  const ciRunUrl = process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_RUN_ID']
-    ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
+  const { GITHUB_SERVER_URL, GITHUB_RUN_ID, GITHUB_REPOSITORY } = process.env;
+  const ciRunUrl = GITHUB_SERVER_URL && GITHUB_RUN_ID && GITHUB_REPOSITORY
+    ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
     : undefined;
   const dateA = shortDate(snapA.capturedAt), dateB = shortDate(snapB.capturedAt);
   await sendSeveritySummaryWebhook(report.severitySummary, dateA, dateB, ciRunUrl);

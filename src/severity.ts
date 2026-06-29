@@ -58,7 +58,9 @@ export async function sendSeveritySummaryWebhook(
   if (!webhookUrl || !webhookUrl.trim()) return;
 
   const { breaking, warning, info } = summary;
-  if (breaking === 0 && warning === 0 && info === 0) return;
+  // Only post to Discord when there is something actionable — pure INFO-only
+  // runs (all changes within 5%) would create noisy green pings on every CI run.
+  if (breaking === 0 && warning === 0) return;
 
   const icon = breaking > 0 ? '🔴' : warning > 0 ? '🟡' : '🟢';
   const summaryLine = [

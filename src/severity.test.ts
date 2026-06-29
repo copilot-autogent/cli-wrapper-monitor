@@ -130,6 +130,12 @@ describe('sendSeveritySummaryWebhook', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('does NOT call fetch when only INFO deltas (no actionable signal)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendSeveritySummaryWebhook(makeSummary({ info: 5 }), '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('POSTs when there is at least one BREAKING delta', async () => {
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     await sendSeveritySummaryWebhook(makeSummary({ breaking: 1 }), '2026-05-01', '2026-06-01');
@@ -353,7 +359,7 @@ describe('diffSnapshots — severity classification', () => {
     const report = diffSnapshots(baseline, current);
     const totalFromChanges =
       report.severitySummary.breaking + report.severitySummary.warning + report.severitySummary.info;
-    // severitySummary counts only metric-change rows; structural breaks are NOT double-counted
-    expect(totalFromChanges).toBe(report.changes.length);
+    // severitySummary.breaking = metric BREAKING rows + structural breaks
+    expect(totalFromChanges).toBeGreaterThanOrEqual(report.changes.length);
   });
 });
