@@ -185,7 +185,7 @@ describe("extractTrendRow", () => {
       },
     });
     const row = extractTrendRow(snap);
-    expect(row.injectionRefusedRate).toBe(0.875);
+    expect(row.injectionRefusedRate).toBe(0.875); // stored as 0–1 fraction
   });
 });
 

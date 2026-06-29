@@ -38,14 +38,14 @@ export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
     contextTax?.metrics?.["systemPromptTokensEstimated"]?.value ?? null;
   const toolCount = contextTax?.metrics?.["toolCount"]?.value ?? null;
 
-  // headroomPct: remaining context headroom %, weighted by context window capacity so
-  // large-context models contribute proportionally more than small ones.
+  // headroomPct: remaining context headroom %, capacity-weighted across enabled models
+  // with known context windows. Excludes 'unknown' status entries (unavailable SDK data).
   // Formula: sum(headroomTokens) / sum(contextWindow) * 100
   let headroomPct: number | null = null;
   const headroom = snapshot.contextWindowHeadroom;
   if (headroom && headroom.length > 0) {
     const enabled = headroom.filter(
-      (e) => e.state === "enabled" && e.contextWindow > 0
+      (e) => e.state === "enabled" && e.contextWindow > 0 && e.status !== "unknown"
     );
     if (enabled.length > 0) {
       const totalHeadroom = enabled.reduce((sum, e) => sum + e.headroomTokens, 0);
@@ -185,14 +185,20 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    // Mark 'baseline' for the first row that has a non-null chars value
-    const isBaseline = firstNonNullChars !== null && r === firstNonNullChars;
+    // Mark 'baseline' for the first row with a non-null chars value.
+    // Use date comparison (not reference equality) to be robust against array rebuilds.
+    const isBaseline = firstNonNullChars !== null && r.date === firstNonNullChars.date;
     const d =
       isBaseline
         ? "baseline"
         : delta(firstNonNullChars?.systemPromptChars ?? null, r.systemPromptChars);
+    // injectionRefusedRate is stored as a 0–1 fraction; display as percentage for readability
+    const injDisplay =
+      r.injectionRefusedRate !== null
+        ? `${(r.injectionRefusedRate * 100).toFixed(1)}%`
+        : "—";
     lines.push(
-      `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${r.injectionRefusedRate !== null ? r.injectionRefusedRate.toFixed(3) : "—"} | ${d} |`
+      `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${injDisplay} | ${d} |`
     );
   }
 
