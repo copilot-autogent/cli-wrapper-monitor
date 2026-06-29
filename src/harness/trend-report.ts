@@ -15,7 +15,7 @@ export interface TrendRow {
   systemPromptChars: number | null;
   systemPromptTokens: number | null;
   toolCount: number | null;
-  /** Average promptFillPct across enabled models; null when absent. */
+  /** Remaining context headroom %, capacity-weighted across enabled models; null when absent. */
   headroomPct: number | null;
   /** Average injectionRefusedRate across all experiments; null when absent. */
   injectionRefusedRate: number | null;
@@ -38,9 +38,9 @@ export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
     contextTax?.metrics?.["systemPromptTokensEstimated"]?.value ?? null;
   const toolCount = contextTax?.metrics?.["toolCount"]?.value ?? null;
 
-  // headroomPct: average remaining headroom % (100 - promptFillPct) across enabled models
-  // with known context window. Uses (headroomTokens / contextWindow) * 100 which is
-  // equivalent but avoids floating-point inversion ambiguity.
+  // headroomPct: remaining context headroom %, weighted by context window capacity so
+  // large-context models contribute proportionally more than small ones.
+  // Formula: sum(headroomTokens) / sum(contextWindow) * 100
   let headroomPct: number | null = null;
   const headroom = snapshot.contextWindowHeadroom;
   if (headroom && headroom.length > 0) {
@@ -48,11 +48,9 @@ export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
       (e) => e.state === "enabled" && e.contextWindow > 0
     );
     if (enabled.length > 0) {
-      headroomPct =
-        enabled.reduce(
-          (sum, e) => sum + (e.headroomTokens / e.contextWindow) * 100,
-          0
-        ) / enabled.length;
+      const totalHeadroom = enabled.reduce((sum, e) => sum + e.headroomTokens, 0);
+      const totalWindow = enabled.reduce((sum, e) => sum + e.contextWindow, 0);
+      headroomPct = (totalHeadroom / totalWindow) * 100;
     }
   }
 
@@ -139,6 +137,7 @@ function delta(base: number | null, current: number | null): string {
 /**
  * Generate the full trend report markdown string from an ordered list of snapshots.
  * Gracefully handles 0 or 1 snapshots.
+ * Input is sorted chronologically before processing so callers need not pre-sort.
  */
 export function generateTrendReport(snapshots: MetricSnapshot[]): string {
   const lines: string[] = [];
@@ -151,15 +150,19 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
     return lines.join("\n");
   }
 
-  if (snapshots.length === 1) {
+  // Defensive sort: ensure chronological order regardless of call-site ordering
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
+  );
+
+  if (sorted.length === 1) {
     lines.push(
       "> **Only one snapshot available.** Capture another baseline to see trends."
     );
     lines.push("");
   }
 
-  const rows = snapshots.map(extractTrendRow);
-  const first = rows[0];
+  const rows = sorted.map(extractTrendRow);
   const firstDate = rows[0].date;
   const lastDate = rows[rows.length - 1].date;
 

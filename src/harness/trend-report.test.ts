@@ -82,7 +82,7 @@ describe("extractTrendRow", () => {
     expect(row.headroomPct).toBeNull();
   });
 
-  it("computes headroomPct as remaining context headroom percentage", () => {
+  it("computes headroomPct as capacity-weighted remaining headroom percentage", () => {
     const snap = makeSnapshot("2026-07-01T00:00:00.000Z", 100_000, 20, {
       contextWindowHeadroom: [
         {
@@ -90,7 +90,7 @@ describe("extractTrendRow", () => {
           state: "enabled",
           contextWindow: 200_000,
           systemPromptTokens: 25_000,
-          headroomTokens: 175_000,
+          headroomTokens: 175_000, // 87.5% remaining
           promptFillPct: 12.5,
           status: "ok",
         },
@@ -99,15 +99,15 @@ describe("extractTrendRow", () => {
           state: "enabled",
           contextWindow: 100_000,
           systemPromptTokens: 25_000,
-          headroomTokens: 75_000,
+          headroomTokens: 75_000, // 75% remaining
           promptFillPct: 25.0,
           status: "ok",
         },
       ],
     });
     const row = extractTrendRow(snap);
-    // (175_000/200_000)*100 = 87.5, (75_000/100_000)*100 = 75.0 → avg = 81.25
-    expect(row.headroomPct).toBeCloseTo(81.25, 2);
+    // Weighted: (175_000 + 75_000) / (200_000 + 100_000) * 100 = 250_000 / 300_000 * 100 ≈ 83.33%
+    expect(row.headroomPct).toBeCloseTo(83.33, 1);
   });
 
   it("ignores disabled models when computing headroomPct", () => {
@@ -134,7 +134,7 @@ describe("extractTrendRow", () => {
       ],
     });
     const row = extractTrendRow(snap);
-    // Only enabled-model: (175_000/200_000)*100 = 87.5
+    // Only enabled-model: 175_000 / 200_000 * 100 = 87.5%
     expect(row.headroomPct).toBeCloseTo(87.5, 2);
   });
 
@@ -291,16 +291,16 @@ describe("generateTrendReport", () => {
   });
 
   it("sparkline direction is upward when prompt size grew", () => {
-    // SNAP_A(50k) → SNAP_B(100k) → (with a 3rd larger) → upward sparkline
+    // SNAP_A(50k) → SNAP_B(100k) → SNAP_D(150k) — monotonically increasing
     const SNAP_D = makeSnapshot("2026-08-01T00:00:00.000Z", 150_000, 30);
-    const report = generateTrendReport([SNAP_A, SNAP_B, SNAP_D]);
-    // Extract the sparkline line
-    const sparklineLine = report.split("\n").find((l) => l.startsWith("`▁"));
-    expect(sparklineLine).toBeDefined();
+    // Use buildSparkline directly for a more precise and robust assertion
+    const sparkline = buildSparkline([50_000, 100_000, 150_000]);
     const BLOCKS = "▁▂▃▄▅▆▇█";
-    const sparkline = sparklineLine!.replace(/`/g, "").split(" ")[0];
     const firstIdx = BLOCKS.indexOf(sparkline[0]);
     const lastIdx = BLOCKS.indexOf(sparkline[sparkline.length - 1]);
     expect(firstIdx).toBeLessThan(lastIdx);
+    // Also verify the report embeds a sparkline section
+    const report = generateTrendReport([SNAP_A, SNAP_B, SNAP_D]);
+    expect(report).toContain("systemPromptChars sparkline");
   });
 });
