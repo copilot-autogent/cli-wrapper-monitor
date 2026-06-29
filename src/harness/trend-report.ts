@@ -38,7 +38,9 @@ export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
     contextTax?.metrics?.["systemPromptTokensEstimated"]?.value ?? null;
   const toolCount = contextTax?.metrics?.["toolCount"]?.value ?? null;
 
-  // headroomPct: average promptFillPct across enabled models with known context window
+  // headroomPct: average remaining headroom % (100 - promptFillPct) across enabled models
+  // with known context window. Uses (headroomTokens / contextWindow) * 100 which is
+  // equivalent but avoids floating-point inversion ambiguity.
   let headroomPct: number | null = null;
   const headroom = snapshot.contextWindowHeadroom;
   if (headroom && headroom.length > 0) {
@@ -47,18 +49,25 @@ export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
     );
     if (enabled.length > 0) {
       headroomPct =
-        enabled.reduce((sum, e) => sum + e.promptFillPct, 0) / enabled.length;
+        enabled.reduce(
+          (sum, e) => sum + (e.headroomTokens / e.contextWindow) * 100,
+          0
+        ) / enabled.length;
     }
   }
 
-  // injectionRefusedRate: search all experiments for a metric with that key
+  // injectionRefusedRate: average across all experiments that expose this metric
   let injectionRefusedRate: number | null = null;
+  const injectionValues: number[] = [];
   for (const exp of Object.values(snapshot.experiments ?? {})) {
     const metric = exp.metrics?.["injectionRefusedRate"];
     if (metric !== undefined) {
-      injectionRefusedRate = metric.value;
-      break;
+      injectionValues.push(metric.value);
     }
+  }
+  if (injectionValues.length > 0) {
+    injectionRefusedRate =
+      injectionValues.reduce((sum, v) => sum + v, 0) / injectionValues.length;
   }
 
   return {
@@ -159,6 +168,10 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
   );
   lines.push("");
 
+  // Find the first non-null systemPromptChars as the delta baseline (older baselines
+  // may lack the metric; using the first non-null avoids all-`—` delta columns).
+  const firstNonNullChars = rows.find((r) => r.systemPromptChars !== null) ?? null;
+
   // Table
   const header =
     "| Date | systemPromptChars | systemPromptTokens | toolCount | headroomPct | injectionRefusedRate | Δ chars |";
@@ -169,7 +182,12 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    const d = i === 0 ? "baseline" : delta(first.systemPromptChars, r.systemPromptChars);
+    // Mark 'baseline' for the first row that has a non-null chars value
+    const isBaseline = firstNonNullChars !== null && r === firstNonNullChars;
+    const d =
+      isBaseline
+        ? "baseline"
+        : delta(firstNonNullChars?.systemPromptChars ?? null, r.systemPromptChars);
     lines.push(
       `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${r.injectionRefusedRate !== null ? r.injectionRefusedRate.toFixed(3) : "—"} | ${d} |`
     );

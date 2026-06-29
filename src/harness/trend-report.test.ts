@@ -82,7 +82,7 @@ describe("extractTrendRow", () => {
     expect(row.headroomPct).toBeNull();
   });
 
-  it("computes headroomPct from contextWindowHeadroom", () => {
+  it("computes headroomPct as remaining context headroom percentage", () => {
     const snap = makeSnapshot("2026-07-01T00:00:00.000Z", 100_000, 20, {
       contextWindowHeadroom: [
         {
@@ -106,7 +106,8 @@ describe("extractTrendRow", () => {
       ],
     });
     const row = extractTrendRow(snap);
-    expect(row.headroomPct).toBeCloseTo(18.75, 2); // average of 12.5 and 25.0
+    // (175_000/200_000)*100 = 87.5, (75_000/100_000)*100 = 75.0 → avg = 81.25
+    expect(row.headroomPct).toBeCloseTo(81.25, 2);
   });
 
   it("ignores disabled models when computing headroomPct", () => {
@@ -133,12 +134,39 @@ describe("extractTrendRow", () => {
       ],
     });
     const row = extractTrendRow(snap);
-    expect(row.headroomPct).toBeCloseTo(12.5, 2);
+    // Only enabled-model: (175_000/200_000)*100 = 87.5
+    expect(row.headroomPct).toBeCloseTo(87.5, 2);
   });
 
   it("returns null injectionRefusedRate when absent", () => {
     const row = extractTrendRow(SNAP_A);
     expect(row.injectionRefusedRate).toBeNull();
+  });
+
+  it("averages injectionRefusedRate across all experiments that have it", () => {
+    const snap = makeSnapshot("2026-07-01T00:00:00.000Z", 100_000, 20, {
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 100_000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 25_000, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+            injectionRefusedRate: { value: 0.8, unit: "fraction", description: "" },
+          },
+        },
+        "injection-probes": {
+          name: "injection-probes",
+          description: "test",
+          metrics: {
+            injectionRefusedRate: { value: 0.6, unit: "fraction", description: "" },
+          },
+        },
+      },
+    });
+    const row = extractTrendRow(snap);
+    expect(row.injectionRefusedRate).toBeCloseTo(0.7, 5); // (0.8 + 0.6) / 2
   });
 
   it("extracts injectionRefusedRate from any experiment metrics", () => {

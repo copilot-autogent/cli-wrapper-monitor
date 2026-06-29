@@ -53,14 +53,6 @@ function main(): void {
   }
 
   const snapshots = loadAll("baselines");
-
-  if (snapshots.length < 2) {
-    console.log(
-      "Not enough baselines to generate a trend report (need ≥2). Capture another baseline first."
-    );
-    return;
-  }
-
   const report = generateTrendReport(snapshots);
 
   if (output) {
