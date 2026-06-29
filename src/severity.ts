@@ -34,9 +34,15 @@ export function classifyDeltaPct(absPct: number): SeverityLevel {
 
 /** Counts of each severity tier across all delta rows. */
 export interface SeveritySummary {
+  /** Count of metric-change rows classified as BREAKING (>15% delta). */
   breaking: number;
   warning: number;
   info: number;
+  /**
+   * Count of structural BREAKING conditions (tool/hook count drop) that are
+   * tracked separately from metric rows to avoid double-counting.
+   */
+  structuralBreakCount: number;
 }
 
 /**
@@ -57,14 +63,15 @@ export async function sendSeveritySummaryWebhook(
   const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
   if (!webhookUrl || !webhookUrl.trim()) return;
 
-  const { breaking, warning, info } = summary;
+  const { breaking, warning, info, structuralBreakCount } = summary;
   // Only post to Discord when there is something actionable — pure INFO-only
   // runs (all changes within 5%) would create noisy green pings on every CI run.
-  if (breaking === 0 && warning === 0) return;
+  if (breaking === 0 && warning === 0 && structuralBreakCount === 0) return;
 
-  const icon = breaking > 0 ? '🔴' : warning > 0 ? '🟡' : '🟢';
+  const icon = breaking > 0 || structuralBreakCount > 0 ? '🔴' : warning > 0 ? '🟡' : '🟢';
   const summaryLine = [
     breaking > 0 ? `${breaking} BREAKING` : null,
+    structuralBreakCount > 0 ? `${structuralBreakCount} structural BREAKING` : null,
     warning > 0 ? `${warning} WARNING` : null,
     info > 0 ? `${info} INFO` : null,
   ]

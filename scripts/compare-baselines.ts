@@ -270,6 +270,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
   // ── Severity summary ─────────────────────────────────────────────────────
   const summaryParts = [
     severitySummary.breaking > 0 ? `${severitySummary.breaking} BREAKING` : null,
+    severitySummary.structuralBreakCount > 0 ? `${severitySummary.structuralBreakCount} structural BREAKING` : null,
     severitySummary.warning > 0 ? `${severitySummary.warning} WARNING` : null,
     severitySummary.info > 0 ? `${severitySummary.info} INFO` : null,
   ].filter(Boolean);

@@ -180,23 +180,19 @@ export function diffSnapshots(
     changes.some((c) => c.severity === 'BREAKING') || structuralBreaks.length > 0;
 
   // severitySummary counts metric-change rows by tier; structural breaks are
-    // severitySummary.breaking includes structural breaks so the webhook fires
-  // (and shows a non-zero breaking count) on structural-only BREAKING runs.
-  // On the rare case where a metric drop is >15% AND also a structural break,
-  // it will appear in both metric changes (BREAKING) and structuralBreaks —
-  // this intentional overlap ensures users see the full picture.
+    // severitySummary counts metric-change rows by tier; structural breaks are
+  // tracked in structuralBreakCount to avoid double-counting with metric rows.
   const severitySummary = {
-    breaking: changes.filter((c) => c.severity === 'BREAKING').length + structuralBreaks.length,
+    breaking: changes.filter((c) => c.severity === 'BREAKING').length,
     warning: changes.filter((c) => c.severity === 'WARNING').length,
     info: changes.filter((c) => c.severity === 'INFO').length,
+    structuralBreakCount: structuralBreaks.length,
   };
 
-  // hasRegressions preserved with original >= 10% semantics for backward compat.
-  // Use hasBreaking (>15% or structural) for the new stricter threshold.
+  // hasRegressions preserved with original >= 10% metric-only semantics.
+  // Does NOT include structural breaks — use hasBreaking for that.
   const LEGACY_REGRESSION_THRESHOLD_PCT = 10;
-  const hasRegressions =
-    changes.some((c) => Math.abs(c.deltaPct) >= LEGACY_REGRESSION_THRESHOLD_PCT) ||
-    structuralBreaks.length > 0;
+  const hasRegressions = changes.some((c) => Math.abs(c.deltaPct) >= LEGACY_REGRESSION_THRESHOLD_PCT);
 
   return {
     baseline,
