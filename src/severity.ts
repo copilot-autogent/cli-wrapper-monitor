@@ -5,7 +5,7 @@
  * data from July 2026 establishes reference points (see issue #16).
  */
 
-/** Metric change >= this threshold (%) is classified as BREAKING. */
+/** Metric change > this threshold (%) is classified as BREAKING. */
 export const BREAKING_THRESHOLD_PCT = 15;
 
 /** Metric change >= this threshold (%) is classified as WARNING. */

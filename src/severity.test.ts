@@ -353,7 +353,7 @@ describe('diffSnapshots — severity classification', () => {
     const report = diffSnapshots(baseline, current);
     const totalFromChanges =
       report.severitySummary.breaking + report.severitySummary.warning + report.severitySummary.info;
-    // structural breaks also count in breaking
-    expect(totalFromChanges).toBeGreaterThanOrEqual(report.changes.length);
+    // severitySummary counts only metric-change rows; structural breaks are NOT double-counted
+    expect(totalFromChanges).toBe(report.changes.length);
   });
 });

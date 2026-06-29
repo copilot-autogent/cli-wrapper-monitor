@@ -294,7 +294,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
   return lines.join("\n");
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const { a, b, json: jsonMode, output } = parseArgs();
   const snapA = loadSnapshot(a), snapB = loadSnapshot(b);
   const report = diffSnapshots(snapA, snapB);
@@ -304,14 +304,13 @@ function main(): void {
   if (output) { writeFileSync(resolve(output), content, "utf-8"); console.log(`Report written to: ${output}`); }
   else { console.log(content); }
 
-  // Send Discord severity summary (fire-and-forget; non-fatal if it fails)
+  // Await webhook so it completes before any process.exit — especially important
+  // on BREAKING runs where we exit immediately after.
   const ciRunUrl = process.env['GITHUB_SERVER_URL'] && process.env['GITHUB_RUN_ID']
     ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}`
     : undefined;
   const dateA = shortDate(snapA.capturedAt), dateB = shortDate(snapB.capturedAt);
-  sendSeveritySummaryWebhook(report.severitySummary, dateA, dateB, ciRunUrl).catch(
-    (err) => console.warn(`⚠️  Discord webhook failed: ${String(err)}`),
-  );
+  await sendSeveritySummaryWebhook(report.severitySummary, dateA, dateB, ciRunUrl);
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.
   if (report.hasBreaking) {
@@ -326,4 +325,4 @@ function main(): void {
   }
 }
 
-try { main(); } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
+main().catch((err) => { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); });

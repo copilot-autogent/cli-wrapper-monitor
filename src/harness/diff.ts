@@ -158,43 +158,48 @@ export function diffSnapshots(
 
   const baselineToolCount = baseline.experiments['context-tax']?.metrics['toolCount']?.value;
   const currentToolCount = current.experiments['context-tax']?.metrics['toolCount']?.value;
-  if (
-    baselineToolCount !== undefined &&
-    currentToolCount !== undefined &&
-    currentToolCount < baselineToolCount
-  ) {
-    structuralBreaks.push(
-      `Tool count dropped: ${baselineToolCount} → ${currentToolCount}`,
-    );
+  if (baselineToolCount !== undefined) {
+    if (currentToolCount === undefined) {
+      structuralBreaks.push(`Tool count disappeared (was ${baselineToolCount})`);
+    } else if (currentToolCount < baselineToolCount) {
+      structuralBreaks.push(`Tool count dropped: ${baselineToolCount} → ${currentToolCount}`);
+    }
   }
 
   const baselineHookCount = baseline.hookCount;
   const currentHookCount = current.hookCount;
-  if (
-    baselineHookCount !== undefined &&
-    currentHookCount !== undefined &&
-    currentHookCount < baselineHookCount
-  ) {
-    structuralBreaks.push(
-      `Hook count dropped: ${baselineHookCount} → ${currentHookCount}`,
-    );
+  if (baselineHookCount !== undefined) {
+    if (currentHookCount === undefined) {
+      structuralBreaks.push(`Hook count disappeared (was ${baselineHookCount})`);
+    } else if (currentHookCount < baselineHookCount) {
+      structuralBreaks.push(`Hook count dropped: ${baselineHookCount} → ${currentHookCount}`);
+    }
   }
 
   const hasBreaking =
     changes.some((c) => c.severity === 'BREAKING') || structuralBreaks.length > 0;
 
+  // severitySummary counts metric-change rows by tier; structural breaks are
+  // tracked separately in structuralBreaks and should NOT be double-counted here.
   const severitySummary = {
-    breaking: changes.filter((c) => c.severity === 'BREAKING').length + structuralBreaks.length,
+    breaking: changes.filter((c) => c.severity === 'BREAKING').length,
     warning: changes.filter((c) => c.severity === 'WARNING').length,
     info: changes.filter((c) => c.severity === 'INFO').length,
   };
+
+  // hasRegressions preserved with original 10% semantics for backward compat.
+  // Use hasBreaking (>15% or structural) for the new stricter threshold.
+  const LEGACY_REGRESSION_THRESHOLD_PCT = 10;
+  const hasRegressions =
+    changes.some((c) => Math.abs(c.deltaPct) > LEGACY_REGRESSION_THRESHOLD_PCT) ||
+    structuralBreaks.length > 0;
 
   return {
     baseline,
     current,
     changes,
     hasBreaking,
-    hasRegressions: hasBreaking,
+    hasRegressions,
     severitySummary,
     structuralBreaks,
     binaryChanged,
@@ -243,9 +248,17 @@ export function formatDiffReport(report: DiffReport): string {
   lines.push(
     report.hasBreaking ? '🔴  **BREAKING regressions detected**' : '✅ No breaking regressions',
     '',
-    '## Metric Changes',
-    '',
   );
+
+  if (report.structuralBreaks.length > 0) {
+    lines.push('## Structural BREAKING Changes', '');
+    for (const sb of report.structuralBreaks) {
+      lines.push(`- 🔴 **BREAKING**: ${sb}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## Metric Changes', '');
 
   if (report.changes.length === 0) {
     lines.push('_No overlapping metrics to compare._');
