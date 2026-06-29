@@ -1,7 +1,5 @@
 import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, ToolParamSchema, ToolSchemaChange } from './types.js';
-
-const WARNING_THRESHOLD_PCT = 5;
-const REGRESSION_THRESHOLD_PCT = 10;
+import { classifyDeltaPct } from '../severity.js';
 
 /** Diff two model pools, returning structured change records. */
 export function diffModelPool(
@@ -108,13 +106,10 @@ export function diffSnapshots(
           : 0;
 
       const absPct = Math.abs(deltaPct);
-      const severity: MetricChange['severity'] =
-        absPct >= REGRESSION_THRESHOLD_PCT
-          ? 'regression'
-          : absPct >= WARNING_THRESHOLD_PCT
-            ? 'warning'
-            : 'info';
+      const severity = classifyDeltaPct(absPct);
 
+      // Structural BREAKING override: tool count dropping is always BREAKING
+      // regardless of percentage magnitude. Detected below via structuralBreaks.
       changes.push({
         experiment: expName,
         metric: metricName,
@@ -157,11 +152,51 @@ export function diffSnapshots(
 
   const modelPoolChanges = diffModelPool(baseline.modelPool, current.modelPool);
 
+  // ── Structural BREAKING conditions ────────────────────────────────────────
+  // These are BREAKING regardless of percentage magnitude.
+  const structuralBreaks: string[] = [];
+
+  const baselineToolCount = baseline.experiments['context-tax']?.metrics['toolCount']?.value;
+  const currentToolCount = current.experiments['context-tax']?.metrics['toolCount']?.value;
+  if (
+    baselineToolCount !== undefined &&
+    currentToolCount !== undefined &&
+    currentToolCount < baselineToolCount
+  ) {
+    structuralBreaks.push(
+      `Tool count dropped: ${baselineToolCount} → ${currentToolCount}`,
+    );
+  }
+
+  const baselineHookCount = baseline.hookCount;
+  const currentHookCount = current.hookCount;
+  if (
+    baselineHookCount !== undefined &&
+    currentHookCount !== undefined &&
+    currentHookCount < baselineHookCount
+  ) {
+    structuralBreaks.push(
+      `Hook count dropped: ${baselineHookCount} → ${currentHookCount}`,
+    );
+  }
+
+  const hasBreaking =
+    changes.some((c) => c.severity === 'BREAKING') || structuralBreaks.length > 0;
+
+  const severitySummary = {
+    breaking: changes.filter((c) => c.severity === 'BREAKING').length + structuralBreaks.length,
+    warning: changes.filter((c) => c.severity === 'WARNING').length,
+    info: changes.filter((c) => c.severity === 'INFO').length,
+  };
+
   return {
     baseline,
     current,
     changes,
-    hasRegressions: changes.some((c) => c.severity === 'regression'),
+    hasBreaking,
+    hasRegressions: hasBreaking,
+    severitySummary,
+    structuralBreaks,
     binaryChanged,
     systemPromptChanged,
     hookChanged,
@@ -206,7 +241,7 @@ export function formatDiffReport(report: DiffReport): string {
   }
 
   lines.push(
-    report.hasRegressions ? '⚠️  **Regressions detected**' : '✅ No regressions',
+    report.hasBreaking ? '🔴  **BREAKING regressions detected**' : '✅ No breaking regressions',
     '',
     '## Metric Changes',
     '',
@@ -217,11 +252,11 @@ export function formatDiffReport(report: DiffReport): string {
   } else {
     for (const change of report.changes) {
       const icon =
-        change.severity === 'regression'
+        change.severity === 'BREAKING'
           ? '🔴'
-          : change.severity === 'warning'
+          : change.severity === 'WARNING'
             ? '🟡'
-            : '⚪';
+            : '🟢';
       const sign = change.deltaAbsolute >= 0 ? '+' : '';
       lines.push(
         `${icon} **${change.experiment}/${change.metric}**: ` +

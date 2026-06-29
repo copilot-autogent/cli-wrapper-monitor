@@ -160,7 +160,7 @@ export interface MetricChange {
   deltaAbsolute: number;
   /** Percentage change; positive = increase */
   deltaPct: number;
-  severity: 'info' | 'warning' | 'regression';
+  severity: 'BREAKING' | 'WARNING' | 'INFO';
 }
 
 /** A parameter-level change for a single tool between two snapshots */
@@ -182,7 +182,17 @@ export interface DiffReport {
   baseline: MetricSnapshot;
   current: MetricSnapshot;
   changes: MetricChange[];
+  /** True when any metric or structural delta is BREAKING. */
+  hasBreaking: boolean;
+  /** @deprecated Use hasBreaking — kept for backward compatibility. */
   hasRegressions: boolean;
+  /** Counts of severity tiers across all classified deltas (metric + structural). */
+  severitySummary: { breaking: number; warning: number; info: number };
+  /**
+   * Descriptions of structural BREAKING changes (e.g. tool count drop,
+   * hook count drop) that are BREAKING regardless of percentage threshold.
+   */
+  structuralBreaks: string[];
   /** True when the monitored CLI binary hash changed between snapshots */
   binaryChanged: boolean;
   /** True when the assembled system prompt hash changed between snapshots */
