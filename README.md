@@ -137,6 +137,11 @@ TOOL_DEFS_FILE=./tools.json npm run experiments
 npm run capture
 AUTOGENT_PATH=/path/to/autogent npm run capture
 
+# Validate environment without writing files (dry run)
+# Authenticates, verifies SDK connection, calls listModels(), runs a lightweight
+# probe, and prints what would be written — exits without writing any files.
+npx tsx scripts/capture-autogent-baseline.ts --dry-run
+
 # Generate a diff report comparing two baselines
 npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05-31.json
 
