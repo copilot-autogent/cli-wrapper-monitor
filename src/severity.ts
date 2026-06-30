@@ -46,6 +46,79 @@ export interface SeveritySummary {
 }
 
 /**
+ * Send a dedicated Discord webhook alert when one or more named tools are
+ * removed between baselines.
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. Silently no-ops when the
+ * env var is absent or when removedTools is empty. Network errors and non-2xx
+ * responses are caught and logged as warnings.
+ */
+export async function sendToolRemovedWebhook(
+  removedTools: string[],
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): Promise<void> {
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl || !webhookUrl.trim()) return;
+  if (removedTools.length === 0) return;
+
+  const header =
+    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}` +
+    (ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '');
+
+  const DISCORD_MAX_CONTENT = 2000;
+  // Build tool list with graceful truncation: if the full list overflows, keep
+  // as many tool names as fit and append "…and N more" so the alert is never
+  // silently incomplete. Tool names are sanitised to strip backticks/newlines
+  // that could break out of Discord code spans.
+  const sanitize = (name: string) => name.replace(/[`\n\r]/g, '_');
+  const toolEntries = removedTools.map((t) => `\`${sanitize(t)}\``);
+  let toolList = toolEntries.join(', ');
+  const REMOVED_PREFIX = '\nRemoved: ';
+  const headerAndPrefix = header.length + REMOVED_PREFIX.length;
+  if (headerAndPrefix + toolList.length > DISCORD_MAX_CONTENT) {
+    // Iteratively find how many entries fit, accounting for a computed suffix.
+    let kept = 0;
+    let running = 0;
+    for (let i = 0; i < toolEntries.length; i++) {
+      const remaining = toolEntries.length - (i + 1);
+      const suffix = remaining > 0 ? `, …and ${remaining} more` : '';
+      const add = (i > 0 ? 2 : 0) + toolEntries[i].length; // 2 for ", "
+      const projectedTotal = headerAndPrefix + running + add + suffix.length;
+      if (projectedTotal > DISCORD_MAX_CONTENT) break;
+      running += add;
+      kept++;
+    }
+    const remaining = toolEntries.length - kept;
+    const sep = kept > 0 ? ', ' : '';
+    toolList = toolEntries.slice(0, kept).join(', ') + (remaining > 0 ? `${sep}…and ${remaining} more` : '');
+    // Final safety clamp in case header itself is pathologically long.
+    const full = header + REMOVED_PREFIX + toolList;
+    if (full.length > DISCORD_MAX_CONTENT) {
+      toolList = '';
+    }
+  }
+  const content = header + REMOVED_PREFIX + toolList;
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      console.warn(
+        `⚠️  Discord webhook returned ${res.status} — tool-removed alert may not have been delivered.`,
+      );
+    }
+  } catch (err) {
+    console.warn(`⚠️  Discord webhook failed (tool-removed notification skipped): ${String(err)}`);
+  }
+}
+
+/**
  * Send a Discord webhook with a severity summary line, e.g.
  * "1 BREAKING, 2 WARNING, 3 INFO".
  *

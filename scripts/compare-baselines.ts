@@ -29,6 +29,7 @@ import {
   SEVERITY_EMOJI,
   classifyDeltaPct,
   sendSeveritySummaryWebhook,
+  sendToolRemovedWebhook,
   type SeverityLevel,
 } from "../src/severity.js";
 
@@ -313,6 +314,19 @@ async function main(): Promise<void> {
     : undefined;
   const dateA = shortDate(snapA.capturedAt), dateB = shortDate(snapB.capturedAt);
   await sendSeveritySummaryWebhook(report.severitySummary, dateA, dateB, ciRunUrl);
+
+  // Fire a dedicated alert for removed tools — high-signal event warranting its own message.
+  // Covers two cases:
+  //   1. Named tool removal (diffToolSchemas found type:'removed' entries)
+  //   2. Schema capture disappeared (baseline had tools but current has no toolSchemas)
+  const removedTools = report.toolSchemaChanges
+    .filter((c) => c.type === 'removed')
+    .map((c) => c.toolName);
+  const schemaDisappeared = report.structuralBreaks.some((s) => s.startsWith('Tool schema data disappeared'));
+  const toolsToAlert = schemaDisappeared
+    ? ['(all tools — schema capture missing in current snapshot)']
+    : removedTools;
+  await sendToolRemovedWebhook(toolsToAlert, dateA, dateB, ciRunUrl);
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.
   if (report.hasBreaking) {

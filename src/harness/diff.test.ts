@@ -245,8 +245,90 @@ describe('diffToolSchemas', () => {
 });
 
 // ---------------------------------------------------------------------------
-// diffSnapshots — toolSchemaChanged
+// diffSnapshots — tool removal → BREAKING (issue #57)
 // ---------------------------------------------------------------------------
+
+describe('diffSnapshots — tool removal structural BREAKING', () => {
+  it('marks hasBreaking when a named tool is removed from toolSchemas', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchema(), grep: makeSchema() } });
+    const current = makeSnapshot({ toolSchemas: { bash: makeSchema() } }); // grep removed
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.hasBreaking).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('grep'))).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('Tool removed'))).toBe(true);
+  });
+
+  it('includes removed tool name in structural break message', () => {
+    const baseline = makeSnapshot({ toolSchemas: { my_tool: makeSchema({ parameterCount: 3 }) } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    const msg = diff.structuralBreaks.find((s) => s.includes('my_tool'));
+    expect(msg).toBeDefined();
+    expect(msg).toContain('Tool removed');
+    expect(msg).toContain('3 params');
+  });
+
+  it('reports singular "param" when parameterCount is 1', () => {
+    const baseline = makeSnapshot({ toolSchemas: { solo: makeSchema({ parameterCount: 1 }) } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    const msg = diff.structuralBreaks.find((s) => s.includes('solo'));
+    expect(msg).toContain('1 param');
+    expect(msg).not.toContain('1 params');
+  });
+
+  it('reports "parameter count unknown" when schema before has no parameterCount', () => {
+    const schemaNoCount = { ...makeSchema(), parameterCount: undefined as unknown as number };
+    const baseline = makeSnapshot({ toolSchemas: { mystery: schemaNoCount } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    const msg = diff.structuralBreaks.find((s) => s.includes('mystery'));
+    expect(msg).toContain('parameter count unknown');
+  });
+
+  it('increments structuralBreakCount for each removed tool', () => {
+    const baseline = makeSnapshot({
+      toolSchemas: { bash: makeSchema(), grep: makeSchema(), view: makeSchema() },
+    });
+    const current = makeSnapshot({ toolSchemas: { bash: makeSchema() } }); // 2 removed
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.severitySummary.structuralBreakCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does NOT add structural break for added tool', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchema() } });
+    const current = makeSnapshot({ toolSchemas: { bash: makeSchema(), view: makeSchema() } });
+    const diff = diffSnapshots(baseline, current);
+    const toolBreaks = diff.structuralBreaks.filter((s) => s.includes('Tool removed'));
+    expect(toolBreaks).toHaveLength(0);
+    expect(diff.hasBreaking).toBe(false);
+  });
+
+  it('does NOT mark BREAKING when baseline toolSchemas is absent (no false positives vs old baselines)', () => {
+    const baseline = makeSnapshot({ toolSchemas: undefined });
+    const current = makeSnapshot({ toolSchemas: { bash: makeSchema() } });
+    const diff = diffSnapshots(baseline, current);
+    const toolBreaks = diff.structuralBreaks.filter((s) => s.includes('Tool removed'));
+    expect(toolBreaks).toHaveLength(0);
+    expect(diff.hasBreaking).toBe(false);
+  });
+
+  it('does NOT mark BREAKING when baseline has empty toolSchemas {} and current has undefined (nothing was tracked)', () => {
+    const baseline = makeSnapshot({ toolSchemas: {} }); // empty — nothing was tracked
+    const current = makeSnapshot({ toolSchemas: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.hasBreaking).toBe(false);
+    expect(diff.structuralBreaks.filter((s) => s.includes('Tool schema data disappeared'))).toHaveLength(0);
+  });
+
+  it('marks BREAKING when baseline had schemas but current toolSchemas is undefined (capture failure)', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchema(), grep: makeSchema() } });
+    const current = makeSnapshot({ toolSchemas: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.hasBreaking).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('Tool schema data disappeared'))).toBe(true);
+  });
+});
 
 describe('diffSnapshots — toolSchemaChanged', () => {
   it('is false when tool schema hashes are identical', () => {
