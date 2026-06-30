@@ -179,12 +179,24 @@ export function diffSnapshots(
   // Named tool removal via schema tracking = always BREAKING.
   // One removed tool is enough to mark the comparison as a breaking regression
   // because callers that depend on a named tool will fail silently when it vanishes.
-  // Note: diffToolSchemas returns [] when either side lacks toolSchemas, so this
-  // will not fire against older baselines that pre-date schema tracking.
-  for (const change of toolSchemaChanges) {
-    if (change.type === 'removed') {
-      const params = change.before?.parameterCount ?? 0;
-      structuralBreaks.push(`Tool removed: \`${change.toolName}\` (was ${params} param${params !== 1 ? 's' : ''})`);
+  //
+  // Special case: if the baseline had schema data but the current snapshot has none,
+  // that is likely a capture failure — flag it as BREAKING rather than silently no-op.
+  // (diffToolSchemas returns [] when either side is undefined, so we check explicitly.)
+  if (baseline.toolSchemas !== undefined && current.toolSchemas === undefined) {
+    structuralBreaks.push(
+      `Tool schema data disappeared — baseline had ${Object.keys(baseline.toolSchemas).length} tool(s) tracked but current snapshot has no toolSchemas`,
+    );
+  } else {
+    // Normal path: diff named tools and flag each removal.
+    for (const change of toolSchemaChanges) {
+      if (change.type === 'removed') {
+        const paramCount = change.before?.parameterCount;
+        const paramLabel = paramCount !== undefined
+          ? `was ${paramCount} param${paramCount !== 1 ? 's' : ''}`
+          : 'parameter count unknown';
+        structuralBreaks.push(`Tool removed: \`${change.toolName}\` (${paramLabel})`);
+      }
     }
   }
 

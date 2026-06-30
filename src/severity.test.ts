@@ -293,13 +293,14 @@ describe('sendToolRemovedWebhook', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('truncates content at 2000 chars for very long tool lists', async () => {
+  it('truncates content with "…and N more" when tool list is very long', async () => {
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     const manyTools = Array.from({ length: 200 }, (_, i) => `tool_${i}`);
     await sendToolRemovedWebhook(manyTools, '2026-05-01', '2026-06-01');
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
     expect(body.content.length).toBeLessThanOrEqual(2000);
+    expect(body.content).toContain('more');
   });
 });
 

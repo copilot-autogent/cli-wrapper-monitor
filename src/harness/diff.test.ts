@@ -277,6 +277,15 @@ describe('diffSnapshots — tool removal structural BREAKING', () => {
     expect(msg).not.toContain('1 params');
   });
 
+  it('reports "parameter count unknown" when schema before has no parameterCount', () => {
+    const schemaNoCount = { ...makeSchema(), parameterCount: undefined as unknown as number };
+    const baseline = makeSnapshot({ toolSchemas: { mystery: schemaNoCount } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    const msg = diff.structuralBreaks.find((s) => s.includes('mystery'));
+    expect(msg).toContain('parameter count unknown');
+  });
+
   it('increments structuralBreakCount for each removed tool', () => {
     const baseline = makeSnapshot({
       toolSchemas: { bash: makeSchema(), grep: makeSchema(), view: makeSchema() },
@@ -295,12 +304,21 @@ describe('diffSnapshots — tool removal structural BREAKING', () => {
     expect(diff.hasBreaking).toBe(false);
   });
 
-  it('does NOT fire when toolSchemas is absent on either side (no false positives vs old baselines)', () => {
+  it('does NOT fire when baseline toolSchemas is absent (no false positives vs old baselines)', () => {
     const baseline = makeSnapshot({ toolSchemas: undefined });
     const current = makeSnapshot({ toolSchemas: { bash: makeSchema() } });
     const diff = diffSnapshots(baseline, current);
     const toolBreaks = diff.structuralBreaks.filter((s) => s.includes('Tool removed'));
     expect(toolBreaks).toHaveLength(0);
+    expect(diff.hasBreaking).toBe(false);
+  });
+
+  it('marks BREAKING when baseline had schemas but current toolSchemas is undefined (capture failure)', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchema(), grep: makeSchema() } });
+    const current = makeSnapshot({ toolSchemas: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.hasBreaking).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('Tool schema data disappeared'))).toBe(true);
   });
 });
 

@@ -63,18 +63,31 @@ export async function sendToolRemovedWebhook(
   if (!webhookUrl || !webhookUrl.trim()) return;
   if (removedTools.length === 0) return;
 
-  const toolList = removedTools.map((t) => `\`${t}\``).join(', ');
-  // CI URL is placed before the tool list so it survives truncation on large removals.
-  const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
+  const header =
+    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}` +
+    (ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '');
 
   const DISCORD_MAX_CONTENT = 2000;
-  let content =
-    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}` +
-    ciLine +
-    `\nRemoved: ${toolList}`;
-  if (content.length > DISCORD_MAX_CONTENT) {
-    content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
+  // Build tool list with graceful truncation: if the full list overflows, keep
+  // as many tool names as fit and append "…and N more" so the alert is never
+  // silently incomplete.
+  const toolEntries = removedTools.map((t) => `\`${t}\``);
+  let toolList = toolEntries.join(', ');
+  const REMOVED_PREFIX = '\nRemoved: ';
+  if (header.length + REMOVED_PREFIX.length + toolList.length > DISCORD_MAX_CONTENT) {
+    const budget = DISCORD_MAX_CONTENT - header.length - REMOVED_PREFIX.length - 20; // reserve for "…and N more"
+    let kept = 0;
+    let running = 0;
+    for (const entry of toolEntries) {
+      const add = (kept > 0 ? 2 : 0) + entry.length; // 2 for ", "
+      if (running + add > budget) break;
+      running += add;
+      kept++;
+    }
+    const remaining = toolEntries.length - kept;
+    toolList = toolEntries.slice(0, kept).join(', ') + (remaining > 0 ? `, …and ${remaining} more` : '');
   }
+  const content = header + REMOVED_PREFIX + toolList;
 
   try {
     const res = await fetch(webhookUrl, {
