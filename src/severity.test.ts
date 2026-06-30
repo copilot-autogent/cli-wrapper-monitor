@@ -184,19 +184,23 @@ describe('sendSeveritySummaryWebhook', () => {
   });
 
   it('does NOT throw on network error (graceful no-op)', async () => {
+    vi.useFakeTimers();
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
-    await expect(
-      sendSeveritySummaryWebhook(makeSummary({ breaking: 1 }), '2026-05-01', '2026-06-01'),
-    ).resolves.toBeUndefined();
+    const promise = sendSeveritySummaryWebhook(makeSummary({ breaking: 1 }), '2026-05-01', '2026-06-01');
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('does NOT throw on non-2xx response', async () => {
+    vi.useFakeTimers();
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
-    await expect(
-      sendSeveritySummaryWebhook(makeSummary({ breaking: 1 }), '2026-05-01', '2026-06-01'),
-    ).resolves.toBeUndefined();
+    const promise = sendSeveritySummaryWebhook(makeSummary({ breaking: 1 }), '2026-05-01', '2026-06-01');
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('truncates content at 2000 chars for very long URLs', async () => {
@@ -286,11 +290,13 @@ describe('sendToolRemovedWebhook', () => {
   });
 
   it('does NOT throw on network error (graceful no-op)', async () => {
+    vi.useFakeTimers();
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
-    await expect(
-      sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01'),
-    ).resolves.toBeUndefined();
+    const promise = sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01');
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('truncates content with "…and N more" when tool list is very long', async () => {

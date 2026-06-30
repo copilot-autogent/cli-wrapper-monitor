@@ -14,6 +14,7 @@
  * compared to the previous baseline snapshot.
  */
 import type { ModelPool, ContextWindowHeadroomEntry, HeadroomStatus, MetricSnapshot } from './types.js';
+import { sendWebhookWithRetry } from './webhook-utils.js';
 
 /** Fill threshold that triggers a HIGH FILL warning */
 export const HEADROOM_HIGH_FILL_PCT = 50;
@@ -241,18 +242,8 @@ export async function sendHeadroomAlertWebhook(
   }
 
   try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) {
-      console.warn(
-        `⚠️  Discord webhook returned ${res.status} — headroom notification may not have been delivered.`,
-      );
-    }
-  } catch (err) {
-    console.warn(`⚠️  Discord headroom webhook failed (notification skipped): ${String(err)}`);
+    await sendWebhookWithRetry(webhookUrl, { content }, 'headroom-alert');
+  } catch {
+    // sendWebhookWithRetry handles all error logging
   }
 }

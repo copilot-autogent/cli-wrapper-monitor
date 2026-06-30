@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.js.map
 
+# Webhook dead-letter log
+logs/
+
 # Generated baseline snapshots (keep schema.json and latest.json)
 baselines/snapshot-*.json
 

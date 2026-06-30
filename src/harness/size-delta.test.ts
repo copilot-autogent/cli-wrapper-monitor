@@ -394,23 +394,31 @@ describe('sendSizeAlertWebhook', () => {
   });
 
   it('does NOT throw when fetch rejects (network error = graceful no-op)', async () => {
+    vi.useFakeTimers();
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
     const latest = makeSnapshot(100_000, 25_000, 10);
     const current = makeSnapshot(120_000, 30_000, 10);
     const result = computeSizeDelta(current, latest);
 
-    await expect(sendSizeAlertWebhook(result)).resolves.toBeUndefined();
+    const promise = sendSizeAlertWebhook(result);
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('does NOT throw on non-2xx response (logged as warning, no CI failure)', async () => {
+    vi.useFakeTimers();
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
     const latest = makeSnapshot(100_000, 25_000, 10);
     const current = makeSnapshot(120_000, 30_000, 10);
     const result = computeSizeDelta(current, latest);
 
-    await expect(sendSizeAlertWebhook(result)).resolves.toBeUndefined();
+    const promise = sendSizeAlertWebhook(result);
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('truncates content at 2000 chars when many metrics alert', async () => {
