@@ -103,11 +103,7 @@ export async function sendToolRemovedWebhook(
   }
   const content = header + REMOVED_PREFIX + toolList;
 
-  try {
-    await sendWebhookWithRetry(webhookUrl, { content }, 'tool-removed');
-  } catch {
-    // sendWebhookWithRetry handles all error logging
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'tool-removed');
 }
 
 /**
@@ -154,9 +150,5 @@ export async function sendSeveritySummaryWebhook(
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }
 
-  try {
-    await sendWebhookWithRetry(webhookUrl, { content }, 'severity-summary');
-  } catch {
-    // sendWebhookWithRetry handles all error logging
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'severity-summary');
 }

@@ -241,9 +241,5 @@ export async function sendHeadroomAlertWebhook(
     content = [...content].slice(0, DISCORD_MAX_CONTENT - 1).join('') + '…';
   }
 
-  try {
-    await sendWebhookWithRetry(webhookUrl, { content }, 'headroom-alert');
-  } catch {
-    // sendWebhookWithRetry handles all error logging
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'headroom-alert');
 }

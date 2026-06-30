@@ -471,22 +471,28 @@ describe('sendHeadroomAlertWebhook', () => {
 
   it('does NOT throw when fetch rejects (network error = graceful no-op)', async () => {
     vi.useFakeTimers();
-    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
-    mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
-    const promise = sendHeadroomAlertWebhook([makeCrossing('model', 64_000, 71.7)]);
-    await vi.runAllTimersAsync();
-    await expect(promise).resolves.toBeUndefined();
-    vi.useRealTimers();
+    try {
+      process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+      mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
+      const promise = sendHeadroomAlertWebhook([makeCrossing('model', 64_000, 71.7)]);
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does NOT throw on non-2xx response (logged as warning, no CI failure)', async () => {
     vi.useFakeTimers();
-    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
-    mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
-    const promise = sendHeadroomAlertWebhook([makeCrossing('model', 64_000, 71.7)]);
-    await vi.runAllTimersAsync();
-    await expect(promise).resolves.toBeUndefined();
-    vi.useRealTimers();
+    try {
+      process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+      mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
+      const promise = sendHeadroomAlertWebhook([makeCrossing('model', 64_000, 71.7)]);
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('truncates content at 2000 code points when many crossings', async () => {

@@ -33,20 +33,23 @@ function sleep(ms: number): Promise<void> {
  * Append a structured failure entry to the dead-letter log.
  * Creates `logs/` if it does not exist. Errors are swallowed to avoid
  * masking the original webhook failure.
+ *
+ * @returns true if the entry was written, false if a FS error occurred.
  */
-function writeDeadLetter(entry: DeadLetterEntry): void {
+function writeDeadLetter(entry: DeadLetterEntry): boolean {
   try {
     mkdirSync(resolve('logs'), { recursive: true });
     appendFileSync(DEAD_LETTER_LOG, JSON.stringify(entry) + '\n', 'utf-8');
+    return true;
   } catch {
-    // Best-effort — do not throw
+    return false;
   }
 }
 
 /**
  * Send a Discord webhook POST with exponential-backoff retries.
  *
- * - Retries up to {@link MAX_ATTEMPTS} times (1 s / 2 s / 4 s delays).
+ * - Retries up to {@link MAX_ATTEMPTS} times (1 s → 2 s delays between attempts).
  * - On final failure writes a structured entry to `logs/webhook-failures.jsonl`.
  * - Logs `console.error` on final failure so CI run logs surface the problem.
  *
@@ -91,10 +94,13 @@ export async function sendWebhookWithRetry(
     attempts: MAX_ATTEMPTS,
   };
 
-  writeDeadLetter(entry);
+  const logged = writeDeadLetter(entry);
+  const logSuffix = logged
+    ? ` Failure logged to ${DEAD_LETTER_LOG}.`
+    : ' Dead-letter write also failed (disk full or permissions error).';
 
   console.error(
     `❌ Discord webhook delivery failed after ${MAX_ATTEMPTS} attempts` +
-      ` [${alertType}]: ${lastError}. Failure logged to ${DEAD_LETTER_LOG}.`,
+      ` [${alertType}]: ${lastError}.${logSuffix}`,
   );
 }

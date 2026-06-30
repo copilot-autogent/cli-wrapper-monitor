@@ -222,9 +222,5 @@ export async function sendSizeAlertWebhook(
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }
 
-  try {
-    await sendWebhookWithRetry(webhookUrl, { content }, 'size-alert');
-  } catch {
-    // sendWebhookWithRetry handles all error logging
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'size-alert');
 }

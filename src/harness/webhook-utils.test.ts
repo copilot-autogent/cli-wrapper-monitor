@@ -187,6 +187,7 @@ describe('sendWebhookWithRetry', () => {
   // ---- Dead-letter fs errors swallowed -----------------------------------
 
   it('does not throw when appendFileSync fails', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     (appendFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
       throw new Error('ENOSPC');
     });
@@ -196,5 +197,8 @@ describe('sendWebhookWithRetry', () => {
     await vi.runAllTimersAsync();
     // Should resolve without throwing despite FS error
     await expect(promise).resolves.toBeUndefined();
+    // console.error should mention that dead-letter write also failed
+    expect(consoleSpy.mock.calls[0][0]).toContain('Dead-letter write also failed');
+    consoleSpy.mockRestore();
   });
 });
