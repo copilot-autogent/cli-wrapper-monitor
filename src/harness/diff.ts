@@ -176,6 +176,16 @@ export function diffSnapshots(
     }
   }
 
+  // Named tool removal via schema tracking = always BREAKING.
+  // One removed tool is enough to mark the comparison as a breaking regression
+  // because callers that depend on a named tool will fail silently when it vanishes.
+  for (const change of toolSchemaChanges) {
+    if (change.type === 'removed') {
+      const params = change.before!.parameterCount;
+      structuralBreaks.push(`Tool removed: \`${change.toolName}\` (was ${params} param${params !== 1 ? 's' : ''})`);
+    }
+  }
+
   const hasBreaking =
     changes.some((c) => c.severity === 'BREAKING') || structuralBreaks.length > 0;
 

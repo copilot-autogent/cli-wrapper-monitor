@@ -209,8 +209,101 @@ describe('sendSeveritySummaryWebhook', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Integration: diffSnapshots severity classification
+// sendToolRemovedWebhook (issue #57)
 // ---------------------------------------------------------------------------
+
+import { sendToolRemovedWebhook } from './severity.js';
+
+describe('sendToolRemovedWebhook', () => {
+  let originalEnv: string | undefined;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    originalEnv = process.env['DISCORD_WEBHOOK_URL'];
+    mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env['DISCORD_WEBHOOK_URL'];
+    } else {
+      process.env['DISCORD_WEBHOOK_URL'] = originalEnv;
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is not set', async () => {
+    delete process.env['DISCORD_WEBHOOK_URL'];
+    await sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call fetch when removedTools is empty', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendToolRemovedWebhook([], '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('POSTs when at least one tool is removed', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01');
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('body contains BREAKING label', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('BREAKING');
+  });
+
+  it('body contains removed tool name(s)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendToolRemovedWebhook(['my_tool', 'other_tool'], '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('my_tool');
+    expect(body.content).toContain('other_tool');
+  });
+
+  it('body contains date range', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('2026-05-01');
+    expect(body.content).toContain('2026-06-01');
+  });
+
+  it('body includes CI run URL when provided', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const ciUrl = 'https://github.com/org/repo/actions/runs/42';
+    await sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01', ciUrl);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain(ciUrl);
+  });
+
+  it('does NOT throw on network error (graceful no-op)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
+    await expect(
+      sendToolRemovedWebhook(['bash'], '2026-05-01', '2026-06-01'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('truncates content at 2000 chars for very long tool lists', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const manyTools = Array.from({ length: 200 }, (_, i) => `tool_${i}`);
+    await sendToolRemovedWebhook(manyTools, '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content.length).toBeLessThanOrEqual(2000);
+  });
+});
+
 
 import { diffSnapshots } from './harness/diff.js';
 import type { MetricSnapshot } from './harness/types.js';

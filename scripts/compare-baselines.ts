@@ -29,6 +29,7 @@ import {
   SEVERITY_EMOJI,
   classifyDeltaPct,
   sendSeveritySummaryWebhook,
+  sendToolRemovedWebhook,
   type SeverityLevel,
 } from "../src/severity.js";
 
@@ -313,6 +314,12 @@ async function main(): Promise<void> {
     : undefined;
   const dateA = shortDate(snapA.capturedAt), dateB = shortDate(snapB.capturedAt);
   await sendSeveritySummaryWebhook(report.severitySummary, dateA, dateB, ciRunUrl);
+
+  // Fire a dedicated alert for each removed tool — high-signal event warranting its own message.
+  const removedTools = report.toolSchemaChanges
+    .filter((c) => c.type === 'removed')
+    .map((c) => c.toolName);
+  await sendToolRemovedWebhook(removedTools, dateA, dateB, ciRunUrl);
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.
   if (report.hasBreaking) {
