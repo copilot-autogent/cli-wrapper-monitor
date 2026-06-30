@@ -70,22 +70,34 @@ export async function sendToolRemovedWebhook(
   const DISCORD_MAX_CONTENT = 2000;
   // Build tool list with graceful truncation: if the full list overflows, keep
   // as many tool names as fit and append "…and N more" so the alert is never
-  // silently incomplete.
-  const toolEntries = removedTools.map((t) => `\`${t}\``);
+  // silently incomplete. Tool names are sanitised to strip backticks/newlines
+  // that could break out of Discord code spans.
+  const sanitize = (name: string) => name.replace(/[`\n\r]/g, '_');
+  const toolEntries = removedTools.map((t) => `\`${sanitize(t)}\``);
   let toolList = toolEntries.join(', ');
   const REMOVED_PREFIX = '\nRemoved: ';
-  if (header.length + REMOVED_PREFIX.length + toolList.length > DISCORD_MAX_CONTENT) {
-    const budget = DISCORD_MAX_CONTENT - header.length - REMOVED_PREFIX.length - 20; // reserve for "…and N more"
+  const headerAndPrefix = header.length + REMOVED_PREFIX.length;
+  if (headerAndPrefix + toolList.length > DISCORD_MAX_CONTENT) {
+    // Iteratively find how many entries fit, accounting for a computed suffix.
     let kept = 0;
     let running = 0;
-    for (const entry of toolEntries) {
-      const add = (kept > 0 ? 2 : 0) + entry.length; // 2 for ", "
-      if (running + add > budget) break;
+    for (let i = 0; i < toolEntries.length; i++) {
+      const remaining = toolEntries.length - (i + 1);
+      const suffix = remaining > 0 ? `, …and ${remaining} more` : '';
+      const add = (i > 0 ? 2 : 0) + toolEntries[i].length; // 2 for ", "
+      const projectedTotal = headerAndPrefix + running + add + suffix.length;
+      if (projectedTotal > DISCORD_MAX_CONTENT) break;
       running += add;
       kept++;
     }
     const remaining = toolEntries.length - kept;
-    toolList = toolEntries.slice(0, kept).join(', ') + (remaining > 0 ? `, …and ${remaining} more` : '');
+    const sep = kept > 0 ? ', ' : '';
+    toolList = toolEntries.slice(0, kept).join(', ') + (remaining > 0 ? `${sep}…and ${remaining} more` : '');
+    // Final safety clamp in case header itself is pathologically long.
+    const full = header + REMOVED_PREFIX + toolList;
+    if (full.length > DISCORD_MAX_CONTENT) {
+      toolList = '';
+    }
   }
   const content = header + REMOVED_PREFIX + toolList;
 

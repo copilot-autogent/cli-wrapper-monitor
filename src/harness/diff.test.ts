@@ -304,13 +304,21 @@ describe('diffSnapshots — tool removal structural BREAKING', () => {
     expect(diff.hasBreaking).toBe(false);
   });
 
-  it('does NOT fire when baseline toolSchemas is absent (no false positives vs old baselines)', () => {
+  it('does NOT mark BREAKING when baseline toolSchemas is absent (no false positives vs old baselines)', () => {
     const baseline = makeSnapshot({ toolSchemas: undefined });
     const current = makeSnapshot({ toolSchemas: { bash: makeSchema() } });
     const diff = diffSnapshots(baseline, current);
     const toolBreaks = diff.structuralBreaks.filter((s) => s.includes('Tool removed'));
     expect(toolBreaks).toHaveLength(0);
     expect(diff.hasBreaking).toBe(false);
+  });
+
+  it('does NOT mark BREAKING when baseline has empty toolSchemas {} and current has undefined (nothing was tracked)', () => {
+    const baseline = makeSnapshot({ toolSchemas: {} }); // empty — nothing was tracked
+    const current = makeSnapshot({ toolSchemas: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.hasBreaking).toBe(false);
+    expect(diff.structuralBreaks.filter((s) => s.includes('Tool schema data disappeared'))).toHaveLength(0);
   });
 
   it('marks BREAKING when baseline had schemas but current toolSchemas is undefined (capture failure)', () => {

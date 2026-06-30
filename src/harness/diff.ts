@@ -180,12 +180,17 @@ export function diffSnapshots(
   // One removed tool is enough to mark the comparison as a breaking regression
   // because callers that depend on a named tool will fail silently when it vanishes.
   //
-  // Special case: if the baseline had schema data but the current snapshot has none,
-  // that is likely a capture failure — flag it as BREAKING rather than silently no-op.
+  // Special case: if the baseline had tracked tools but current snapshot has no
+  // toolSchemas, that is likely a capture failure — flag it as BREAKING.
+  // Only trigger when baseline actually tracked at least one tool, so a baseline
+  // that was created without schema data does not produce a false positive.
   // (diffToolSchemas returns [] when either side is undefined, so we check explicitly.)
-  if (baseline.toolSchemas !== undefined && current.toolSchemas === undefined) {
+  const baselineTrackedToolCount = baseline.toolSchemas
+    ? Object.keys(baseline.toolSchemas).length
+    : 0;
+  if (baseline.toolSchemas !== undefined && current.toolSchemas === undefined && baselineTrackedToolCount > 0) {
     structuralBreaks.push(
-      `Tool schema data disappeared — baseline had ${Object.keys(baseline.toolSchemas).length} tool(s) tracked but current snapshot has no toolSchemas`,
+      `Tool schema data disappeared — baseline had ${baselineTrackedToolCount} tool(s) tracked but current snapshot has no toolSchemas`,
     );
   } else {
     // Normal path: diff named tools and flag each removal.
