@@ -64,13 +64,14 @@ export async function sendToolRemovedWebhook(
   if (removedTools.length === 0) return;
 
   const toolList = removedTools.map((t) => `\`${t}\``).join(', ');
+  // CI URL is placed before the tool list so it survives truncation on large removals.
   const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
 
   const DISCORD_MAX_CONTENT = 2000;
   let content =
-    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}\n` +
-    `Removed: ${toolList}` +
-    ciLine;
+    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}` +
+    ciLine +
+    `\nRemoved: ${toolList}`;
   if (content.length > DISCORD_MAX_CONTENT) {
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }

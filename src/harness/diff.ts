@@ -179,9 +179,11 @@ export function diffSnapshots(
   // Named tool removal via schema tracking = always BREAKING.
   // One removed tool is enough to mark the comparison as a breaking regression
   // because callers that depend on a named tool will fail silently when it vanishes.
+  // Note: diffToolSchemas returns [] when either side lacks toolSchemas, so this
+  // will not fire against older baselines that pre-date schema tracking.
   for (const change of toolSchemaChanges) {
     if (change.type === 'removed') {
-      const params = change.before!.parameterCount;
+      const params = change.before?.parameterCount ?? 0;
       structuralBreaks.push(`Tool removed: \`${change.toolName}\` (was ${params} param${params !== 1 ? 's' : ''})`);
     }
   }

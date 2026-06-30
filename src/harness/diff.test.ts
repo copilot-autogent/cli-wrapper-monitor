@@ -304,8 +304,6 @@ describe('diffSnapshots — tool removal structural BREAKING', () => {
   });
 });
 
-
-
 describe('diffSnapshots — toolSchemaChanged', () => {
   it('is false when tool schema hashes are identical', () => {
     const snap = makeSnapshot({ toolSchemaHash: 'sha256:same', toolSchemas: {} });

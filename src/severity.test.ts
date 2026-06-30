@@ -5,6 +5,7 @@ import {
   WARNING_THRESHOLD_PCT,
   SEVERITY_EMOJI,
   sendSeveritySummaryWebhook,
+  sendToolRemovedWebhook,
   type SeverityLevel,
   type SeveritySummary,
 } from './severity.js';
@@ -211,8 +212,6 @@ describe('sendSeveritySummaryWebhook', () => {
 // ---------------------------------------------------------------------------
 // sendToolRemovedWebhook (issue #57)
 // ---------------------------------------------------------------------------
-
-import { sendToolRemovedWebhook } from './severity.js';
 
 describe('sendToolRemovedWebhook', () => {
   let originalEnv: string | undefined;
