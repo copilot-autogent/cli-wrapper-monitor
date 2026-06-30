@@ -187,7 +187,7 @@ export interface DiffReport {
   /** @deprecated Use hasBreaking — kept for backward compatibility. */
   hasRegressions: boolean;
   /** Counts of severity tiers across all classified deltas (metric + structural). */
-  severitySummary: { breaking: number; warning: number; info: number };
+  severitySummary: { breaking: number; warning: number; info: number; structuralBreakCount: number };
   /**
    * Descriptions of structural BREAKING changes (e.g. tool count drop,
    * hook count drop) that are BREAKING regardless of percentage threshold.
