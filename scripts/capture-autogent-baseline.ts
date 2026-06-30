@@ -18,6 +18,7 @@
  *   SKIP_REFUSAL=true npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_MODEL_POOL=true npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_PROVENANCE=true npx tsx scripts/capture-autogent-baseline.ts
+ *   npx tsx scripts/capture-autogent-baseline.ts --dry-run
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -49,6 +50,7 @@ const LIVE_MODE = process.env['LIVE_MODE'] === 'true';
 const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
 const SKIP_MODEL_POOL = process.env['SKIP_MODEL_POOL'] === 'true';
 const SKIP_PROVENANCE = process.env['SKIP_PROVENANCE'] === 'true';
+const DRY_RUN = process.argv.includes('--dry-run');
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -582,8 +584,11 @@ async function captureModelPool(): Promise<ModelPool | null> {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<void> {
+  const dryRun = opts.dryRun ?? DRY_RUN;
+
   console.log('CLI Wrapper Monitor — Autogent Baseline Capture');
+  if (dryRun) console.log('(DRY RUN — validation only, no files will be written)');
   console.log('================================================\n');
 
   const autogentExists = existsSync(AUTOGENT_PATH);
@@ -740,6 +745,33 @@ async function main(): Promise<void> {
     console.log('');
   }
 
+  // ── Dry-run output ────────────────────────────────────────────────────────
+  if (dryRun) {
+    const safeTs = snapshot.capturedAt.replace(/[:.]/g, '-');
+    const snapshotPath = join(BASELINES_DIR, `snapshot-${safeTs}.json`);
+    const latestPath = join(BASELINES_DIR, 'latest.json');
+
+    // Print full metrics per experiment (same as normal mode)
+    for (const [expName, result] of Object.entries(snapshot.experiments)) {
+      console.log(`Experiment: ${expName}`);
+      if (result.error) {
+        console.log(`  Error: ${result.error}`);
+      } else {
+        for (const [key, metric] of Object.entries(result.metrics)) {
+          console.log(`  ${key}: ${metric.value} ${metric.unit}`);
+        }
+      }
+      console.log('');
+    }
+
+    console.log('Would write:');
+    console.log(`  ${snapshotPath}`);
+    console.log(`  ${latestPath}`);
+    console.log('');
+    console.log('DRY RUN — no files written');
+    return;
+  }
+
   const savedPath = store.save(snapshot);
   console.log(`Snapshot saved: ${savedPath}`);
   console.log('');
@@ -869,7 +901,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run when invoked directly (not imported in tests)
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  captureBaseline().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
