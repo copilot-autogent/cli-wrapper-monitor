@@ -1,0 +1,232 @@
+# PR Baseline Delta Comment
+#
+# Triggers on PRs that touch baselines/*.json and posts (or updates) a
+# formatted comparison comment summarising metric deltas between the
+# previous baseline and the one being introduced by the PR.
+#
+# The comment is identified by an HTML marker so subsequent pushes to
+# the same PR update the existing comment rather than creating duplicates.
+#
+# Secrets / permissions required:
+#   GITHUB_TOKEN — provided automatically by Actions; needs:
+#     contents: read, pull-requests: write
+#
+# No new secrets are needed beyond what is already present in the repo.
+name: PR Baseline Delta Comment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'baselines/*.json'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  baseline-delta-comment:
+    name: Post baseline delta summary
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout full history so we can list all baseline files
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # 2. Set up Node.js and install dependencies
+      # -----------------------------------------------------------------------
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # 3. Identify the new baseline and locate the previous one
+      #
+      # Strategy:
+      #   a. Determine which baseline JSON files were added/modified in this PR
+      #      by comparing HEAD against the base branch.
+      #   b. Pick the newest (alphabetically last) changed file as FILE_B.
+      #   c. From all baseline files present in the repo EXCLUDING FILE_B,
+      #      pick the alphabetically last one as FILE_A (previous baseline).
+      #   d. If no previous baseline exists, set COMPARE_SKIP=true to post
+      #      a graceful "no previous baseline" comment instead.
+      #
+      # Baselines are named with ISO date prefixes (YYYY-MM-DD…), so
+      # alphabetical order == chronological order.
+      # -----------------------------------------------------------------------
+      - name: Identify baselines to compare
+        id: identify
+        run: |
+          # Files changed in this PR relative to the merge base.
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- 'baselines/*.json' | sort)
+          echo "Changed baseline files:"
+          echo "${CHANGED}"
+
+          if [ -z "${CHANGED}" ]; then
+            echo "No baseline JSON files changed — nothing to compare."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Newest changed file = FILE_B
+          FILE_B=$(echo "${CHANGED}" | tail -1)
+          echo "FILE_B=${FILE_B}" >> "$GITHUB_OUTPUT"
+          echo "Selected FILE_B: ${FILE_B}"
+
+          # All baselines in the repo except FILE_B, sorted; skip schema.json and latest.json
+          ALL_BASELINES=$(ls baselines/*.json 2>/dev/null \
+            | grep -v 'schema\.json' \
+            | grep -v 'latest\.json' \
+            | grep -v "^${FILE_B}$" \
+            | sort)
+
+          FILE_A=$(echo "${ALL_BASELINES}" | tail -1)
+
+          if [ -z "${FILE_A}" ]; then
+            echo "No previous baseline available."
+            echo "skip=false"         >> "$GITHUB_OUTPUT"
+            echo "no_prev=true"       >> "$GITHUB_OUTPUT"
+          else
+            echo "FILE_A=${FILE_A}"   >> "$GITHUB_OUTPUT"
+            echo "no_prev=false"      >> "$GITHUB_OUTPUT"
+            echo "Selected FILE_A: ${FILE_A}"
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 4a. Run npm run compare and capture output (when both baselines exist)
+      # -----------------------------------------------------------------------
+      - name: Run baseline comparison
+        id: compare
+        if: steps.identify.outputs.skip == 'false' && steps.identify.outputs.no_prev != 'true'
+        # continue-on-error so a BREAKING regression (exit 1) still lets us
+        # post the comment; we surface the regression status in the comment.
+        continue-on-error: true
+        run: |
+          FILE_A="${{ steps.identify.outputs.FILE_A }}"
+          FILE_B="${{ steps.identify.outputs.FILE_B }}"
+          echo "Comparing ${FILE_A} → ${FILE_B}"
+          npm run compare -- "${FILE_A}" "${FILE_B}" > /tmp/compare-output.md 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 4b. Determine compare exit code for BREAKING detection
+      # -----------------------------------------------------------------------
+      - name: Capture compare exit code
+        id: compare_exit
+        if: steps.identify.outputs.skip == 'false' && steps.identify.outputs.no_prev != 'true'
+        run: |
+          # Rerun compare silently to capture the real exit code (step.outcome
+          # is only 'success'/'failure', but we need the numeric code).
+          FILE_A="${{ steps.identify.outputs.FILE_A }}"
+          FILE_B="${{ steps.identify.outputs.FILE_B }}"
+          npm run compare -- "${FILE_A}" "${FILE_B}" > /dev/null 2>&1 && \
+            echo "breaking=false" >> "$GITHUB_OUTPUT" || \
+            echo "breaking=true"  >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 5. Build the final comment body
+      # -----------------------------------------------------------------------
+      - name: Build comment body
+        id: build_comment
+        if: steps.identify.outputs.skip == 'false'
+        run: |
+          MARKER="<!-- baseline-delta-summary -->"
+          FILE_B="${{ steps.identify.outputs.FILE_B }}"
+          FILE_A="${{ steps.identify.outputs.FILE_A }}"
+
+          if [ "${{ steps.identify.outputs.no_prev }}" = "true" ]; then
+            BODY="${MARKER}
+          ## 📊 Baseline Delta Summary
+
+          > ℹ️ **No previous baseline to compare against.**
+          > This appears to be the first baseline file in the repository.
+
+          **New baseline:** \`${FILE_B}\`
+
+          ---
+          *Generated by compare-baselines.ts — run \`npm run compare\` locally for full output*"
+          else
+            BREAKING="${{ steps.compare_exit.outputs.breaking }}"
+            if [ "${BREAKING}" = "true" ]; then
+              HEADER="🔴 BREAKING regression detected"
+            else
+              HEADER="📊 Baseline Delta Summary"
+            fi
+
+            COMPARE_OUTPUT=$(cat /tmp/compare-output.md)
+
+            BODY="${MARKER}
+          ## ${HEADER}
+
+          **Comparing:** \`${FILE_A}\` → \`${FILE_B}\`
+
+          ${COMPARE_OUTPUT}
+
+          ---
+          *Generated by [compare-baselines.ts](https://github.com/${{ github.repository }}/blob/main/scripts/compare-baselines.ts) — run \`npm run compare\` locally for full output*"
+          fi
+
+          # Save body to file to avoid shell quoting issues
+          echo "${BODY}" > /tmp/comment-body.md
+          echo "body_path=/tmp/comment-body.md" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 6. Find existing delta comment (if any) to update instead of duplicating
+      # -----------------------------------------------------------------------
+      - name: Find existing comment
+        id: find_comment
+        if: steps.identify.outputs.skip == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- baseline-delta-summary -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            return existing ? existing.id : null;
+
+      # -----------------------------------------------------------------------
+      # 7. Post or update the PR comment
+      # -----------------------------------------------------------------------
+      - name: Post or update PR comment
+        if: steps.identify.outputs.skip == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/comment-body.md', 'utf8');
+            const commentId = ${{ steps.find_comment.outputs.result }};
+
+            if (commentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: commentId,
+                body,
+              });
+              console.log(`Updated existing comment ${commentId}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              console.log('Created new comment');
+            }
