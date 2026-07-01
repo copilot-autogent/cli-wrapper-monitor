@@ -114,6 +114,19 @@ describe('readHealthLog', () => {
     expect(entries[1]!.status).toBe('error');
     expect(entries[1]!.errorType).toBe('NetworkError');
   });
+
+  it('skips malformed lines and returns remaining valid entries', () => {
+    // Manually inject a bad line between two good ones
+    const goodLine1 = JSON.stringify(makeEntry('success')) + '\n';
+    const badLine = '{not valid json\n';
+    const goodLine2 = JSON.stringify(makeEntry('error', { errorType: 'Timeout' })) + '\n';
+    mockFileStore.set(LOG_PATH, goodLine1 + badLine + goodLine2);
+
+    const entries = readHealthLog(LOG_PATH);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.status).toBe('success');
+    expect(entries[1]!.status).toBe('error');
+  });
 });
 
 describe('consecutiveFailureCount', () => {

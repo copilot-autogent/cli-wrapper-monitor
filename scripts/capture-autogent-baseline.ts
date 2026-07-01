@@ -946,16 +946,6 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
 // Only run when invoked directly (not imported in tests)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   captureBaseline().catch((err: unknown) => {
-    const errorType = err instanceof Error ? err.constructor.name : typeof err;
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    appendHealthLog(HEALTH_LOG_PATH, {
-      capturedAt: new Date().toISOString(),
-      status: 'error',
-      durationMs: 0,
-      baselinesDir: BASELINES_DIR,
-      errorType,
-      errorMessage,
-    });
     console.error(err);
     process.exit(1);
   });

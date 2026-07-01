@@ -4,7 +4,8 @@
  * Provides:
  *   - appendHealthLog()       write one entry after a capture attempt
  *   - readHealthLog()         read all entries from the log
- *   - checkConsecutiveFailures()  detect streaks of 3+ consecutive errors
+ *   - consecutiveFailureCount()  count trailing consecutive errors
+ *   - hasFailureStreak()      detect streaks of 3+ consecutive errors
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -45,19 +46,28 @@ export function appendHealthLog(logPath: string, entry: HealthLogEntry): void {
 
 /**
  * Read and parse all entries from the JSONL health log.
- * Returns an empty array when the file does not exist or cannot be parsed.
+ * Returns an empty array when the file does not exist or cannot be read.
+ * Malformed individual lines are skipped rather than aborting the parse,
+ * so one corrupt entry does not erase history or suppress streak detection.
  */
 export function readHealthLog(logPath: string): HealthLogEntry[] {
   if (!existsSync(logPath)) return [];
+  let raw: string;
   try {
-    const raw = readFileSync(logPath, 'utf-8');
-    return raw
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      .map((line) => JSON.parse(line) as HealthLogEntry);
+    raw = readFileSync(logPath, 'utf-8');
   } catch {
     return [];
   }
+  const entries: HealthLogEntry[] = [];
+  for (const line of raw.split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      entries.push(JSON.parse(line) as HealthLogEntry);
+    } catch {
+      // Skip malformed lines — best-effort reads.
+    }
+  }
+  return entries;
 }
 
 /**
