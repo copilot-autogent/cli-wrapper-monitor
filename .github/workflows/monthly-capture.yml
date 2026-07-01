@@ -3,7 +3,8 @@
 # Runs on the 3rd of every month at 00:00 UTC.  On each run it:
 #   1. Checks out autogent source (using GITHUB_API_TOKEN).
 #   2. Captures a fresh baseline snapshot via `npm run capture`.
-#   3. Commits the new baseline + health log to a dated branch.
+#   3. Commits the new baseline + health log to a dated branch
+#      (even on capture failure so artefacts are preserved).
 #   4. Opens a PR titled "baseline: YYYY-MM capture".
 #   5. Posts a Discord success or failure notification.
 #
@@ -25,9 +26,10 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+# Concurrency guard: prevent overlapping monthly runs for the same month.
+concurrency:
+  group: monthly-capture-${{ github.event_name }}
+  cancel-in-progress: false
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -39,6 +41,9 @@ jobs:
     name: Dry-run (validate capture script)
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    # Read-only token is sufficient for this job.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +73,20 @@ jobs:
     name: Capture baseline and open PR
     runs-on: ubuntu-latest
     if: github.event_name != 'push'
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
+      # -----------------------------------------------------------------------
+      # 0. Initialise month variables immediately so they are available even if
+      #    later steps fail (needed by the Discord failure notification).
+      # -----------------------------------------------------------------------
+      - name: Set month variables
+        run: |
+          YEAR_MONTH=$(date +%Y-%m)
+          echo "YEAR_MONTH=${YEAR_MONTH}" >> "$GITHUB_ENV"
+          echo "BRANCH=baseline/${YEAR_MONTH}" >> "$GITHUB_ENV"
+
       # -----------------------------------------------------------------------
       # 1. Check out the monitor repo (full history for git log in script)
       # -----------------------------------------------------------------------
@@ -121,17 +139,22 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # 5. Create the capture branch
+      # 5. Create or reset the capture branch
       # -----------------------------------------------------------------------
       - name: Create capture branch
+        id: create_branch
         run: |
-          YEAR_MONTH=$(date +%Y-%m)
-          BRANCH="baseline/${YEAR_MONTH}"
-          echo "YEAR_MONTH=${YEAR_MONTH}" >> "$GITHUB_ENV"
-          echo "BRANCH=${BRANCH}"        >> "$GITHUB_ENV"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${BRANCH}"
+          # If the branch already exists on the remote (re-run in same month),
+          # fetch and check it out rather than failing with branch-exists error.
+          if git ls-remote --exit-code origin "${BRANCH}" > /dev/null 2>&1; then
+            echo "Branch ${BRANCH} already exists — fetching and checking out."
+            git fetch origin "${BRANCH}"
+            git checkout -b "${BRANCH}" "origin/${BRANCH}"
+          else
+            git checkout -b "${BRANCH}"
+          fi
 
       # -----------------------------------------------------------------------
       # 6. Run the baseline capture
@@ -140,7 +163,7 @@ jobs:
         id: run_capture
         # continue-on-error keeps the workflow alive when the script exits
         # non-zero (e.g., regressions detected) so we can still commit the
-        # snapshot and surface the failure as a red run / Discord alert.
+        # snapshot artefacts and surface the failure as a red run / Discord alert.
         continue-on-error: true
         env:
           # Map GITHUB_API_TOKEN → GITHUB_TOKEN so the refusal-rate
@@ -150,27 +173,33 @@ jobs:
         run: npm run capture
 
       # -----------------------------------------------------------------------
-      # 7. Commit artefacts to the capture branch
+      # 7. Commit artefacts to the capture branch.
+      #    Runs even on capture failure so the health log entry and any
+      #    partial snapshot are preserved for later investigation.
       # -----------------------------------------------------------------------
       - name: Commit baseline artefacts
         id: commit
-        if: steps.run_capture.outcome == 'success'
+        if: steps.create_branch.outcome == 'success'
         run: |
-          # Stage all generated artefacts: baselines, health log, chart, reports.
-          git add baselines/ logs/ chart.svg reports/ 2>/dev/null || true
+          # Stage generated artefacts: baselines, health log, chart, reports.
+          # Use explicit paths so unrelated workspace changes are never staged.
+          for path in baselines logs chart.svg reports; do
+            [ -e "${path}" ] && git add "${path}"
+          done
 
           if git diff --staged --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Nothing new to commit — baseline is unchanged."
           else
-            git commit -m "baseline: ${YEAR_MONTH} capture [skip ci]"
+            CAPTURE_STATUS="${{ steps.run_capture.outcome }}"
+            git commit -m "baseline: ${YEAR_MONTH} capture (${CAPTURE_STATUS}) [skip ci]"
             git push origin "${BRANCH}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed and pushed to ${BRANCH}."
           fi
 
       # -----------------------------------------------------------------------
-      # 8. Open the PR
+      # 8. Open the PR (only on successful capture with new artefacts)
       # -----------------------------------------------------------------------
       - name: Open PR
         id: pr
@@ -178,13 +207,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_API_TOKEN || github.token }}
         run: |
-          PR_URL=$(gh pr create \
-            --title "baseline: ${YEAR_MONTH} capture" \
-            --body "$(printf 'Automated monthly baseline capture for %s.\n\nGenerated by the \`monthly-capture\` GitHub Actions workflow.\n\nPart of #65' "${YEAR_MONTH}")" \
-            --base main \
-            --head "${BRANCH}")
-          echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
-          echo "PR opened: ${PR_URL}"
+          # If a PR already exists for this branch (re-run in same month),
+          # reuse it rather than failing with a duplicate-PR error.
+          EXISTING=$(gh pr list --head "${BRANCH}" --state open --json url --jq '.[0].url // ""')
+          if [ -n "${EXISTING}" ]; then
+            echo "PR already open: ${EXISTING}"
+            echo "pr_url=${EXISTING}" >> "$GITHUB_OUTPUT"
+          else
+            # Write body to a temp file to avoid shell quoting / backtick issues.
+            cat > /tmp/pr-body.md << EOF
+Automated monthly baseline capture for ${YEAR_MONTH}.
+
+Generated by the \`monthly-capture\` GitHub Actions workflow.
+
+Part of #65
+EOF
+            PR_URL=$(gh pr create \
+              --title "baseline: ${YEAR_MONTH} capture" \
+              --body-file /tmp/pr-body.md \
+              --base main \
+              --head "${BRANCH}")
+            echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
+            echo "PR opened: ${PR_URL}"
+          fi
 
       # -----------------------------------------------------------------------
       # 9. Discord success notification
@@ -204,15 +249,19 @@ jobs:
           else
             MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` — baseline unchanged, no PR opened."
           fi
-          curl -s -o /dev/null -w "%{http_code}" -X POST "${DISCORD_WEBHOOK_URL}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"${MSG}\"}"
+          # Use jq to safely build the JSON payload so special chars in MSG are escaped.
+          PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" -d "${PAYLOAD}")
+          echo "Discord response: ${HTTP_STATUS}"
+          [ "${HTTP_STATUS}" -ge 200 ] && [ "${HTTP_STATUS}" -lt 300 ] || \
+            echo "Warning: Discord notification returned HTTP ${HTTP_STATUS}"
 
       # -----------------------------------------------------------------------
       # 10. Discord failure notification
       # -----------------------------------------------------------------------
       - name: Notify Discord (failure)
-        if: steps.run_capture.outcome != 'success'
+        if: failure() || steps.run_capture.outcome == 'failure'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
@@ -221,16 +270,18 @@ jobs:
             exit 0
           fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          curl -s -o /dev/null -w "%{http_code}" -X POST "${DISCORD_WEBHOOK_URL}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"❌ Monthly baseline capture failed for \`${YEAR_MONTH}\`. Check the run for details and health log streak. ${RUN_URL}\"}"
+          MSG="❌ Monthly baseline capture failed for \`${YEAR_MONTH:-unknown}\`. Check run: ${RUN_URL}"
+          PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" -d "${PAYLOAD}")
+          echo "Discord response: ${HTTP_STATUS}"
 
       # -----------------------------------------------------------------------
       # 11. Fail the workflow when the capture exited non-zero so GitHub
       #     marks the run red and triggers any configured notifications.
       # -----------------------------------------------------------------------
       - name: Fail on capture error
-        if: steps.run_capture.outcome != 'success'
+        if: steps.run_capture.outcome == 'failure'
         run: |
-          echo "Capture script exited non-zero. Check logs above."
+          echo "Capture script exited non-zero. Check logs above for details."
           exit 1
