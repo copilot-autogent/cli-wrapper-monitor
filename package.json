@@ -12,6 +12,7 @@
     "chart": "npx ts-node --esm scripts/generate-chart.ts",
     "multi-model": "npx ts-node --esm scripts/capture-multi-model.ts",
     "validate": "npx ts-node --esm scripts/validate-baselines.ts",
+    "health": "npx tsx scripts/capture-health-report.ts",
     "test": "vitest run"
   },
   "dependencies": {

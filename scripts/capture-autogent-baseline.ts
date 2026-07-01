@@ -41,9 +41,16 @@ import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
 import type { ModelPool, ToolParamSchema } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
+import {
+  appendHealthLog,
+  readHealthLog,
+  hasFailureStreak,
+  FAILURE_STREAK_THRESHOLD,
+} from '../src/harness/capture-health.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASELINES_DIR = join(__dirname, '../baselines');
+const HEALTH_LOG_PATH = join(__dirname, '../logs/capture-health.jsonl');
 
 const AUTOGENT_PATH = process.env['AUTOGENT_PATH'] ?? '/app';
 const LIVE_MODE = process.env['LIVE_MODE'] === 'true';
@@ -586,6 +593,16 @@ async function captureModelPool(): Promise<ModelPool | null> {
 
 export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<void> {
   const dryRun = opts.dryRun ?? DRY_RUN;
+  const startMs = Date.now();
+
+  // Warn when the last FAILURE_STREAK_THRESHOLD captures all failed.
+  const priorEntries = readHealthLog(HEALTH_LOG_PATH);
+  if (hasFailureStreak(priorEntries)) {
+    console.warn(
+      `⚠️  CAPTURE HEALTH: last ${FAILURE_STREAK_THRESHOLD} capture attempts all failed. ` +
+        'Check API auth, network connectivity, and model availability.',
+    );
+  }
 
   console.log('CLI Wrapper Monitor — Autogent Baseline Capture');
   if (dryRun) console.log('(DRY RUN — validation only, no files will be written)');
@@ -600,6 +617,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     `Workspace path: ${WORKSPACE_PATH} ${workspaceExists ? '✓' : '✗ (not found)'}`,
   );
 
+  try {
   // Extract data from autogent source
   const systemPrompt =
     autogentExists || workspaceExists
@@ -769,12 +787,25 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     console.log(`  ${latestPath}`);
     console.log('');
     console.log('DRY RUN — no files written');
+    appendHealthLog(HEALTH_LOG_PATH, {
+      capturedAt: snapshot.capturedAt,
+      status: 'success',
+      durationMs: Date.now() - startMs,
+      baselinesDir: BASELINES_DIR,
+    });
     return;
   }
 
   const savedPath = store.save(snapshot);
   console.log(`Snapshot saved: ${savedPath}`);
   console.log('');
+  appendHealthLog(HEALTH_LOG_PATH, {
+    capturedAt: snapshot.capturedAt,
+    status: 'success',
+    durationMs: Date.now() - startMs,
+    baselinesDir: BASELINES_DIR,
+    snapshotPath: savedPath,
+  });
 
   // Print full metrics per experiment
   for (const [expName, result] of Object.entries(snapshot.experiments)) {
@@ -899,11 +930,32 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
         'Run again next month to detect changes.',
     );
   }
+  } catch (err) {
+    appendHealthLog(HEALTH_LOG_PATH, {
+      capturedAt: new Date().toISOString(),
+      status: 'error',
+      durationMs: Date.now() - startMs,
+      baselinesDir: BASELINES_DIR,
+      errorType: err instanceof Error ? err.constructor.name : typeof err,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 // Only run when invoked directly (not imported in tests)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   captureBaseline().catch((err: unknown) => {
+    const errorType = err instanceof Error ? err.constructor.name : typeof err;
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    appendHealthLog(HEALTH_LOG_PATH, {
+      capturedAt: new Date().toISOString(),
+      status: 'error',
+      durationMs: 0,
+      baselinesDir: BASELINES_DIR,
+      errorType,
+      errorMessage,
+    });
     console.error(err);
     process.exit(1);
   });
