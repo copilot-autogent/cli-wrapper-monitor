@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { diffSnapshots } from "../src/harness/diff.js";
+import { validateBaselineFile } from "../src/harness/validator.js";
 import {
   BREAKING_THRESHOLD_PCT,
   WARNING_THRESHOLD_PCT,
@@ -298,6 +299,19 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
 
 async function main(): Promise<void> {
   const { a, b, json: jsonMode, output } = parseArgs();
+
+  // Pre-validate both input files before attempting the diff
+  for (const [label, path] of [["file-a", a], ["file-b", b]] as [string, string][]) {
+    const result = validateBaselineFile(resolve(path));
+    if (!result.valid) {
+      console.error(`Error: baseline integrity check failed for ${label} (${path}):`);
+      for (const err of result.errors) {
+        console.error(`  [${err.field}] ${err.message}`);
+      }
+      process.exit(1);
+    }
+  }
+
   const snapA = loadSnapshot(a), snapB = loadSnapshot(b);
   const report = diffSnapshots(snapA, snapB);
   let content: string;

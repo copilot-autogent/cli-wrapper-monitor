@@ -11,6 +11,7 @@
     "trend": "npx ts-node --esm scripts/trend-report.ts",
     "chart": "npx ts-node --esm scripts/generate-chart.ts",
     "multi-model": "npx ts-node --esm scripts/capture-multi-model.ts",
+    "validate": "npx ts-node --esm scripts/validate-baselines.ts",
     "test": "vitest run"
   },
   "dependencies": {
