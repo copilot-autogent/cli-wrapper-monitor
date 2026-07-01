@@ -28,6 +28,11 @@ jobs:
   baseline-delta-comment:
     name: Post baseline delta summary
     runs-on: ubuntu-latest
+    # Serialize per-PR to prevent two simultaneous synchronize events from
+    # both missing the existing marker comment and creating duplicate posts.
+    concurrency:
+      group: pr-baseline-comment-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
 
     steps:
       # -----------------------------------------------------------------------
@@ -79,17 +84,26 @@ jobs:
           # Ensure the base branch ref is available for the merge-base diff.
           git fetch origin "${{ github.base_ref }}" --depth=1 2>/dev/null || true
 
-          # Files changed in this PR relative to the merge base.
-          # Exclude the non-snapshot helper files from consideration.
-          CHANGED=$(git diff --name-only \
-              "$(git merge-base HEAD "origin/${{ github.base_ref }}")" HEAD \
-              -- 'baselines/*.json' \
-            | grep -v 'baselines/schema\.json' \
-            | grep -v 'baselines/latest\.json' \
-            | sort)
+          # Compute merge-base; fall back to origin/<base> if it fails (e.g., forked PR).
+          MERGE_BASE=$(git merge-base HEAD "origin/${{ github.base_ref }}" 2>/dev/null \
+            || git rev-parse "origin/${{ github.base_ref }}" 2>/dev/null \
+            || echo "")
+
+          # Files added or modified in this PR relative to the merge base.
+          # --diff-filter=AM excludes deleted/renamed files (we can't compare against
+          # a file that no longer exists on HEAD).
+          # grep -v pipelines use || true so an all-excluded result doesn't abort the step.
+          CHANGED=""
+          if [ -n "${MERGE_BASE}" ]; then
+            CHANGED=$(git diff --name-only --diff-filter=AM "${MERGE_BASE}" HEAD \
+                -- 'baselines/*.json' \
+              | { grep -v 'baselines/schema\.json' || true; } \
+              | { grep -v 'baselines/latest\.json' || true; } \
+              | sort)
+          fi
 
           echo "Changed baseline files:"
-          echo "${CHANGED:-  (none)"
+          echo "${CHANGED:-(none)}"
 
           if [ -z "${CHANGED}" ]; then
             echo "No snapshot baseline JSON files changed — nothing to compare."
@@ -104,11 +118,14 @@ jobs:
           echo "FILE_B=${FILE_B}" >> "$GITHUB_OUTPUT"
           echo "Selected FILE_B: ${FILE_B}"
 
-          # All snapshot baselines that sort strictly BEFORE FILE_B.
-          # Uses find to avoid parsing ls output (spaces/newlines in filenames).
-          FILE_A=$(find baselines -maxdepth 1 -name '*.json' \
-            | grep -v 'baselines/schema\.json' \
-            | grep -v 'baselines/latest\.json' \
+          # All snapshot baselines on the base branch that sort strictly BEFORE FILE_B.
+          # We resolve FILE_A from the base branch (origin/<base>) so that even if
+          # the PR modifies an older baseline, we always compare against a committed
+          # (not PR-mutated) previous snapshot.
+          # Uses find + shell pipelines with || true to avoid pipefail aborts on empty.
+          FILE_A=$(git ls-tree -r --name-only "origin/${{ github.base_ref }}" -- 'baselines/' \
+            | { grep -v 'baselines/schema\.json' || true; } \
+            | { grep -v 'baselines/latest\.json' || true; } \
             | sort \
             | awk -v fb="${FILE_B}" '$0 < fb' \
             | tail -1)
@@ -142,7 +159,11 @@ jobs:
           FILE_B: ${{ steps.identify.outputs.FILE_B }}
         run: |
           echo "Comparing ${FILE_A} → ${FILE_B}"
-          npm run compare -- "${FILE_A}" "${FILE_B}" > /tmp/compare-output.md 2>&1
+          # Redirect stderr to a separate file so diagnostic messages don't
+          # contaminate the Markdown comment body.
+          npm run compare -- "${FILE_A}" "${FILE_B}" \
+            > /tmp/compare-output.md \
+            2> /tmp/compare-stderr.txt
 
       # -----------------------------------------------------------------------
       # 5. Build the final comment body and write it to /tmp/comment-body.md.
@@ -184,7 +205,7 @@ jobs:
               HEADER="📊 Baseline Delta Summary"
             fi
 
-            COMPARE_OUTPUT=$(cat /tmp/compare-output.md)
+            COMPARE_OUTPUT=$(cat /tmp/compare-output.md 2>/dev/null || echo "(compare output unavailable)")
 
             {
               printf '%s\n' \
