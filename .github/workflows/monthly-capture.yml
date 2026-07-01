@@ -1,0 +1,236 @@
+# Monthly baseline capture — PR flow.
+#
+# Runs on the 3rd of every month at 00:00 UTC.  On each run it:
+#   1. Checks out autogent source (using GITHUB_API_TOKEN).
+#   2. Captures a fresh baseline snapshot via `npm run capture`.
+#   3. Commits the new baseline + health log to a dated branch.
+#   4. Opens a PR titled "baseline: YYYY-MM capture".
+#   5. Posts a Discord success or failure notification.
+#
+# A lightweight dry-run job also runs on every push to `main` to verify
+# the capture script still loads without writing any files.
+#
+# Secrets required (already present in repo):
+#   GITHUB_API_TOKEN    — PAT with access to JackywithaWhiteDog/autogent
+#                         and copilot-autogent/cli-wrapper-monitor.
+#                         Also passed as GITHUB_TOKEN to enable the
+#                         refusal-rate experiment (GitHub Models API).
+#   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → no notification.
+name: Monthly Capture (PR flow)
+
+on:
+  schedule:
+    - cron: '0 0 3 * *'  # 3rd of every month at 00:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Dry-run: fires on every push to main.
+  # Validates that the capture script loads and parses cleanly without
+  # writing any baseline files (--dry-run flag).
+  # ---------------------------------------------------------------------------
+  dry-run:
+    name: Dry-run (validate capture script)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate capture script (dry run)
+        # --dry-run causes the script to parse source, compute metrics, and
+        # log a health entry but skip writing baseline JSON files.
+        # AUTOGENT_PATH is set to the workspace so static source extraction
+        # finds the local copy rather than falling back to the /app default.
+        run: npm run capture -- --dry-run
+        env:
+          AUTOGENT_PATH: ${{ github.workspace }}
+
+  # ---------------------------------------------------------------------------
+  # Full capture: fires on schedule and manual workflow_dispatch.
+  # Creates a dated branch, runs the capture, commits artefacts, opens a PR,
+  # and posts a Discord notification for success or failure.
+  # ---------------------------------------------------------------------------
+  capture:
+    name: Capture baseline and open PR
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push'
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Check out the monitor repo (full history for git log in script)
+      # -----------------------------------------------------------------------
+      - name: Checkout cli-wrapper-monitor
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Use GITHUB_API_TOKEN so the subsequent push is authenticated.
+          token: ${{ secrets.GITHUB_API_TOKEN || github.token }}
+
+      # -----------------------------------------------------------------------
+      # 2. Check out autogent source for static extraction
+      # -----------------------------------------------------------------------
+      - name: Checkout autogent source
+        id: checkout_autogent
+        uses: actions/checkout@v4
+        # continue-on-error so the rest of the workflow still runs even
+        # when the secret is missing or the repo is temporarily unavailable.
+        continue-on-error: true
+        with:
+          repository: JackywithaWhiteDog/autogent
+          token: ${{ secrets.GITHUB_API_TOKEN }}
+          ref: main
+          path: autogent-src
+          fetch-depth: 1
+
+      # -----------------------------------------------------------------------
+      # 3. Build environment
+      # -----------------------------------------------------------------------
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # 4. Resolve AUTOGENT_PATH
+      # -----------------------------------------------------------------------
+      - name: Resolve autogent path
+        run: |
+          if [ "${{ steps.checkout_autogent.outcome }}" = "success" ] && \
+             [ -d autogent-src/src ]; then
+            echo "AUTOGENT_PATH=${{ github.workspace }}/autogent-src" >> "$GITHUB_ENV"
+            echo "Autogent source available at autogent-src/"
+          else
+            echo "Autogent source not available — capture will use static fallback."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 5. Create the capture branch
+      # -----------------------------------------------------------------------
+      - name: Create capture branch
+        run: |
+          YEAR_MONTH=$(date +%Y-%m)
+          BRANCH="baseline/${YEAR_MONTH}"
+          echo "YEAR_MONTH=${YEAR_MONTH}" >> "$GITHUB_ENV"
+          echo "BRANCH=${BRANCH}"        >> "$GITHUB_ENV"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+
+      # -----------------------------------------------------------------------
+      # 6. Run the baseline capture
+      # -----------------------------------------------------------------------
+      - name: Run capture
+        id: run_capture
+        # continue-on-error keeps the workflow alive when the script exits
+        # non-zero (e.g., regressions detected) so we can still commit the
+        # snapshot and surface the failure as a red run / Discord alert.
+        continue-on-error: true
+        env:
+          # Map GITHUB_API_TOKEN → GITHUB_TOKEN so the refusal-rate
+          # experiment (GitHub Models API) and provenance lookups work.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_API_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: npm run capture
+
+      # -----------------------------------------------------------------------
+      # 7. Commit artefacts to the capture branch
+      # -----------------------------------------------------------------------
+      - name: Commit baseline artefacts
+        id: commit
+        if: steps.run_capture.outcome == 'success'
+        run: |
+          # Stage all generated artefacts: baselines, health log, chart, reports.
+          git add baselines/ logs/ chart.svg reports/ 2>/dev/null || true
+
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing new to commit — baseline is unchanged."
+          else
+            git commit -m "baseline: ${YEAR_MONTH} capture [skip ci]"
+            git push origin "${BRANCH}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Committed and pushed to ${BRANCH}."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 8. Open the PR
+      # -----------------------------------------------------------------------
+      - name: Open PR
+        id: pr
+        if: steps.run_capture.outcome == 'success' && steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_API_TOKEN || github.token }}
+        run: |
+          PR_URL=$(gh pr create \
+            --title "baseline: ${YEAR_MONTH} capture" \
+            --body "$(printf 'Automated monthly baseline capture for %s.\n\nGenerated by the \`monthly-capture\` GitHub Actions workflow.\n\nPart of #65' "${YEAR_MONTH}")" \
+            --base main \
+            --head "${BRANCH}")
+          echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
+          echo "PR opened: ${PR_URL}"
+
+      # -----------------------------------------------------------------------
+      # 9. Discord success notification
+      # -----------------------------------------------------------------------
+      - name: Notify Discord (success)
+        if: steps.run_capture.outcome == 'success'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "DISCORD_WEBHOOK_URL not set — skipping notification."
+            exit 0
+          fi
+          PR_LINK="${{ steps.pr.outputs.pr_url }}"
+          if [ -n "${PR_LINK}" ]; then
+            MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` — PR: ${PR_LINK}"
+          else
+            MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` — baseline unchanged, no PR opened."
+          fi
+          curl -s -o /dev/null -w "%{http_code}" -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"${MSG}\"}"
+
+      # -----------------------------------------------------------------------
+      # 10. Discord failure notification
+      # -----------------------------------------------------------------------
+      - name: Notify Discord (failure)
+        if: steps.run_capture.outcome != 'success'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "DISCORD_WEBHOOK_URL not set — skipping notification."
+            exit 0
+          fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null -w "%{http_code}" -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"❌ Monthly baseline capture failed for \`${YEAR_MONTH}\`. Check the run for details and health log streak. ${RUN_URL}\"}"
+
+      # -----------------------------------------------------------------------
+      # 11. Fail the workflow when the capture exited non-zero so GitHub
+      #     marks the run red and triggers any configured notifications.
+      # -----------------------------------------------------------------------
+      - name: Fail on capture error
+        if: steps.run_capture.outcome != 'success'
+        run: |
+          echo "Capture script exited non-zero. Check logs above."
+          exit 1
