@@ -2,9 +2,8 @@
 /**
  * Baseline integrity validator — standalone script.
  *
- * Scans all baselines/*.json files (excluding schema.json and latest.json
- * which is a symlink to the most recent capture) and validates each against
- * the expected MetricSnapshot schema.
+ * Scans all baselines/*.json files (including latest.json if present, excluding
+ * schema.json) and validates each against the expected MetricSnapshot schema.
  *
  * Usage:
  *   npm run validate
@@ -20,7 +19,7 @@
 
 import { readdirSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
-import { validateBaselineFile } from '../src/harness/validator.js';
+import { validateBaselineFile, type ValidationResult } from '../src/harness/validator.js';
 
 interface CliArgs {
   dir: string;
@@ -45,7 +44,7 @@ function main(): void {
   }
 
   const files = readdirSync(absDir)
-    .filter((f) => f.endsWith('.json') && f !== 'schema.json' && f !== 'latest.json')
+    .filter((f) => f.endsWith('.json') && f !== 'schema.json')
     .sort();
 
   if (files.length === 0) {
@@ -53,16 +52,18 @@ function main(): void {
     process.exit(0);
   }
 
-  let allValid = true;
+  // Validate all files in a single pass; cache results to avoid double I/O
+  const results: Array<{ file: string; result: ValidationResult }> = files.map((file) => ({
+    file,
+    result: validateBaselineFile(join(absDir, file)),
+  }));
 
-  for (const file of files) {
-    const filePath = join(absDir, file);
-    const result = validateBaselineFile(filePath);
-
+  let invalidCount = 0;
+  for (const { file, result } of results) {
     if (result.valid) {
       console.log(`  ✓  ${file}`);
     } else {
-      allValid = false;
+      invalidCount++;
       console.error(`  ✗  ${file}`);
       for (const err of result.errors) {
         console.error(`       [${err.field}] ${err.message}`);
@@ -70,14 +71,10 @@ function main(): void {
     }
   }
 
-  if (allValid) {
+  if (invalidCount === 0) {
     console.log(`\nAll ${files.length} baseline file${files.length === 1 ? '' : 's'} valid.`);
     process.exit(0);
   } else {
-    const invalidCount = files.filter((f) => {
-      const result = validateBaselineFile(join(absDir, f));
-      return !result.valid;
-    }).length;
     console.error(`\n${invalidCount} of ${files.length} baseline file${files.length === 1 ? '' : 's'} invalid.`);
     process.exit(1);
   }

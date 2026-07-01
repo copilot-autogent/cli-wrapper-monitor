@@ -31,9 +31,16 @@ const REQUIRED_TOP_LEVEL: Record<string, string> = {
 };
 
 function isValidIso8601(value: string): boolean {
+  // Require full datetime pattern (date + T + time)
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return false;
   const d = new Date(value);
-  return !isNaN(d.getTime());
+  if (isNaN(d.getTime())) return false;
+  // Round-trip check: re-serialize and ensure the date components match what was
+  // passed in, catching impossible dates that JS normalizes (e.g. Feb 31 → Mar 3).
+  const iso = d.toISOString(); // always UTC "YYYY-MM-DDTHH:mm:ss.sssZ"
+  const inputDate = value.slice(0, 10);
+  const roundTripDate = iso.slice(0, 10);
+  return inputDate === roundTripDate;
 }
 
 /**
@@ -86,6 +93,8 @@ export function validateSnapshot(data: unknown): ValidationResult {
       for (const required of ['name', 'description', 'metrics']) {
         if (!(required in exp)) {
           errors.push({ field: `${expPath}.${required}`, message: `Experiment "${expName}" is missing required field "${required}"` });
+        } else if (required !== 'metrics' && typeof exp[required] !== 'string') {
+          errors.push({ field: `${expPath}.${required}`, message: `Experiment "${expName}.${required}" must be a string, got ${typeof exp[required]}` });
         }
       }
 
@@ -103,15 +112,19 @@ export function validateSnapshot(data: unknown): ValidationResult {
           for (const required of ['value', 'unit', 'description']) {
             if (!(required in metric)) {
               errors.push({ field: `${metricPath}.${required}`, message: `Metric "${metricName}" is missing required field "${required}"` });
+            } else if (required !== 'value' && typeof metric[required] !== 'string') {
+              errors.push({ field: `${metricPath}.${required}`, message: `Metric "${metricName}.${required}" must be a string, got ${typeof metric[required]}` });
             }
           }
 
-          // Check numeric value is not NaN or null
-          const value = metric.value;
-          if (typeof value !== 'number') {
-            errors.push({ field: `${metricPath}.value`, message: `Metric "${metricName}.value" must be a number, got ${value === null ? 'null' : typeof value}` });
-          } else if (isNaN(value)) {
-            errors.push({ field: `${metricPath}.value`, message: `Metric "${metricName}.value" is NaN` });
+          // Check numeric value is not NaN or null (only if present)
+          if ('value' in metric) {
+            const value = metric.value;
+            if (typeof value !== 'number') {
+              errors.push({ field: `${metricPath}.value`, message: `Metric "${metricName}.value" must be a number, got ${value === null ? 'null' : typeof value}` });
+            } else if (isNaN(value)) {
+              errors.push({ field: `${metricPath}.value`, message: `Metric "${metricName}.value" is NaN` });
+            }
           }
         }
       } else if ('metrics' in exp && (exp.metrics === null || typeof exp.metrics !== 'object' || Array.isArray(exp.metrics))) {
