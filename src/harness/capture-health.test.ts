@@ -115,6 +115,18 @@ describe('readHealthLog', () => {
     expect(entries[1]!.errorType).toBe('NetworkError');
   });
 
+  it('skips entries with missing or invalid status field', () => {
+    const goodLine = JSON.stringify(makeEntry('success')) + '\n';
+    const noStatusLine = JSON.stringify({ capturedAt: new Date().toISOString(), durationMs: 1, baselinesDir: '/b' }) + '\n';
+    const badStatusLine = JSON.stringify({ ...makeEntry('success'), status: 'ok' }) + '\n';
+    const nullLine = 'null\n';
+    mockFileStore.set(LOG_PATH, goodLine + noStatusLine + badStatusLine + nullLine);
+
+    const entries = readHealthLog(LOG_PATH);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.status).toBe('success');
+  });
+
   it('skips malformed lines and returns remaining valid entries', () => {
     // Manually inject a bad line between two good ones
     const goodLine1 = JSON.stringify(makeEntry('success')) + '\n';

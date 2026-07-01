@@ -62,7 +62,16 @@ export function readHealthLog(logPath: string): HealthLogEntry[] {
   for (const line of raw.split('\n')) {
     if (line.trim() === '') continue;
     try {
-      entries.push(JSON.parse(line) as HealthLogEntry);
+      const parsed: unknown = JSON.parse(line);
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        'status' in parsed &&
+        ((parsed as Record<string, unknown>)['status'] === 'success' ||
+          (parsed as Record<string, unknown>)['status'] === 'error')
+      ) {
+        entries.push(parsed as HealthLogEntry);
+      }
     } catch {
       // Skip malformed lines — best-effort reads.
     }
