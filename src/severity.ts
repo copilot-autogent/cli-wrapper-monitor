@@ -5,6 +5,8 @@
  * data from July 2026 establishes reference points (see issue #16).
  */
 
+import { sendWebhookWithRetry } from './harness/webhook-utils.js';
+
 /** Metric change > this threshold (%) is classified as BREAKING. */
 export const BREAKING_THRESHOLD_PCT = 15;
 
@@ -101,21 +103,7 @@ export async function sendToolRemovedWebhook(
   }
   const content = header + REMOVED_PREFIX + toolList;
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) {
-      console.warn(
-        `⚠️  Discord webhook returned ${res.status} — tool-removed alert may not have been delivered.`,
-      );
-    }
-  } catch (err) {
-    console.warn(`⚠️  Discord webhook failed (tool-removed notification skipped): ${String(err)}`);
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'tool-removed');
 }
 
 /**
@@ -162,19 +150,5 @@ export async function sendSeveritySummaryWebhook(
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) {
-      console.warn(
-        `⚠️  Discord webhook returned ${res.status} — severity summary may not have been delivered.`,
-      );
-    }
-  } catch (err) {
-    console.warn(`⚠️  Discord webhook failed (notification skipped): ${String(err)}`);
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'severity-summary');
 }

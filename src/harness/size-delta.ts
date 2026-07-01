@@ -1,4 +1,5 @@
 import type { MetricSnapshot } from './types.js';
+import { sendWebhookWithRetry } from './webhook-utils.js';
 
 /** Percentage change threshold that triggers a size alert */
 export const SIZE_ALERT_THRESHOLD_PCT = 10;
@@ -221,19 +222,5 @@ export async function sendSizeAlertWebhook(
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) {
-      console.warn(
-        `⚠️  Discord webhook returned ${res.status} — notification may not have been delivered.`,
-      );
-    }
-  } catch (err) {
-    console.warn(`⚠️  Discord webhook failed (notification skipped): ${String(err)}`);
-  }
+  await sendWebhookWithRetry(webhookUrl, { content }, 'size-alert');
 }
