@@ -26,9 +26,11 @@ on:
   push:
     branches: [main]
 
-# Concurrency guard: prevent overlapping monthly runs for the same month.
+# Concurrency guard: only one capture (schedule or manual) can run at a time.
+# Using a fixed group name (not event_name) prevents a schedule + dispatch
+# from racing on the same baseline/YYYY-MM branch in the same month.
 concurrency:
-  group: monthly-capture-${{ github.event_name }}
+  group: monthly-capture
   cancel-in-progress: false
 
 jobs:
@@ -174,18 +176,25 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 7. Commit artefacts to the capture branch.
-      #    Runs even on capture failure so the health log entry and any
-      #    partial snapshot are preserved for later investigation.
+      #    Health log is always staged (failure streak data must be preserved).
+      #    Baseline data artefacts are only staged on a successful capture to
+      #    avoid committing partial or deleted data from a failed run.
       # -----------------------------------------------------------------------
       - name: Commit baseline artefacts
         id: commit
         if: steps.create_branch.outcome == 'success'
         run: |
-          # Stage generated artefacts: baselines, health log, chart, reports.
-          # Use explicit paths so unrelated workspace changes are never staged.
-          for path in baselines logs chart.svg reports; do
-            [ -e "${path}" ] && git add "${path}"
-          done
+          # Always stage the health log — it is append-only and safe to commit
+          # even when the capture itself errored.
+          [ -e logs ] && git add logs
+
+          # Only stage data artefacts when capture succeeded to avoid
+          # committing partially-written or deleted files from a failed run.
+          if [ "${{ steps.run_capture.outcome }}" = "success" ]; then
+            for path in baselines chart.svg reports; do
+              [ -e "${path}" ] && git add "${path}"
+            done
+          fi
 
           if git diff --staged --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -193,7 +202,9 @@ jobs:
           else
             CAPTURE_STATUS="${{ steps.run_capture.outcome }}"
             git commit -m "baseline: ${YEAR_MONTH} capture (${CAPTURE_STATUS}) [skip ci]"
-            git push origin "${BRANCH}"
+            # --force-with-lease is safe: we own this branch and it avoids
+            # a non-fast-forward error when a same-month re-run re-pushes.
+            git push --force-with-lease origin "${BRANCH}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed and pushed to ${BRANCH}."
           fi
@@ -262,6 +273,9 @@ EOF
       # -----------------------------------------------------------------------
       - name: Notify Discord (failure)
         if: failure() || steps.run_capture.outcome == 'failure'
+        # continue-on-error so a jq/curl hiccup here doesn't change the job
+        # outcome — the run is already failed; notification is best-effort.
+        continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |

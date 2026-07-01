@@ -195,7 +195,7 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 
 ## Methodology Notes
 
-- **Monthly cadence** — captures run automatically on the 3rd via GitHub Actions (PR flow); not CI on every commit
+- **Monthly cadence** — captures run automatically via GitHub Actions: PR-flow on the 3rd (`monthly-capture.yml`), direct-commit on the 1st (`monthly-baseline.yml`); not CI on every commit
 - **Copilot CLI/SDK only** — no cross-CLI comparison (resource constraint)
 - **Static + live modes** — context-tax works without credentials; refusal-rate needs a live session
 - **Results in repo** — snapshots committed to `baselines/`, diff reports to `reports/`
