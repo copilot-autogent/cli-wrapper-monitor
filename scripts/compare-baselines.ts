@@ -31,6 +31,7 @@ import {
   classifyDeltaPct,
   sendSeveritySummaryWebhook,
   sendToolRemovedWebhook,
+  sendModelRemovedWebhook,
   type SeverityLevel,
 } from "../src/severity.js";
 
@@ -341,6 +342,12 @@ async function main(): Promise<void> {
     ? ['(all tools — schema capture missing in current snapshot)']
     : removedTools;
   await sendToolRemovedWebhook(toolsToAlert, dateA, dateB, ciRunUrl);
+
+  // Fire a dedicated alert for removed models — high-signal event warranting its own message.
+  const removedModels = report.modelPoolChanges
+    .filter((c) => c.type === 'removed')
+    .map((c) => c.modelId);
+  await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.
   if (report.hasBreaking) {

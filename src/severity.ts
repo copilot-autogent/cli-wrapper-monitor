@@ -107,6 +107,59 @@ export async function sendToolRemovedWebhook(
 }
 
 /**
+ * Send a dedicated Discord webhook alert when one or more models are removed
+ * from the pool between baselines.
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. Silently no-ops when the
+ * env var is absent or when removedModels is empty. Network errors and non-2xx
+ * responses are caught and logged as warnings.
+ */
+export async function sendModelRemovedWebhook(
+  removedModels: string[],
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): Promise<void> {
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl || !webhookUrl.trim()) return;
+  if (removedModels.length === 0) return;
+
+  const header =
+    `🚨 **BREAKING: Model removed from pool** — ${dateA} vs ${dateB}` +
+    (ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '');
+
+  const DISCORD_MAX_CONTENT = 2000;
+  const sanitize = (name: string) => name.replace(/[`\n\r]/g, '_');
+  const modelEntries = removedModels.map((m) => `\`${sanitize(m)}\``);
+  let modelList = modelEntries.join(', ');
+  const REMOVED_PREFIX = '\nRemoved: ';
+  const headerAndPrefix = header.length + REMOVED_PREFIX.length;
+  if (headerAndPrefix + modelList.length > DISCORD_MAX_CONTENT) {
+    let kept = 0;
+    let running = 0;
+    for (let i = 0; i < modelEntries.length; i++) {
+      const remaining = modelEntries.length - (i + 1);
+      const suffix = remaining > 0 ? `, …and ${remaining} more` : '';
+      const add = (i > 0 ? 2 : 0) + modelEntries[i].length;
+      const projectedTotal = headerAndPrefix + running + add + suffix.length;
+      if (projectedTotal > DISCORD_MAX_CONTENT) break;
+      running += add;
+      kept++;
+    }
+    const remaining = modelEntries.length - kept;
+    const sep = kept > 0 ? ', ' : '';
+    modelList = modelEntries.slice(0, kept).join(', ') + (remaining > 0 ? `${sep}…and ${remaining} more` : '');
+    const full = header + REMOVED_PREFIX + modelList;
+    if (full.length > DISCORD_MAX_CONTENT) {
+      modelList = '';
+    }
+  }
+  const content = header + REMOVED_PREFIX + modelList;
+
+  await sendWebhookWithRetry(webhookUrl, { content }, 'model-removed');
+}
+
+/**
  * Send a Discord webhook with a severity summary line, e.g.
  * "1 BREAKING, 2 WARNING, 3 INFO".
  *

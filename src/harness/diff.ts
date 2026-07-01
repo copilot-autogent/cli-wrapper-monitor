@@ -205,6 +205,16 @@ export function diffSnapshots(
     }
   }
 
+  // Model removal is always BREAKING: agents that hard-code a model ID will
+  // silently fall back or error when that model disappears from the pool.
+  for (const change of modelPoolChanges) {
+    if (change.type === 'removed' && change.before) {
+      structuralBreaks.push(
+        `Model removed from pool: \`${change.modelId}\` (was state: ${change.before.state})`,
+      );
+    }
+  }
+
   const hasBreaking =
     changes.some((c) => c.severity === 'BREAKING') || structuralBreaks.length > 0;
 
