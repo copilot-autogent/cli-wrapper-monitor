@@ -799,13 +799,6 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   const savedPath = store.save(snapshot);
   console.log(`Snapshot saved: ${savedPath}`);
   console.log('');
-  appendHealthLog(HEALTH_LOG_PATH, {
-    capturedAt: snapshot.capturedAt,
-    status: 'success',
-    durationMs: Date.now() - startMs,
-    baselinesDir: BASELINES_DIR,
-    snapshotPath: savedPath,
-  });
 
   // Print full metrics per experiment
   for (const [expName, result] of Object.entries(snapshot.experiments)) {
@@ -930,9 +923,18 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
         'Run again next month to detect changes.',
     );
   }
+  // Log success only after all work completes — avoids writing both a success
+  // and error entry when post-save code throws.
+  appendHealthLog(HEALTH_LOG_PATH, {
+    capturedAt: snapshot.capturedAt,
+    status: 'success',
+    durationMs: Date.now() - startMs,
+    baselinesDir: BASELINES_DIR,
+    snapshotPath: savedPath,
+  });
   } catch (err) {
     appendHealthLog(HEALTH_LOG_PATH, {
-      capturedAt: new Date().toISOString(),
+      capturedAt: new Date(startMs).toISOString(),
       status: 'error',
       durationMs: Date.now() - startMs,
       baselinesDir: BASELINES_DIR,

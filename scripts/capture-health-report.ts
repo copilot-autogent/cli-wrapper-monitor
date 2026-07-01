@@ -58,6 +58,7 @@ if (streak > 0) {
       `\n⚠️  WARNING: ${streak} consecutive capture failures detected!\n` +
         '   Investigate capture reliability — check API auth, network, and model availability.',
     );
+    process.exitCode = 1;
   }
 }
 
