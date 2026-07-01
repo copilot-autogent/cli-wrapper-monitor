@@ -31,16 +31,38 @@ const REQUIRED_TOP_LEVEL: Record<string, string> = {
 };
 
 function isValidIso8601(value: string): boolean {
-  // Require full datetime pattern (date + T + time)
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return false;
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return false;
-  // Round-trip check: re-serialize and ensure the date components match what was
-  // passed in, catching impossible dates that JS normalizes (e.g. Feb 31 → Mar 3).
-  const iso = d.toISOString(); // always UTC "YYYY-MM-DDTHH:mm:ss.sssZ"
-  const inputDate = value.slice(0, 10);
-  const roundTripDate = iso.slice(0, 10);
-  return inputDate === roundTripDate;
+  // Require full datetime with explicit timezone (Z or ±HH:MM), anchored at both ends.
+  // This rejects bare dates, bare times, and strings with trailing junk.
+  const m = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+  );
+  if (!m) return false;
+
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  const day = parseInt(m[3], 10);
+  const hour = parseInt(m[4], 10);
+  const minute = parseInt(m[5], 10);
+  const second = parseInt(m[6], 10);
+
+  // Basic component range checks
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+
+  // Detect impossible calendar dates (e.g. Feb 31) via Date.UTC round-trip.
+  // Using Date.UTC avoids local timezone interference; we compare the UTC
+  // components produced by treating the extracted values as if they were UTC.
+  const d = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return (
+    !isNaN(d.getTime()) &&
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day &&
+    d.getUTCHours() === hour &&
+    d.getUTCMinutes() === minute &&
+    d.getUTCSeconds() === second
+  );
 }
 
 /**

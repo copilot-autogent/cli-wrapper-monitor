@@ -126,6 +126,26 @@ describe('validateSnapshot', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('accepts a valid ISO 8601 date with negative offset crossing UTC day boundary', () => {
+    const snap = { ...validSnapshot(), capturedAt: '2026-05-20T23:30:00-02:00' };
+    const result = validateSnapshot(snap);
+    expect(result.valid).toBe(true);
+  });
+
+  it('fails when capturedAt has trailing junk after a valid datetime prefix', () => {
+    const snap = { ...validSnapshot(), capturedAt: '2026-05-20T17:00:00junk' };
+    const result = validateSnapshot(snap);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === 'capturedAt')).toBe(true);
+  });
+
+  it('fails when capturedAt is missing timezone designator', () => {
+    const snap = { ...validSnapshot(), capturedAt: '2026-05-20T17:00:00' };
+    const result = validateSnapshot(snap);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === 'capturedAt')).toBe(true);
+  });
+
   // NaN / null in numeric fields
   it('fails when a metric value is NaN (serialized as null in JSON)', () => {
     const snap = validSnapshot();
