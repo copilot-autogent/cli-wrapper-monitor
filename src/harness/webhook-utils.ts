@@ -11,7 +11,7 @@ const BASE_DELAY_MS = 1000;
  * HTTP status codes that are permanent client errors and should NOT be retried.
  * Server errors (5xx) and rate-limits (429) and timeouts (408) are retryable.
  */
-const NON_RETRYABLE_STATUS = new Set([400, 401, 403, 404, 405, 410]);
+const NON_RETRYABLE_STATUS = new Set([400, 401, 403, 404, 405, 410, 413, 415, 422]);
 
 /** Path to the dead-letter log file. Resolved lazily (at call time) to respect CWD. */
 function deadLetterLogPath(): string {
@@ -34,7 +34,7 @@ interface DeadLetterEntry {
 
 /** Sleep for the given number of milliseconds. */
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((res) => setTimeout(res, ms));
 }
 
 /**
