@@ -6,6 +6,7 @@ import {
   SEVERITY_EMOJI,
   sendSeveritySummaryWebhook,
   sendToolRemovedWebhook,
+  sendModelRemovedWebhook,
   type SeverityLevel,
   type SeveritySummary,
 } from './severity.js';
@@ -325,6 +326,125 @@ describe('sendToolRemovedWebhook', () => {
     process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
     const manyTools = Array.from({ length: 200 }, (_, i) => `tool_${i}`);
     await sendToolRemovedWebhook(manyTools, '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content.length).toBeLessThanOrEqual(2000);
+    expect(body.content).toContain('more');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendModelRemovedWebhook (issue #67)
+// ---------------------------------------------------------------------------
+
+describe('sendModelRemovedWebhook', () => {
+  let originalEnv: string | undefined;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    originalEnv = process.env['DISCORD_WEBHOOK_URL'];
+    mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env['DISCORD_WEBHOOK_URL'];
+    } else {
+      process.env['DISCORD_WEBHOOK_URL'] = originalEnv;
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is not set', async () => {
+    delete process.env['DISCORD_WEBHOOK_URL'];
+    await sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is whitespace-only', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = '   ';
+    await sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call fetch when removedModels is empty', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendModelRemovedWebhook([], '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('POSTs when at least one model is removed', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('body contains BREAKING label', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('BREAKING');
+  });
+
+  it('body contains removed model name(s)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendModelRemovedWebhook(['claude-opus-4.6', 'gpt-5.3-codex'], '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('claude-opus-4.6');
+    expect(body.content).toContain('gpt-5.3-codex');
+  });
+
+  it('body contains date range', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    await sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('2026-05-01');
+    expect(body.content).toContain('2026-06-01');
+  });
+
+  it('body includes CI run URL when provided', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const ciUrl = 'https://github.com/org/repo/actions/runs/42';
+    await sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01', ciUrl);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain(ciUrl);
+  });
+
+  it('does NOT throw on network error (graceful no-op)', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+      mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
+      const promise = sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT throw on non-2xx response', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+      mockFetch.mockResolvedValue(new Response(null, { status: 429 }));
+      const promise = sendModelRemovedWebhook(['claude-opus-4.6'], '2026-05-01', '2026-06-01');
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('truncates content with "…and N more" when model list is very long', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.com/api/webhooks/test/token';
+    const manyModels = Array.from({ length: 200 }, (_, i) => `model-${i}`);
+    await sendModelRemovedWebhook(manyModels, '2026-05-01', '2026-06-01');
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
     expect(body.content.length).toBeLessThanOrEqual(2000);

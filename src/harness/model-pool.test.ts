@@ -215,8 +215,100 @@ describe('MetricSnapshot modelPool field', () => {
 });
 
 // ---------------------------------------------------------------------------
-// listModels() serialization (mock-based)
+// diffSnapshots — model pool BREAKING classification
 // ---------------------------------------------------------------------------
+
+describe('diffSnapshots — model pool BREAKING', () => {
+  it('no-change: structuralBreaks does not include model-related entries', () => {
+    const pool = makePool([makeEntry('claude-opus-4.8'), makeEntry('gpt-5.4')]);
+    const baseline = makeSnapshot({ modelPool: pool });
+    const current = makeSnapshot({ modelPool: pool });
+
+    const diff = diffSnapshots(baseline, current);
+
+    expect(diff.structuralBreaks.filter((s) => s.includes('Model removed'))).toHaveLength(0);
+    expect(diff.hasBreaking).toBe(false);
+  });
+
+  it('removed-only: adds BREAKING entry to structuralBreaks and sets hasBreaking', () => {
+    const baseline = makeSnapshot({
+      modelPool: makePool([makeEntry('claude-opus-4.6'), makeEntry('claude-opus-4.8')]),
+    });
+    const current = makeSnapshot({
+      modelPool: makePool([makeEntry('claude-opus-4.8')]),
+    });
+
+    const diff = diffSnapshots(baseline, current);
+
+    expect(diff.structuralBreaks.some((s) => s.includes('claude-opus-4.6'))).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('Model removed from pool'))).toBe(true);
+    expect(diff.hasBreaking).toBe(true);
+    expect(diff.severitySummary.structuralBreakCount).toBeGreaterThan(0);
+  });
+
+  it('added-only: does NOT add to structuralBreaks (INFO, no alert)', () => {
+    const baseline = makeSnapshot({
+      modelPool: makePool([makeEntry('claude-opus-4.8')]),
+    });
+    const current = makeSnapshot({
+      modelPool: makePool([makeEntry('claude-opus-4.8'), makeEntry('claude-opus-4.9')]),
+    });
+
+    const diff = diffSnapshots(baseline, current);
+
+    expect(diff.structuralBreaks.filter((s) => s.includes('Model removed'))).toHaveLength(0);
+    // hasBreaking may still be false if no other BREAKING conditions exist
+    expect(diff.modelPoolChanges.some((c) => c.type === 'added')).toBe(true);
+  });
+
+  it('mixed add+remove: structuralBreaks includes removed model, added is not flagged', () => {
+    const baseline = makeSnapshot({
+      modelPool: makePool([makeEntry('claude-opus-4.6'), makeEntry('claude-sonnet-4.6')]),
+    });
+    const current = makeSnapshot({
+      modelPool: makePool([makeEntry('claude-opus-4.8'), makeEntry('claude-sonnet-4.6')]),
+    });
+
+    const diff = diffSnapshots(baseline, current);
+
+    const modelBreaks = diff.structuralBreaks.filter((s) => s.includes('Model removed'));
+    expect(modelBreaks).toHaveLength(1);
+    expect(modelBreaks[0]).toContain('claude-opus-4.6');
+    expect(diff.hasBreaking).toBe(true);
+    // Added model does not appear in structuralBreaks
+    expect(diff.structuralBreaks.some((s) => s.includes('claude-opus-4.8'))).toBe(false);
+  });
+
+  it('multiple removals: one BREAKING entry per removed model', () => {
+    const baseline = makeSnapshot({
+      modelPool: makePool([
+        makeEntry('model-a'),
+        makeEntry('model-b'),
+        makeEntry('model-c'),
+      ]),
+    });
+    const current = makeSnapshot({
+      modelPool: makePool([makeEntry('model-c')]),
+    });
+
+    const diff = diffSnapshots(baseline, current);
+
+    const modelBreaks = diff.structuralBreaks.filter((s) => s.includes('Model removed'));
+    expect(modelBreaks).toHaveLength(2);
+    expect(modelBreaks.some((s) => s.includes('model-a'))).toBe(true);
+    expect(modelBreaks.some((s) => s.includes('model-b'))).toBe(true);
+    expect(diff.hasBreaking).toBe(true);
+  });
+
+  it('no modelPool on either snapshot: no BREAKING entries', () => {
+    const baseline = makeSnapshot(); // no modelPool
+    const current = makeSnapshot();  // no modelPool
+
+    const diff = diffSnapshots(baseline, current);
+
+    expect(diff.structuralBreaks.filter((s) => s.includes('Model removed'))).toHaveLength(0);
+  });
+});
 
 describe('model pool capture serialization from listModels() response', () => {
   it('maps ModelInfo fields to ModelPoolEntry correctly', () => {
