@@ -1,7 +1,7 @@
 /**
  * Unit tests for the baseline integrity validator.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { validateSnapshot, validateBaselineFile } from './validator.js';
 
 // Minimal valid MetricSnapshot for use in tests
@@ -146,6 +146,13 @@ describe('validateSnapshot', () => {
     expect(result.errors.some((e) => e.field === 'capturedAt')).toBe(true);
   });
 
+  it('fails when capturedAt has an out-of-range timezone offset', () => {
+    const snap = { ...validSnapshot(), capturedAt: '2026-05-20T17:00:00+99:99' };
+    const result = validateSnapshot(snap);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === 'capturedAt')).toBe(true);
+  });
+
   // NaN / null in numeric fields
   it('fails when a metric value is NaN (serialized as null in JSON)', () => {
     const snap = validSnapshot();
@@ -237,10 +244,6 @@ vi.mock('fs', async (importOriginal) => {
       return actual.readFileSync(path, 'utf-8');
     }),
   };
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('validateBaselineFile', () => {

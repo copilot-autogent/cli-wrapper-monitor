@@ -301,10 +301,10 @@ async function main(): Promise<void> {
   const { a, b, json: jsonMode, output } = parseArgs();
 
   // Pre-validate both input files before attempting the diff
-  for (const [label, path] of [["file-a", a], ["file-b", b]] as [string, string][]) {
-    const result = validateBaselineFile(resolve(path));
+  for (const [label, filePath] of [["file-a", a], ["file-b", b]] as [string, string][]) {
+    const result = validateBaselineFile(resolve(filePath));
     if (!result.valid) {
-      console.error(`Error: baseline integrity check failed for ${label} (${path}):`);
+      console.error(`Error: baseline integrity check failed for ${label} (${filePath}):`);
       for (const err of result.errors) {
         console.error(`  [${err.field}] ${err.message}`);
       }

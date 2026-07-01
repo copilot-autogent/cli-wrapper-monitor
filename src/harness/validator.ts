@@ -33,8 +33,9 @@ const REQUIRED_TOP_LEVEL: Record<string, string> = {
 function isValidIso8601(value: string): boolean {
   // Require full datetime with explicit timezone (Z or ±HH:MM), anchored at both ends.
   // This rejects bare dates, bare times, and strings with trailing junk.
+  // Offset hours are limited to 0–14 (valid UTC offsets), minutes to 0–59.
   const m = value.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/
   );
   if (!m) return false;
 
@@ -49,6 +50,13 @@ function isValidIso8601(value: string): boolean {
   if (month < 1 || month > 12) return false;
   if (day < 1 || day > 31) return false;
   if (hour > 23 || minute > 59 || second > 59) return false;
+
+  // Validate timezone offset ranges when present (m[7] = sign, m[8] = hh, m[9] = mm)
+  if (m[8] !== undefined) {
+    const offsetHour = parseInt(m[8], 10);
+    const offsetMinute = parseInt(m[9], 10);
+    if (offsetHour > 14 || offsetMinute > 59) return false;
+  }
 
   // Detect impossible calendar dates (e.g. Feb 31) via Date.UTC round-trip.
   // Using Date.UTC avoids local timezone interference; we compare the UTC
