@@ -2,13 +2,21 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /** Maximum number of delivery attempts (initial + retries). */
-const MAX_ATTEMPTS = 3;
+export const MAX_ATTEMPTS = 3;
 
-/** Base delay in milliseconds for exponential backoff (1s → 2s → 4s). */
+/** Base delay in milliseconds for exponential backoff (1 s → 2 s). */
 const BASE_DELAY_MS = 1000;
 
-/** Path to the dead-letter log file. */
-const DEAD_LETTER_LOG = resolve('logs', 'webhook-failures.jsonl');
+/**
+ * HTTP status codes that are permanent client errors and should NOT be retried.
+ * Server errors (5xx) and rate-limits (429) and timeouts (408) are retryable.
+ */
+const NON_RETRYABLE_STATUS = new Set([400, 401, 403, 404, 405, 410]);
+
+/** Path to the dead-letter log file. Resolved lazily (at call time) to respect CWD. */
+function deadLetterLogPath(): string {
+  return resolve('logs', 'webhook-failures.jsonl');
+}
 
 /** Payload structure sent to Discord. */
 export interface WebhookPayload {
@@ -37,9 +45,10 @@ function sleep(ms: number): Promise<void> {
  * @returns true if the entry was written, false if a FS error occurred.
  */
 function writeDeadLetter(entry: DeadLetterEntry): boolean {
+  const logPath = deadLetterLogPath();
   try {
     mkdirSync(resolve('logs'), { recursive: true });
-    appendFileSync(DEAD_LETTER_LOG, JSON.stringify(entry) + '\n', 'utf-8');
+    appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf-8');
     return true;
   } catch {
     return false;
@@ -50,6 +59,7 @@ function writeDeadLetter(entry: DeadLetterEntry): boolean {
  * Send a Discord webhook POST with exponential-backoff retries.
  *
  * - Retries up to {@link MAX_ATTEMPTS} times (1 s → 2 s delays between attempts).
+ * - Short-circuits immediately on permanent client errors (400/401/403/404/405/410).
  * - On final failure writes a structured entry to `logs/webhook-failures.jsonl`.
  * - Logs `console.error` on final failure so CI run logs surface the problem.
  *
@@ -63,8 +73,10 @@ export async function sendWebhookWithRetry(
   alertType: string,
 ): Promise<void> {
   let lastError = '';
+  let attemptsMade = 0;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    attemptsMade = attempt;
     try {
       const res = await fetch(webhookUrl, {
         method: 'POST',
@@ -76,6 +88,9 @@ export async function sendWebhookWithRetry(
       if (res.ok) return; // Delivered successfully
 
       lastError = `HTTP ${res.status}`;
+
+      // Permanent client error — retrying won't help
+      if (NON_RETRYABLE_STATUS.has(res.status)) break;
     } catch (err) {
       lastError = String(err);
     }
@@ -91,16 +106,17 @@ export async function sendWebhookWithRetry(
     alertType,
     payload,
     error: lastError,
-    attempts: MAX_ATTEMPTS,
+    attempts: attemptsMade,
   };
 
+  const logPath = deadLetterLogPath();
   const logged = writeDeadLetter(entry);
   const logSuffix = logged
-    ? ` Failure logged to ${DEAD_LETTER_LOG}.`
+    ? ` Failure logged to ${logPath}.`
     : ' Dead-letter write also failed (disk full or permissions error).';
 
   console.error(
-    `❌ Discord webhook delivery failed after ${MAX_ATTEMPTS} attempts` +
+    `❌ Discord webhook delivery failed after ${attemptsMade} attempt(s)` +
       ` [${alertType}]: ${lastError}.${logSuffix}`,
   );
 }

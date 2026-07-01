@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { sendWebhookWithRetry } from './webhook-utils.js';
+import { sendWebhookWithRetry, MAX_ATTEMPTS } from './webhook-utils.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -91,24 +91,42 @@ describe('sendWebhookWithRetry', () => {
 
   // ---- Retry count -------------------------------------------------------
 
-  it('retries exactly 3 times total on persistent non-2xx responses', async () => {
+  it('retries exactly MAX_ATTEMPTS times on persistent non-2xx responses', async () => {
     mockFetch.mockResolvedValue(makeErrorResponse(429));
 
     const promise = sendWebhookWithRetry(WEBHOOK_URL, PAYLOAD, ALERT_TYPE);
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_ATTEMPTS);
   });
 
-  it('retries exactly 3 times on persistent network errors', async () => {
+  it('retries exactly MAX_ATTEMPTS times on persistent network errors', async () => {
     mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
 
     const promise = sendWebhookWithRetry(WEBHOOK_URL, PAYLOAD, ALERT_TYPE);
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+  });
+
+  it('does NOT retry on non-retryable 4xx (e.g. 404) — stops after first attempt', async () => {
+    mockFetch.mockResolvedValue(makeErrorResponse(404));
+
+    const promise = sendWebhookWithRetry(WEBHOOK_URL, PAYLOAD, ALERT_TYPE);
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT retry on 401 Unauthorized', async () => {
+    mockFetch.mockResolvedValue(makeErrorResponse(401));
+
+    await sendWebhookWithRetry(WEBHOOK_URL, PAYLOAD, ALERT_TYPE);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   // ---- Dead-letter log ---------------------------------------------------
@@ -131,7 +149,7 @@ describe('sendWebhookWithRetry', () => {
     const entry = JSON.parse(written.trim());
     expect(entry.alertType).toBe(ALERT_TYPE);
     expect(entry.payload).toEqual(PAYLOAD);
-    expect(entry.attempts).toBe(3);
+    expect(entry.attempts).toBe(MAX_ATTEMPTS);
     expect(typeof entry.timestamp).toBe('string');
     expect(entry.error).toContain('429');
   });
@@ -170,7 +188,7 @@ describe('sendWebhookWithRetry', () => {
     await promise;
 
     expect(consoleSpy).toHaveBeenCalledOnce();
-    expect(consoleSpy.mock.calls[0][0]).toContain('3 attempts');
+    expect(consoleSpy.mock.calls[0][0]).toContain(`${MAX_ATTEMPTS} attempt`);
     consoleSpy.mockRestore();
   });
 
