@@ -53,7 +53,14 @@ Tracking this over time reveals when hook or system prompt changes silently alte
 
 ## Automated Capture
 
-Monthly baselines are captured automatically by the [Monthly Baseline Capture](./.github/workflows/monthly-baseline.yml) GitHub Actions workflow. It runs on the **1st of every month at 06:00 UTC** and can also be triggered manually via *Actions → Monthly Baseline Capture → Run workflow*.
+Captures run automatically on the **3rd of every month** via GitHub Actions. Two workflows handle this:
+
+| Workflow | Schedule | Behaviour |
+|----------|----------|-----------|
+| [Monthly Capture (PR flow)](./.github/workflows/monthly-capture.yml) | 3rd of month, 00:00 UTC | Captures baseline, opens a PR titled `baseline: YYYY-MM capture`, posts Discord notification |
+| [Monthly Baseline Capture](./.github/workflows/monthly-baseline.yml) | 1st of month, 06:00 UTC | Captures baseline and commits directly to `main` |
+
+Both workflows can also be triggered manually via *Actions → \<workflow name\> → Run workflow*.
 
 ### What the workflow does
 
@@ -188,7 +195,7 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 
 ## Methodology Notes
 
-- **Monthly cadence** — automated via GitHub Actions (1st of month); not CI on every commit
+- **Monthly cadence** — captures run automatically via GitHub Actions: PR-flow on the 3rd (`monthly-capture.yml`), direct-commit on the 1st (`monthly-baseline.yml`); not CI on every commit
 - **Copilot CLI/SDK only** — no cross-CLI comparison (resource constraint)
 - **Static + live modes** — context-tax works without credentials; refusal-rate needs a live session
 - **Results in repo** — snapshots committed to `baselines/`, diff reports to `reports/`
