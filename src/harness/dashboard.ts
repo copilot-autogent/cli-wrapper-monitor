@@ -4,7 +4,7 @@
  */
 
 import type { MetricSnapshot } from "./types.js";
-import { extractTrendRow, type TrendRow } from "./trend-report.js";
+import { extractTrendRow } from "./trend-report.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -108,40 +108,43 @@ export function extractInjectionRefusalSeries(snapshots: MetricSnapshot[]): Spar
 
 /**
  * Scan sequential snapshot pairs and extract BREAKING/WARNING changes.
+ * Sorts snapshots by capturedAt before comparing to ensure correct order
+ * regardless of input ordering.
  * Returns one entry per detected regression event.
  */
 export function extractRegressions(snapshots: MetricSnapshot[]): RegressionEntry[] {
   if (snapshots.length < 2) return [];
 
-  const entries: RegressionEntry[] = [];
-  const BREAKING_THRESHOLD = 10; // >10% change = BREAKING
-  const WARNING_THRESHOLD = 5;   // >5% change = WARNING
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
+  );
 
-  for (let i = 1; i < snapshots.length; i++) {
-    const prev = snapshots[i - 1];
-    const curr = snapshots[i];
+  const entries: RegressionEntry[] = [];
+  const BREAKING_THRESHOLD = 10; // >10% increase = BREAKING
+  const WARNING_THRESHOLD = 5;   // >5% increase = WARNING
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
     const date = curr.capturedAt.slice(0, 10);
 
     const prevRow = extractTrendRow(prev);
     const currRow = extractTrendRow(curr);
 
-    // Check system prompt chars change
+    // Check system prompt chars INCREASES only (decreases are positive news, not regressions)
     if (prevRow.systemPromptChars !== null && currRow.systemPromptChars !== null && prevRow.systemPromptChars > 0) {
       const deltaPct = ((currRow.systemPromptChars - prevRow.systemPromptChars) / prevRow.systemPromptChars) * 100;
-      const absDelta = Math.abs(deltaPct);
-      if (absDelta > BREAKING_THRESHOLD) {
-        const sign = deltaPct > 0 ? "+" : "";
+      if (deltaPct > BREAKING_THRESHOLD) {
         entries.push({
           date,
           severity: "BREAKING",
-          description: `systemPromptChars ${sign}${deltaPct.toFixed(1)}% (${fmtNum(prevRow.systemPromptChars)} → ${fmtNum(currRow.systemPromptChars)})`,
+          description: `systemPromptChars +${deltaPct.toFixed(1)}% (${fmtNum(prevRow.systemPromptChars)} → ${fmtNum(currRow.systemPromptChars)})`,
         });
-      } else if (absDelta > WARNING_THRESHOLD) {
-        const sign = deltaPct > 0 ? "+" : "";
+      } else if (deltaPct > WARNING_THRESHOLD) {
         entries.push({
           date,
           severity: "WARNING",
-          description: `systemPromptChars ${sign}${deltaPct.toFixed(1)}% (${fmtNum(prevRow.systemPromptChars)} → ${fmtNum(currRow.systemPromptChars)})`,
+          description: `systemPromptChars +${deltaPct.toFixed(1)}% (${fmtNum(prevRow.systemPromptChars)} → ${fmtNum(currRow.systemPromptChars)})`,
         });
       }
     }

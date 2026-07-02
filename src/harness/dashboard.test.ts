@@ -174,6 +174,49 @@ describe("extractRegressions", () => {
     expect(r!.date).toBe("2026-06-01");
   });
 
+  it("sorts unsorted input before comparing", () => {
+    // Reverse order — should still find the regression
+    const regressions = extractRegressions([SNAP_B, SNAP_A]);
+    const r = regressions.find((r) => r.description.includes("systemPromptChars"));
+    expect(r).toBeDefined();
+    expect(r!.date).toBe("2026-06-01"); // SNAP_B is the later/larger one
+  });
+
+  it("does NOT flag systemPromptChars DECREASE as regression", () => {
+    // SNAP_B (150k) → SNAP_A (100k): a decrease is good, not a regression
+    const snapLarge = makeSnap({
+      capturedAt: "2026-05-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 200000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 50000, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const snapSmall = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 100000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 25000, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const regressions = extractRegressions([snapLarge, snapSmall]);
+    const r = regressions.find((r) => r.description.includes("systemPromptChars"));
+    expect(r).toBeUndefined(); // decrease = no regression
+  });
+
   it("detects BREAKING tool count drop", () => {
     const regressions = extractRegressions([SNAP_B, SNAP_TOOL_DROP]);
     const r = regressions.find((r) => r.description.includes("toolCount"));

@@ -188,7 +188,7 @@ function renderSummaryCard(card: SummaryCardData): string {
     </div>
     <div class="card">
       <div class="card-label">Context Headroom</div>
-      <div class="card-value ${card.headroomPct !== null && card.headroomPct < 20 ? "danger" : card.headroomPct !== null && card.headroomPct < 40 ? "warning" : "ok"}">${headroomDisplay}</div>
+      <div class="card-value ${card.headroomPct === null ? "" : card.headroomPct < 20 ? "danger" : card.headroomPct < 40 ? "warning" : "ok"}">${headroomDisplay}</div>
     </div>
   </div>
 </section>`;
