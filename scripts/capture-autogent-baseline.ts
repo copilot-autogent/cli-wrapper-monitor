@@ -22,7 +22,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CopilotClient } from '@github/copilot-sdk';
 import { ExperimentRunner } from '../src/harness/runner.js';
@@ -49,7 +49,12 @@ import {
 } from '../src/harness/capture-health.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASELINES_DIR = join(__dirname, '../baselines');
+// BASELINES_DIR can be overridden via the BASELINES_DIR environment variable.
+// The weekly-capture workflow sets this to 'baselines/weekly' so weekly
+// snapshots land in a separate directory from the monthly PR-flow captures.
+const BASELINES_DIR = process.env['BASELINES_DIR']
+  ? resolve(process.env['BASELINES_DIR'])
+  : join(__dirname, '../baselines');
 const HEALTH_LOG_PATH = join(__dirname, '../logs/capture-health.jsonl');
 
 const AUTOGENT_PATH = process.env['AUTOGENT_PATH'] ?? '/app';
@@ -795,7 +800,6 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     });
     return;
   }
-
   const savedPath = store.save(snapshot);
   console.log(`Snapshot saved: ${savedPath}`);
   console.log('');
