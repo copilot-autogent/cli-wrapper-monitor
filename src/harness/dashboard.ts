@@ -48,12 +48,17 @@ export interface ModelPoolEntry {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract a summary card data object from the most-recent (last) snapshot.
+ * Extract a summary card data object from the most-recent snapshot.
+ * Defensively sorts by capturedAt to guarantee the latest is selected
+ * regardless of input ordering.
  */
 export function extractSummaryCard(snapshots: MetricSnapshot[]): SummaryCardData | null {
   if (snapshots.length === 0) return null;
 
-  const latest = snapshots[snapshots.length - 1];
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
+  );
+  const latest = sorted[sorted.length - 1];
   const row = extractTrendRow(latest);
 
   return {
@@ -141,39 +146,70 @@ export function extractRegressions(snapshots: MetricSnapshot[]): RegressionEntry
       }
     }
 
-    // Check tool count drop (any drop is BREAKING)
+    // Check tool count changes: any drop is BREAKING (structural); increases are WARNING only
+    // when > WARNING_THRESHOLD percent — avoids noise from trivial +1 additions.
     if (prevRow.toolCount !== null && currRow.toolCount !== null && prevRow.toolCount !== currRow.toolCount) {
       const delta = currRow.toolCount - prevRow.toolCount;
-      const severity: "BREAKING" | "WARNING" = delta < 0 ? "BREAKING" : "WARNING";
-      const sign = delta > 0 ? "+" : "";
-      entries.push({
-        date,
-        severity,
-        description: `toolCount ${sign}${delta} (${prevRow.toolCount} → ${currRow.toolCount})`,
-      });
+      if (delta < 0) {
+        // Any tool loss is BREAKING, consistent with severity.ts structural-break rule
+        entries.push({
+          date,
+          severity: "BREAKING",
+          description: `toolCount ${delta} (${prevRow.toolCount} → ${currRow.toolCount})`,
+        });
+      } else if (prevRow.toolCount > 0) {
+        const pct = (delta / prevRow.toolCount) * 100;
+        if (pct > BREAKING_THRESHOLD) {
+          entries.push({
+            date,
+            severity: "BREAKING",
+            description: `toolCount +${delta} (+${pct.toFixed(1)}%) (${prevRow.toolCount} → ${currRow.toolCount})`,
+          });
+        } else if (pct > WARNING_THRESHOLD) {
+          entries.push({
+            date,
+            severity: "WARNING",
+            description: `toolCount +${delta} (+${pct.toFixed(1)}%) (${prevRow.toolCount} → ${currRow.toolCount})`,
+          });
+        }
+      }
     }
 
-    // Check hook count changes
+    // Check hook count changes: any drop is BREAKING; increases only flagged when > threshold
     const prevHook = prev.hookCount ?? null;
     const currHook = curr.hookCount ?? null;
     if (prevHook !== null && currHook !== null && prevHook !== currHook) {
       const delta = currHook - prevHook;
-      const severity: "BREAKING" | "WARNING" = delta < 0 ? "BREAKING" : "WARNING";
-      const sign = delta > 0 ? "+" : "";
-      entries.push({
-        date,
-        severity,
-        description: `hookCount ${sign}${delta} (${prevHook} → ${currHook})`,
-      });
-    }
-
-    // Check injection refusal rate drop
-    if (prevRow.injectionRefusedRate !== null && currRow.injectionRefusedRate !== null) {
-      const deltaPct = ((currRow.injectionRefusedRate - prevRow.injectionRefusedRate) / Math.max(prevRow.injectionRefusedRate, 0.001)) * 100;
-      if (deltaPct < -WARNING_THRESHOLD) {
+      if (delta < 0) {
         entries.push({
           date,
-          severity: deltaPct < -BREAKING_THRESHOLD ? "BREAKING" : "WARNING",
+          severity: "BREAKING",
+          description: `hookCount ${delta} (${prevHook} → ${currHook})`,
+        });
+      } else if (prevHook > 0) {
+        const pct = (delta / prevHook) * 100;
+        if (pct > WARNING_THRESHOLD) {
+          entries.push({
+            date,
+            severity: pct > BREAKING_THRESHOLD ? "BREAKING" : "WARNING",
+            description: `hookCount +${delta} (+${pct.toFixed(1)}%) (${prevHook} → ${currHook})`,
+          });
+        }
+      }
+    }
+
+    // Check injection refusal rate drop using absolute threshold to avoid
+    // percentage blow-up when the baseline rate is near zero.
+    if (prevRow.injectionRefusedRate !== null && currRow.injectionRefusedRate !== null) {
+      const absDrop = prevRow.injectionRefusedRate - currRow.injectionRefusedRate; // positive = drop
+      if (absDrop > 0.05) {
+        // Use relative % only when baseline is large enough (>= 0.05) to be meaningful
+        const deltaPct = prevRow.injectionRefusedRate >= 0.05
+          ? -((absDrop / prevRow.injectionRefusedRate) * 100)
+          : -(absDrop * 100); // express as absolute percentage-point drop
+        entries.push({
+          date,
+          severity: absDrop > 0.1 ? "BREAKING" : "WARNING",
           description: `injectionRefusalRate ${deltaPct.toFixed(1)}% (${(prevRow.injectionRefusedRate * 100).toFixed(1)}% → ${(currRow.injectionRefusedRate * 100).toFixed(1)}%)`,
         });
       }
@@ -190,19 +226,32 @@ export function extractRegressions(snapshots: MetricSnapshot[]): RegressionEntry
 /**
  * Track model pool evolution across snapshots.
  * Returns unique models with their first/last seen dates.
+ *
+ * A model's `lastSeen` is null when it appeared in the latest snapshot that
+ * contains a modelPool. If the latest snapshot has no modelPool, active/retired
+ * status is derived from the most recent snapshot that does.
  */
 export function extractModelPoolHistory(snapshots: MetricSnapshot[]): ModelPoolEntry[] {
   const modelMap = new Map<string, ModelPoolEntry>();
 
+  // Find the latest snapshot that actually has a modelPool field
+  const latestWithPool = [...snapshots]
+    .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+    .reverse()
+    .find((s) => s.modelPool != null);
+
   const latestModelIds = new Set<string>();
-  const latest = snapshots[snapshots.length - 1];
-  if (latest?.modelPool) {
-    for (const m of latest.modelPool.models) {
+  if (latestWithPool?.modelPool) {
+    for (const m of latestWithPool.modelPool.models) {
       latestModelIds.add(m.id);
     }
   }
 
-  for (const snap of snapshots) {
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
+  );
+
+  for (const snap of sorted) {
     if (!snap.modelPool) continue;
     const date = snap.capturedAt.slice(0, 10);
 
@@ -264,18 +313,22 @@ export function generateSparklineSVG(
   const pw = width - PAD.left - PAD.right;
   const ph = height - PAD.top - PAD.bottom;
 
-  const valid = points.filter((p): p is SparklinePoint & { value: number } => p.value !== null);
+  // Sort valid points by date to ensure monotonic x-axis rendering
+  const valid = points
+    .filter((p): p is SparklinePoint & { value: number } => p.value !== null)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   if (valid.length === 0) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" font-size="11" fill="#999">No data</text></svg>`;
   }
 
-  const minVal = Math.min(...valid.map((p) => p.value));
-  const maxVal = Math.max(...valid.map((p) => p.value));
+  // Use reduce instead of spread to avoid call-stack overflow on large arrays
+  const minVal = valid.reduce((m, p) => Math.min(m, p.value), Infinity);
+  const maxVal = valid.reduce((m, p) => Math.max(m, p.value), -Infinity);
   const valRange = maxVal - minVal || 1;
 
-  const dates = valid.map((p) => new Date(p.date).getTime());
-  const minDate = Math.min(...dates);
-  const maxDate = Math.max(...dates);
+  const timestamps = valid.map((p) => new Date(p.date).getTime());
+  const minDate = timestamps.reduce((m, t) => Math.min(m, t), Infinity);
+  const maxDate = timestamps.reduce((m, t) => Math.max(m, t), -Infinity);
   const dateRange = maxDate - minDate || 1;
 
   const xOf = (d: string) => PAD.left + ((new Date(d).getTime() - minDate) / dateRange) * pw;

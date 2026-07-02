@@ -56,7 +56,12 @@ function loadAll(dir: string): MetricSnapshot[] {
   }
 
   const files = readdirSync(absDir)
-    .filter((f) => f.endsWith(".json") && f !== "schema.json" && f !== "latest.json")
+    .filter((f) => {
+      if (!f.endsWith(".json") || f === "schema.json" || f === "latest.json") return false;
+      // Skip symlinks at the root baselines/ dir (consistent with collectJsonFiles)
+      const st = lstatSync(join(absDir, f));
+      return !st.isSymbolicLink() && st.isFile();
+    })
     .sort();
 
   let anyInvalid = false;
@@ -225,7 +230,7 @@ function renderSparklines(
       ${tokensSvg}
     </div>
     <div class="sparkline-card">
-      ${hasInjectionData ? injectionSvg : injectionSvg}
+      ${injectionSvg}
     </div>
   </div>
 </section>`;
@@ -575,7 +580,13 @@ function main(): void {
   const args = process.argv.slice(2);
   let output = "reports/dashboard.html";
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--output" && args[i + 1]) output = args[++i];
+    if (args[i] === "--output") {
+      if (!args[i + 1] || args[i + 1].startsWith("--")) {
+        console.error(`Error: --output requires a path argument`);
+        process.exit(1);
+      }
+      output = args[++i];
+    }
   }
 
   const snapshots = loadAll("baselines");
