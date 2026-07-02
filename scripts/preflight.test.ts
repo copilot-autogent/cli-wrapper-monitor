@@ -61,18 +61,11 @@ describe('checkAuth', () => {
   });
 
   it('returns ok=false when listModels() times out', async () => {
-    const client = makeClient({
-      listModels: vi.fn().mockReturnValue(new Promise(() => { /* never resolves */ })),
-    });
-
-    // Use a very short AUTH_TIMEOUT_MS by mocking setTimeout behaviour is
-    // complex; instead we mock listModels to reject after a tick to simulate
-    // timeout-like behaviour.
+    // Mock listModels to reject quickly to simulate timeout-like behaviour.
     const clientTimeout = makeClient({
       listModels: vi.fn().mockImplementation(
         () =>
           new Promise<never>((_, reject) => {
-            // Reject quickly to simulate timeout
             setImmediate(() => reject(new Error('timeout')));
           }),
       ),
@@ -136,7 +129,7 @@ describe('checkWebhook', () => {
     const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://discord.example/webhook');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ type: 'preflight-test' });
+    expect(JSON.parse(init.body as string)).toEqual({ content: 'preflight-test' });
   });
 
   it('returns ok=false when fetch returns non-2xx', async () => {

@@ -77,10 +77,15 @@ export async function checkAuth(deps: AuthCheckDeps = {}): Promise<PreflightResu
     client = createClient();
     await client.start();
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), AUTH_TIMEOUT_MS),
-    );
-    await Promise.race([client.listModels(), timeoutPromise]);
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error('timeout')), AUTH_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([client.listModels(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
 
     return { ok: true, message: '✅ Auth check passed.' };
   } catch (err) {
@@ -125,7 +130,7 @@ export async function checkWebhook(
     const res = await fetchFn(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'preflight-test' }),
+      body: JSON.stringify({ content: 'preflight-test' }),
     });
 
     if (res.ok) {
