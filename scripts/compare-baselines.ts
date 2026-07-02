@@ -345,7 +345,10 @@ async function main(): Promise<void> {
     ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
     : undefined;
   const dateA = shortDate(snapA.capturedAt), dateB = shortDate(snapB.capturedAt);
-  await sendSeveritySummaryWebhook(report.severitySummary, dateA, dateB, ciRunUrl);
+  await sendSeveritySummaryWebhook(
+    { ...report.severitySummary, securityPostureScore: report.securityPostureScore },
+    dateA, dateB, ciRunUrl,
+  );
 
   // Fire a dedicated alert for removed tools — high-signal event warranting its own message.
   // Covers two cases:

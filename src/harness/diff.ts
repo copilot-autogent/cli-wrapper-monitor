@@ -1,6 +1,93 @@
 import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, ToolParamSchema, ToolSchemaChange } from './types.js';
 import { classifyDeltaPct } from '../severity.js';
 
+/**
+ * Compute an aggregate security regression score (0–100, higher = more regressed).
+ *
+ * Scoring formula:
+ *   - Tool removals:          10 pts per removed tool (max 30)
+ *   - Model pool drop:        20 pts if any model removed
+ *   - Hook count decrease:    20 pts if hook count drops
+ *   - Hook body change:        5 pts per body-change event (max 10)
+ *   - Injection refusal drop: 15 pts if avg refusal rate drops >5 pp
+ *   - Headroom below 50%:      5 pts if current headroom is below 50%
+ *
+ * Score 0 = no regressions. Score ≥30 = BREAKING tier. Score 1–29 = WARNING tier.
+ */
+export function computeSecurityPostureScore(
+  baseline: MetricSnapshot,
+  current: MetricSnapshot,
+  toolSchemaChanges: ToolSchemaChange[],
+  modelPoolChanges: ModelPoolChange[],
+  hookChanged: boolean,
+): number {
+  let score = 0;
+
+  // Tool removals: 10 pts per removed tool, capped at 30
+  const removedToolCount = toolSchemaChanges.filter((c) => c.type === 'removed').length;
+  score += Math.min(removedToolCount * 10, 30);
+
+  // Model pool drop: 20 pts if any model removed
+  if (modelPoolChanges.some((c) => c.type === 'removed')) {
+    score += 20;
+  }
+
+  // Hook count decrease: 20 pts if hook count drops (or disappears)
+  const baselineHookCount = baseline.hookCount;
+  const currentHookCount = current.hookCount;
+  const hookCountDropped =
+    baselineHookCount !== undefined &&
+    (currentHookCount === undefined || currentHookCount < baselineHookCount);
+  if (hookCountDropped) {
+    score += 20;
+  }
+
+  // Hook body change: 5 pts per change event (max 10).
+  // With single-hash tracking, a body change with unchanged count counts as one event.
+  if (
+    hookChanged &&
+    baselineHookCount !== undefined &&
+    currentHookCount !== undefined &&
+    baselineHookCount === currentHookCount
+  ) {
+    score += 5;
+  }
+
+  // Injection refusal drop: 15 pts if avg refusal rate drops >5 percentage points
+  const getAvgInjectionRate = (snap: MetricSnapshot): number | null => {
+    const values: number[] = [];
+    for (const exp of Object.values(snap.experiments ?? {})) {
+      const metric = exp.metrics?.['injectionRefusedRate'];
+      if (metric !== undefined) values.push(metric.value);
+    }
+    return values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : null;
+  };
+  const baselineRate = getAvgInjectionRate(baseline);
+  const currentRate = getAvgInjectionRate(current);
+  if (baselineRate !== null && currentRate !== null && baselineRate - currentRate > 0.05) {
+    score += 15;
+  }
+
+  // Headroom drop: 5 pts if current headroom falls below 50%
+  const getHeadroomPct = (snap: MetricSnapshot): number | null => {
+    const entries = snap.contextWindowHeadroom;
+    if (!entries || entries.length === 0) return null;
+    const enabled = entries.filter(
+      (e) => e.state === 'enabled' && e.contextWindow > 0 && e.status !== 'unknown',
+    );
+    if (enabled.length === 0) return null;
+    const totalHeadroom = enabled.reduce((sum, e) => sum + e.headroomTokens, 0);
+    const totalWindow = enabled.reduce((sum, e) => sum + e.contextWindow, 0);
+    return (totalHeadroom / totalWindow) * 100;
+  };
+  const currentHeadroom = getHeadroomPct(current);
+  if (currentHeadroom !== null && currentHeadroom < 50) {
+    score += 5;
+  }
+
+  return Math.min(score, 100);
+}
+
 /** Diff two model pools, returning structured change records. */
 export function diffModelPool(
   baseline: ModelPool | undefined,
@@ -267,6 +354,13 @@ export function diffSnapshots(
     modelPoolChanges,
     toolSchemaChanged,
     toolSchemaChanges,
+    securityPostureScore: computeSecurityPostureScore(
+      baseline,
+      current,
+      toolSchemaChanges,
+      modelPoolChanges,
+      hookChanged,
+    ),
   };
 }
 
@@ -280,6 +374,12 @@ export function formatDiffReport(report: DiffReport): string {
     `**Model**: ${report.current.model}`,
     '',
   ];
+
+  // Security Posture Score
+  const score = report.securityPostureScore;
+  const scoreIcon = score >= 30 ? '🔴' : score >= 1 ? '⚠️' : '✅';
+  const scoreTierLabel = score >= 30 ? 'BREAKING' : score >= 1 ? 'WARNING' : 'CLEAN';
+  lines.push(`**Security Posture Score**: ${score}/100 ${scoreIcon} ${scoreTierLabel}`, '');
 
   // Hash change warnings
   if (report.binaryChanged) {

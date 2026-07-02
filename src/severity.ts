@@ -45,6 +45,11 @@ export interface SeveritySummary {
    * tracked separately from metric rows to avoid double-counting.
    */
   structuralBreakCount: number;
+  /**
+   * Aggregate security regression score (0–100).
+   * Absent in older callers that have not yet been updated.
+   */
+  securityPostureScore?: number;
 }
 
 /**
@@ -239,7 +244,7 @@ export async function sendSeveritySummaryWebhook(
   const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
   if (!webhookUrl || !webhookUrl.trim()) return;
 
-  const { breaking, warning, info, structuralBreakCount } = summary;
+  const { breaking, warning, info, structuralBreakCount, securityPostureScore } = summary;
   // Only post to Discord when there is something actionable — pure INFO-only
   // runs (all changes within 5%) would create noisy green pings on every CI run.
   if (breaking === 0 && warning === 0 && structuralBreakCount === 0) return;
@@ -255,11 +260,17 @@ export async function sendSeveritySummaryWebhook(
     .join(', ');
 
   const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
+  const scoreLine =
+    securityPostureScore !== undefined
+      ? `\nSecurity Posture Score: ${securityPostureScore}/100` +
+        (securityPostureScore >= 30 ? ' 🔴 BREAKING' : securityPostureScore >= 1 ? ' ⚠️ WARNING' : ' ✅ CLEAN')
+      : '';
 
   const DISCORD_MAX_CONTENT = 2000;
   let content =
     `${icon} **Baseline comparison** — ${dateA} vs ${dateB}\n` +
     `Severity: **${summaryLine}**` +
+    scoreLine +
     ciLine;
   if (content.length > DISCORD_MAX_CONTENT) {
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
