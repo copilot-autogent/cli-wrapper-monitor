@@ -124,7 +124,7 @@ export async function checkWebhook(
     return { ok: true, message: '✅ Webhook check skipped (DISCORD_WEBHOOK_URL not set).' };
   }
 
-  const fetchFn = deps.fetchFn ?? globalThis.fetch;
+  const fetchFn = deps.fetchFn ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
 
   try {
     const res = await fetchFn(webhookUrl, {
@@ -230,6 +230,9 @@ function runTscSync(projectRoot: string): { exitCode: number; stderr: string } {
     cwd: projectRoot,
     encoding: 'utf-8',
   });
+  if (result.error) {
+    throw result.error;
+  }
   return {
     exitCode: result.status ?? 1,
     stderr: (result.stdout ?? '') + (result.stderr ?? ''),
