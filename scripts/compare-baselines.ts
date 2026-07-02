@@ -230,15 +230,14 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
   } else if (snapA.modelPool || snapB.modelPool) lines.push(`## Model Pool Changes`, "", "> No model pool changes detected.", "");
 
   // ── Hook Changes ──────────────────────────────────────────────────────────
-  const hasHookCountChange =
-    (snapA.hookCount !== undefined && snapB.hookCount !== undefined && snapA.hookCount !== snapB.hookCount) ||
-    (snapA.hookCount !== undefined && snapB.hookCount === undefined);
-  if (report.structuralBreaks.some((s) => s.startsWith("Hook count")) || report.warnings.some((w) => w.startsWith("Hook body"))) {
+  const hookStructuralBreaks = report.structuralBreaks.filter((s) => s.startsWith("Hook"));
+  const hookWarnings = report.warnings.filter((w) => w.startsWith("Hook body"));
+  if (hookStructuralBreaks.length > 0 || hookWarnings.length > 0) {
     lines.push(`## Hook Changes`, "");
-    for (const sb of report.structuralBreaks.filter((s) => s.startsWith("Hook count") || s.startsWith("Hook"))) {
+    for (const sb of hookStructuralBreaks) {
       lines.push(`- 🔴 **BREAKING**: ${sb}`);
     }
-    for (const w of report.warnings.filter((w) => w.startsWith("Hook body"))) {
+    for (const w of hookWarnings) {
       lines.push(`- 🟡 **WARNING**: ${w}`);
     }
     lines.push("");
@@ -368,12 +367,21 @@ async function main(): Promise<void> {
   await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
 
   // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
-  // BREAKING (hook added/removed) and WARNING (body changed) each fire an alert.
-  const hookCountIncreased = report.structuralBreaks.some((s) => s.startsWith('Hook count increased'));
-  const hookCountDropped = report.structuralBreaks.some(
-    (s) => s.startsWith('Hook count dropped') || s.startsWith('Hook count disappeared'),
-  );
-  const hookBodyChanged = report.warnings.some((w) => w.startsWith('Hook body changed'));
+  // Derive detection directly from snapshot data to avoid fragile string matching.
+  // BREAKING (hook added/removed) and WARNING (body changed) fire independently.
+  const hookCountDropped =
+    snapA.hookCount !== undefined &&
+    (snapB.hookCount === undefined || snapB.hookCount < snapA.hookCount);
+  const hookCountIncreased =
+    snapA.hookCount !== undefined &&
+    snapB.hookCount !== undefined &&
+    snapB.hookCount > snapA.hookCount;
+  const hookBodyChanged =
+    report.hookChanged &&
+    snapA.hookCount !== undefined &&
+    snapB.hookCount !== undefined &&
+    snapA.hookCount === snapB.hookCount;
+
   if (hookCountDropped || hookCountIncreased) {
     const changeType = hookCountDropped ? 'removed' : 'added';
     await sendHookChangedWebhook(
@@ -382,7 +390,8 @@ async function main(): Promise<void> {
       { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
       dateA, dateB, ciRunUrl,
     );
-  } else if (hookBodyChanged) {
+  }
+  if (hookBodyChanged) {
     await sendHookChangedWebhook(
       'body_changed',
       { before: snapA.hookCount, after: snapB.hookCount },

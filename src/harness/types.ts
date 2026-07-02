@@ -194,8 +194,9 @@ export interface DiffReport {
    */
   structuralBreaks: string[];
   /**
-   * Descriptions of WARNING-level structural changes that are notable but
-   * not BREAKING (e.g. hook body changed without count change).
+   * Descriptions of WARNING-level hook changes (hook body changed without count change).
+   * These are rendered under `## Hook Changes` in the formatted report.
+   * All entries are currently hook-related; extend the renderer if new warning types are added.
    */
   warnings: string[];
   /** True when the monitored CLI binary hash changed between snapshots */
