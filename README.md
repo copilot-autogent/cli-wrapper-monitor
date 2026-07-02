@@ -169,6 +169,12 @@ npm run archive -- --dry-run
 
 # Archive with custom retention window (12 months)
 npm run archive -- --older-than-months 12
+
+# Generate a self-contained HTML dashboard from all baselines
+npm run dashboard
+
+# Save dashboard to a custom path
+npm run dashboard -- --output reports/dashboard-2026-07.html
 ```
 
 > **Note**: The refusal-rate experiment requires a live SDK connection (`GITHUB_TOKEN`). This is a sprint 2 feature.
@@ -209,6 +215,27 @@ npm run archive -- --older-than-months 12
 | ⚪ Info | < 5% change |
 | 🟡 Warning | 5–10% change |
 | 🔴 Regression | > 10% change |
+
+## Dashboard
+
+Generate a self-contained HTML snapshot of all baseline history with trend charts and regression detection:
+
+```bash
+npm run dashboard
+# → writes reports/dashboard.html
+```
+
+The dashboard is **zero-dependency** (no JS frameworks, no CDN links) and can be opened directly in any browser, emailed, or linked from the README.
+
+### What the dashboard includes
+
+1. **Summary card** — latest baseline date, tool count, hook count, system prompt size, estimated tokens, context headroom, model, SDK version
+2. **Trend sparklines** — inline SVG line charts for: tool count over time, system prompt tokens over time, injection refusal rate over time
+3. **Regression timeline** — table of all detected BREAKING/WARNING changes with dates and descriptions
+4. **Model pool section** — active models with context window sizes; retired models with first/last seen dates
+5. **Zero external deps** — pure HTML/CSS/inline SVG, works offline
+
+`reports/dashboard.html` is gitignored by default. To commit the file, remove the `reports/dashboard.html` line from `.gitignore`.
 
 ## Published Reports
 
