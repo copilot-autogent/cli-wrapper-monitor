@@ -10,11 +10,26 @@
  * ASCII sparkline for systemPromptChars (when ≥3 data points are available).
  */
 
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "fs";
 import { resolve, join } from "path";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { generateTrendReport } from "../src/harness/trend-report.js";
 import { validateBaselineFile } from "../src/harness/validator.js";
+
+/** Recursively collect *.json file paths under a directory tree. */
+function collectJsonFiles(dir: string): string[] {
+  const results: string[] = [];
+  if (!existsSync(dir)) return results;
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      results.push(...collectJsonFiles(full));
+    } else if (entry.endsWith(".json") && entry !== "schema.json" && entry !== "latest.json") {
+      results.push(full);
+    }
+  }
+  return results;
+}
 
 function loadAll(dir: string): MetricSnapshot[] {
   const absDir = resolve(dir);
@@ -22,6 +37,7 @@ function loadAll(dir: string): MetricSnapshot[] {
     throw new Error(`Baselines directory not found: ${absDir}`);
   }
 
+  // Collect files from the root baselines/ dir (exclude archive/ subdir entries)
   const files = readdirSync(absDir)
     .filter((f) => f.endsWith(".json") && f !== "schema.json" && f !== "latest.json")
     .sort(); // lexicographic = chronological for ISO-date filenames
@@ -39,15 +55,30 @@ function loadAll(dir: string): MetricSnapshot[] {
       }
     }
   }
+
+  // Also validate and collect archived baselines (baselines/archive/**/*.json)
+  const archiveDir = join(absDir, "archive");
+  const archivedFilePaths = collectJsonFiles(archiveDir);
+  for (const filePath of archivedFilePaths) {
+    const result = validateBaselineFile(filePath);
+    if (!result.valid) {
+      anyInvalid = true;
+      console.error(`Error: baseline integrity check failed for ${filePath}:`);
+      for (const err of result.errors) {
+        console.error(`  [${err.field}] ${err.message}`);
+      }
+    }
+  }
+
   if (anyInvalid) {
     console.error("Aborting trend report: one or more baseline files are invalid.");
     process.exit(1);
   }
 
-  const snapshots: MetricSnapshot[] = files.map((f) => {
-    const content = readFileSync(join(absDir, f), "utf-8");
-    return JSON.parse(content) as MetricSnapshot;
-  });
+  const snapshots: MetricSnapshot[] = [
+    ...files.map((f) => JSON.parse(readFileSync(join(absDir, f), "utf-8")) as MetricSnapshot),
+    ...archivedFilePaths.map((p) => JSON.parse(readFileSync(p, "utf-8")) as MetricSnapshot),
+  ];
 
   // Also include latest.json if it exists and isn't already represented
   const latestPath = join(absDir, "latest.json");

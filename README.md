@@ -155,11 +155,20 @@ npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05
 # Generate a diff report and save to reports/
 npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05-31.json --output reports/diff-2026-05-31.md
 
-# Show trend table across all historical baselines
+# Show trend table across all historical baselines (includes archived)
 npm run trend
 
 # Save trend report to file
 npm run trend -- --output reports/trend-2026-05.md
+
+# Archive baselines older than 6 months (moves to baselines/archive/YYYY/)
+npm run archive
+
+# Preview what would be archived (dry run)
+npm run archive -- --dry-run
+
+# Archive with custom retention window (12 months)
+npm run archive -- --older-than-months 12
 ```
 
 > **Note**: The refusal-rate experiment requires a live SDK connection (`GITHUB_TOKEN`). This is a sprint 2 feature.
@@ -169,6 +178,29 @@ npm run trend -- --output reports/trend-2026-05.md
 Results are stored as JSON in `baselines/` following [schema.json](./baselines/schema.json).
 
 Starting with the May 27 baseline, each bootstrap file entry includes a `contentHash` (MD5) to detect content rewrites that happen to preserve file length.
+
+## Baseline Retention Policy
+
+Monthly captures accumulate over time. To keep the repository lean, baselines older than **6 calendar months** can be moved to `baselines/archive/YYYY/` using the archive script:
+
+```bash
+# Archive baselines older than 6 months (default)
+npm run archive
+
+# Preview without moving files
+npm run archive -- --dry-run
+
+# Custom retention window (e.g. keep 12 months in baselines/)
+npm run archive -- --older-than-months 12
+```
+
+**Behaviour:**
+
+- Files are moved by date prefix in the filename (`YYYY-MM-DD`). Files whose names don't start with a date (e.g. `schema.json`, `latest.json`) are always left in place.
+- `baselines/archive/YYYY/*.json` — archived files organised by year.
+- `npm run trend` and `npm run validate` automatically include the archive directory so historical data is never lost — trend lines remain intact.
+- The script is **idempotent**: running it twice has no side effects.
+- The `--older-than-months N` flag overrides the default 6-month threshold.
 
 ## Regression Thresholds
 
