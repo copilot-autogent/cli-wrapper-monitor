@@ -49,29 +49,25 @@ jobs:
           CAPTURE_DATE=$(date +%Y-%m-%d)
           echo "CAPTURE_DATE=${CAPTURE_DATE}" >> "$GITHUB_ENV"
           echo "WEEKLY_FILE=baselines/weekly/${CAPTURE_DATE}.json" >> "$GITHUB_ENV"
-          # Write CAPTURE_REASON using the multiline GITHUB_ENV format to
-          # prevent a newline in the input from injecting extra env entries.
+          # Write CAPTURE_REASON using a unique per-run delimiter to prevent
+          # env-file injection even if the input contains a line matching
+          # a static delimiter string.
+          UNIQUE_DELIM="DELIM_${CAPTURE_DATE}_$(head -c 8 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 8)"
           {
-            echo "CAPTURE_REASON<<DELIMITER"
+            echo "CAPTURE_REASON<<${UNIQUE_DELIM}"
             printf '%s' "${CAPTURE_REASON_RAW}"
             echo ""
-            echo "DELIMITER"
+            echo "${UNIQUE_DELIM}"
           } >> "$GITHUB_ENV"
         env:
           CAPTURE_REASON_RAW: ${{ inputs.capture_reason || 'weekly' }}
 
-      # -----------------------------------------------------------------------
-      # 1. Check out the monitor repo
-      # -----------------------------------------------------------------------
       - name: Checkout cli-wrapper-monitor
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      # -----------------------------------------------------------------------
-      # 2. Check out autogent source
-      # -----------------------------------------------------------------------
       - name: Checkout autogent source
         id: checkout_autogent
         uses: actions/checkout@v4
@@ -83,9 +79,6 @@ jobs:
           path: autogent-src
           fetch-depth: 1
 
-      # -----------------------------------------------------------------------
-      # 3. Build environment
-      # -----------------------------------------------------------------------
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -95,9 +88,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # -----------------------------------------------------------------------
-      # 4. Resolve AUTOGENT_PATH
-      # -----------------------------------------------------------------------
       - name: Resolve autogent path
         run: |
           if [ "${{ steps.checkout_autogent.outcome }}" = "success" ] && \
@@ -108,15 +98,12 @@ jobs:
             echo "Autogent source not available — capture will use static fallback."
           fi
 
-      # -----------------------------------------------------------------------
-      # 5. Ensure baselines/weekly/ directory exists
-      # -----------------------------------------------------------------------
       - name: Ensure weekly baselines directory
         run: mkdir -p baselines/weekly
 
       # -----------------------------------------------------------------------
-      # 6. Run the baseline capture, directing output to baselines/weekly/
-      #    The capture script reads BASELINES_DIR to override the output path.
+      # Run capture with BASELINES_DIR pointing to the weekly directory.
+      # The capture script reads this env var to determine its output path.
       # -----------------------------------------------------------------------
       - name: Run capture
         id: run_capture
@@ -124,16 +111,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          # Override the capture output directory so snapshots go to
-          # baselines/weekly/ instead of the default baselines/.
-          # Matches capture.config.json weeklyBaselinesDir.
           BASELINES_DIR: baselines/weekly
         run: npm run capture
 
       # -----------------------------------------------------------------------
-      # 7. Commit the weekly snapshot directly to main.
-      #    Rebase on latest main before push to avoid non-fast-forward errors
-      #    from concurrent commits (e.g. monthly capture on the same day).
+      # Commit the weekly snapshot directly to main.
+      # --autostash ensures any unstaged writes from the capture (e.g. logs)
+      # don't cause the rebase to fail on a dirty worktree.
       # -----------------------------------------------------------------------
       - name: Commit weekly snapshot
         id: commit
@@ -149,16 +133,16 @@ jobs:
             echo "No changes in weekly snapshot — skipping commit."
           else
             git commit -m "baseline(weekly): ${CAPTURE_DATE} ${CAPTURE_REASON} snapshot [skip ci]"
-            # Rebase on latest main before push to prevent non-fast-forward
-            # failures when main has advanced since the checkout.
-            git pull --rebase origin main
+            # --autostash handles any unstaged writes (e.g. logs/) made by the
+            # capture script so the rebase doesn't fail on a dirty worktree.
+            git pull --rebase --autostash origin main
             git push origin main
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed weekly snapshot for ${CAPTURE_DATE}."
           fi
 
       # -----------------------------------------------------------------------
-      # 8. Discord notification (only when changes detected and notification enabled)
+      # Notify Discord (success) — only when changes detected and enabled.
       # -----------------------------------------------------------------------
       - name: Notify Discord (changes detected)
         if: |
@@ -180,13 +164,11 @@ jobs:
             -H "Content-Type: application/json" -d "${PAYLOAD}"
 
       # -----------------------------------------------------------------------
-      # 9. Discord failure notification
+      # Notify Discord (failure) — gated same as success to respect opt-out.
+      # Explicitly checks run_capture outcome because continue-on-error prevents
+      # a capture failure from propagating to failure() directly.
       # -----------------------------------------------------------------------
       - name: Notify Discord (failure)
-        # Use steps.run_capture.outcome == 'failure' explicitly because
-        # run_capture has continue-on-error:true, which prevents failure()
-        # from seeing its exit code; other infra failures still trigger
-        # the outer failure() condition.
         if: |
           (failure() || steps.run_capture.outcome == 'failure') &&
           (github.event_name == 'schedule' || inputs.send_discord_notification != false)
@@ -205,9 +187,6 @@ jobs:
             -X POST "${DISCORD_WEBHOOK_URL}" \
             -H "Content-Type: application/json" -d "${PAYLOAD}"
 
-      # -----------------------------------------------------------------------
-      # 10. Fail the workflow when the capture exited non-zero.
-      # -----------------------------------------------------------------------
       - name: Fail on capture error
         if: steps.run_capture.outcome == 'failure'
         run: |
