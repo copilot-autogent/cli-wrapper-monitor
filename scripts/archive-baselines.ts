@@ -22,6 +22,7 @@
 
 import { readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
+import { fileURLToPath } from 'url';
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing
@@ -63,10 +64,13 @@ function parseArgs(): CliArgs {
 
 /**
  * Parse a YYYY-MM-DD date from the start of a filename.
- * Returns null when the filename does not begin with a valid date.
+ * Accepts `YYYY-MM-DD.json` and `YYYY-MM-DD-suffix.json` forms.
+ * Returns null when the filename does not match or the date is invalid
+ * (e.g. February 30 — JS would silently roll over without this check).
  */
 export function parseDateFromFilename(filename: string): Date | null {
-  const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  // Require date immediately followed by either '-' (suffix) or end of base name.
+  const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})(?=-|\.json$)/);
   if (!match) return null;
 
   const year = parseInt(match[1], 10);
@@ -75,19 +79,31 @@ export function parseDateFromFilename(filename: string): Date | null {
 
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
 
-  // Use local midnight for comparison with cutoff (also local midnight).
-  return new Date(year, month - 1, day);
+  // Round-trip validation: rejects impossible dates like Feb 30 that JS would silently roll over.
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+    return null;
+  }
+  return d;
 }
 
 /**
  * Compute the cutoff date: files with a date strictly before this are archived.
  * Subtracts `olderThanMonths` calendar months from `now` and normalises to midnight.
+ *
+ * Month-end clamping: if `now` is on the 31st and the target month has fewer days,
+ * the result is clamped to the last day of that month (e.g. Aug 31 − 6 months = Feb 28).
+ * This prevents JS's silent date roll-over (Feb 31 → Mar 3) from shifting the boundary.
  */
 export function computeCutoffDate(now: Date, olderThanMonths: number): Date {
-  const cutoff = new Date(now);
-  cutoff.setMonth(cutoff.getMonth() - olderThanMonths);
-  cutoff.setHours(0, 0, 0, 0);
-  return cutoff;
+  const targetYear = now.getFullYear();
+  const targetMonth = now.getMonth() - olderThanMonths;
+  // Construct as 1st of the target month first (avoids roll-over when building the Date)
+  const first = new Date(targetYear, targetMonth, 1);
+  // Last day of the target month (day 0 of the next month)
+  const lastDayOfMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const day = Math.min(now.getDate(), lastDayOfMonth);
+  return new Date(first.getFullYear(), first.getMonth(), day, 0, 0, 0, 0);
 }
 
 export interface ArchiveResult {
@@ -149,16 +165,21 @@ export function archiveBaselines(
       const srcPath = join(absDir, file);
       const destPath = join(destDir, file);
 
-      if (!dryRun) {
+      if (dryRun) {
+        // Dry-run: report what would be moved without touching files
+        archived.push(file);
+      } else {
         if (!existsSync(destDir)) {
           mkdirSync(destDir, { recursive: true });
         }
-        // Guard against duplicate runs where the source was already removed
+        // Only rename (and count as archived) when src exists and dest is absent.
+        // If dest already exists a previous run moved the file; src would be gone from
+        // readdirSync results in normal use, but guard defensively.
         if (existsSync(srcPath) && !existsSync(destPath)) {
           renameSync(srcPath, destPath);
+          archived.push(file);
         }
       }
-      archived.push(file);
     } else {
       kept.push(file);
     }
@@ -168,7 +189,7 @@ export function archiveBaselines(
 }
 
 // ---------------------------------------------------------------------------
-// Entry point
+// Entry point — only run when this file is executed directly (not imported)
 // ---------------------------------------------------------------------------
 
 function main(): void {
@@ -211,4 +232,9 @@ function main(): void {
   }
 }
 
-main();
+// Only run when this file is the direct entry-point (not imported by tests or other scripts).
+const _thisFile = fileURLToPath(import.meta.url);
+const _entryFile = process.argv[1] ? resolve(process.argv[1]) : '';
+if (_thisFile === _entryFile) {
+  main();
+}

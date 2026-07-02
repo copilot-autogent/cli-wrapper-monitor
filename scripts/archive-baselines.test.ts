@@ -55,6 +55,14 @@ describe('parseDateFromFilename', () => {
   it('returns null for invalid day', () => {
     expect(parseDateFromFilename('2026-01-00.json')).toBeNull();
   });
+
+  it('returns null for impossible date (Feb 30)', () => {
+    expect(parseDateFromFilename('2026-02-30.json')).toBeNull();
+  });
+
+  it('returns null for filenames where garbage immediately follows the date (no dash or .json)', () => {
+    expect(parseDateFromFilename('2026-01-15garbage.json')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -77,6 +85,24 @@ describe('computeCutoffDate', () => {
     const cutoff = computeCutoffDate(now, 6);
     expect(cutoff.getFullYear()).toBe(2025);
     expect(cutoff.getMonth()).toBe(8); // September (3 - 6 = -3 → wraps to Sep 2025)
+    expect(cutoff.getDate()).toBe(1);
+  });
+
+  it('clamps month-end overflow (Aug 31 − 6 months = Feb 28, not Mar 3)', () => {
+    const now = new Date(2026, 7, 31, 12, 0, 0); // August 31, 2026
+    const cutoff = computeCutoffDate(now, 6);
+    expect(cutoff.getFullYear()).toBe(2026);
+    expect(cutoff.getMonth()).toBe(1); // February
+    expect(cutoff.getDate()).toBe(28); // Clamped to Feb 28 (non-leap year)
+    expect(cutoff.getHours()).toBe(0);
+  });
+
+  it('clamps month-end overflow across year boundary (Mar 31 − 6 months = Sep 30)', () => {
+    const now = new Date(2026, 2, 31, 0, 0, 0); // March 31, 2026
+    const cutoff = computeCutoffDate(now, 6);
+    expect(cutoff.getFullYear()).toBe(2025);
+    expect(cutoff.getMonth()).toBe(8); // September
+    expect(cutoff.getDate()).toBe(30); // Clamped to Sep 30
   });
 });
 
@@ -225,8 +251,7 @@ describe('archiveBaselines', () => {
   });
 
   it('throws when the baselines directory does not exist', () => {
-    expect(() =>
-      archiveBaselines('/tmp/nonexistent-dir-xyz-99999', 6, false, NOW)
-    ).toThrow(/not found/);
+    const missing = join(tmpBase, 'nonexistent-subdir');
+    expect(() => archiveBaselines(missing, 6, false, NOW)).toThrow(/not found/);
   });
 });
