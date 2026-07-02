@@ -18,9 +18,11 @@
  *   1  One or more files invalid (or directory not found)
  */
 
-import { readdirSync, existsSync, statSync } from 'fs';
+import { readdirSync, existsSync, lstatSync } from 'fs';
 import { resolve, join, relative } from 'path';
 import { validateBaselineFile, type ValidationResult } from '../src/harness/validator.js';
+
+interface CliArgs {
   dir: string;
 }
 
@@ -39,7 +41,7 @@ function collectJsonFiles(dir: string): string[] {
   if (!existsSync(dir)) return results;
   for (const entry of readdirSync(dir).sort()) {
     const full = join(dir, entry);
-    const st = statSync(full);
+    const st = lstatSync(full); // lstatSync does NOT follow symlinks (unlike statSync)
     if (st.isSymbolicLink()) continue; // skip symlinks to prevent traversal outside archive
     if (st.isDirectory()) {
       results.push(...collectJsonFiles(full));

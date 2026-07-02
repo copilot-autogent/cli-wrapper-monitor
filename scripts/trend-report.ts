@@ -10,7 +10,7 @@
  * ASCII sparkline for systemPromptChars (when ≥3 data points are available).
  */
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, lstatSync } from "fs";
 import { resolve, join } from "path";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { generateTrendReport } from "../src/harness/trend-report.js";
@@ -22,7 +22,7 @@ function collectJsonFiles(dir: string): string[] {
   if (!existsSync(dir)) return results;
   for (const entry of readdirSync(dir).sort()) {
     const full = join(dir, entry);
-    const st = statSync(full);
+    const st = lstatSync(full); // lstatSync does NOT follow symlinks (unlike statSync)
     if (st.isSymbolicLink()) continue; // skip symlinks to prevent traversal outside archive
     if (st.isDirectory()) {
       results.push(...collectJsonFiles(full));

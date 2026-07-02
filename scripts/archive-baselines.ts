@@ -166,8 +166,15 @@ export function archiveBaselines(
       const destPath = join(destDir, file);
 
       if (dryRun) {
-        // Dry-run: report what would be moved without touching files
-        archived.push(file);
+        // In dry-run, check whether the archive destination already exists to mirror real behavior.
+        if (!existsSync(destPath)) {
+          archived.push(file);
+        } else {
+          console.warn(
+            `Warning: skipping ${file} — destination already exists at ${destPath}.`
+          );
+          skipped.push(file);
+        }
       } else {
         if (!existsSync(destDir)) {
           mkdirSync(destDir, { recursive: true });
