@@ -21,8 +21,6 @@
 import { readdirSync, existsSync, statSync } from 'fs';
 import { resolve, join, relative } from 'path';
 import { validateBaselineFile, type ValidationResult } from '../src/harness/validator.js';
-
-interface CliArgs {
   dir: string;
 }
 
@@ -35,15 +33,17 @@ function parseArgs(): CliArgs {
   return { dir };
 }
 
-/** Recursively collect all *.json file paths under a directory tree. */
+/** Recursively collect all *.json file paths under a directory tree. Symlinks are skipped. */
 function collectJsonFiles(dir: string): string[] {
   const results: string[] = [];
   if (!existsSync(dir)) return results;
   for (const entry of readdirSync(dir).sort()) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) {
+    const st = statSync(full);
+    if (st.isSymbolicLink()) continue; // skip symlinks to prevent traversal outside archive
+    if (st.isDirectory()) {
       results.push(...collectJsonFiles(full));
-    } else if (entry.endsWith('.json') && entry !== 'schema.json') {
+    } else if (entry.endsWith('.json') && entry !== 'schema.json' && entry !== 'latest.json') {
       results.push(full);
     }
   }

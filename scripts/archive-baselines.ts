@@ -172,13 +172,19 @@ export function archiveBaselines(
         if (!existsSync(destDir)) {
           mkdirSync(destDir, { recursive: true });
         }
-        // Only rename (and count as archived) when src exists and dest is absent.
-        // If dest already exists a previous run moved the file; src would be gone from
-        // readdirSync results in normal use, but guard defensively.
         if (existsSync(srcPath) && !existsSync(destPath)) {
           renameSync(srcPath, destPath);
           archived.push(file);
+        } else if (existsSync(srcPath) && existsSync(destPath)) {
+          // Collision: both src and dest exist (e.g. partial manual copy). Report in skipped.
+          console.warn(
+            `Warning: skipping ${file} — destination already exists at ${destPath}. ` +
+              `Remove one copy manually to resolve.`
+          );
+          skipped.push(file);
         }
+        // If src is already gone (moved by a prior run) it won't appear in readdirSync;
+        // this branch is unreachable in normal use.
       }
     } else {
       kept.push(file);
