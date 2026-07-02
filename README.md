@@ -179,9 +179,10 @@ Before running a full baseline capture, use the pre-flight validator to check th
 npm install
 
 # Run all pre-flight checks (auth, webhook, disk space, TypeScript compilation)
+# Exits 0 on all-pass, 1 on any failure — does NOT proceed to capture.
 npm run preflight
 
-# Or via the capture script flag
+# Or invoke via the capture script (same checks, same exit codes, no capture)
 npx tsx scripts/capture-autogent-baseline.ts --preflight
 ```
 
@@ -190,7 +191,7 @@ npx tsx scripts/capture-autogent-baseline.ts --preflight
 | Check | What it verifies | Failure action |
 |---|---|---|
 | **Auth** | Calls `listModels()` via CopilotClient to confirm SDK auth is valid | Run `/login` in Copilot CLI |
-| **Webhook** | POSTs a `{"content":"preflight-test"}` ping to `DISCORD_WEBHOOK_URL` (skipped if unset) | Check URL or network connectivity |
+| **Webhook** | POSTs a `{"type":"preflight-test"}` ping to `DISCORD_WEBHOOK_URL` (skipped if unset) | Check URL or network connectivity |
 | **Disk space** | Verifies ≥ 10 MB free in `baselines/` | Clear old baselines or free disk space |
 | **TypeScript** | Runs `tsc --noEmit` to catch pre-existing type errors | Fix type errors shown in output |
 
@@ -198,6 +199,9 @@ On success, prints `✅ Pre-flight checks passed — ready to capture.` and exit
 On failure, prints which check failed with an actionable message and exits 1.
 
 ```bash
+# Install dependencies
+npm install
+
 # Run all experiments (static analysis mode — no credentials needed)
 npm run experiments
 
