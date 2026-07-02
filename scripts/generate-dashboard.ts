@@ -1,4 +1,4 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env npx tsx
 /**
  * Generate a self-contained static HTML dashboard from all historical baselines.
  *
@@ -581,7 +581,7 @@ function main(): void {
   let output = "reports/dashboard.html";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--output") {
-      if (!args[i + 1] || args[i + 1].startsWith("--")) {
+      if (i + 1 >= args.length) {
         console.error(`Error: --output requires a path argument`);
         process.exit(1);
       }
