@@ -57,8 +57,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Use AUTOGENT_PAT so the subsequent push is authenticated (falls
-          token: ${{ secrets.AUTOGENT_PAT || github.token }}
+          # Same-repo checkout/push: the built-in github.token already has
+          # contents:write on this repo (see job permissions), so use it here.
+          # AUTOGENT_PAT is reserved for the cross-repo autogent checkout below.
+          token: ${{ github.token }}
 
       # -----------------------------------------------------------------------
       # 2. Check out autogent source for static extraction
@@ -71,6 +73,10 @@ jobs:
         continue-on-error: true
         with:
           repository: JackywithaWhiteDog/autogent
+          # Cross-repo read: requires a PAT. No github.token fallback because
+          # github.token cannot read another repository; when AUTOGENT_PAT is
+          # absent this step fails softly (continue-on-error) and capture uses
+          # its static fallback.
           token: ${{ secrets.AUTOGENT_PAT }}
           ref: main
           path: autogent-src
@@ -177,7 +183,7 @@ jobs:
         id: pr
         if: steps.run_capture.outcome == 'success' && steps.commit.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.AUTOGENT_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # If a PR already exists for this branch (re-run in same month),
           # reuse it rather than failing with a duplicate-PR error.

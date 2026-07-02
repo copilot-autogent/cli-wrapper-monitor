@@ -18,3 +18,17 @@ jobs:
       - run: npx tsc
       - run: npm run validate
       - run: npm test
+
+  # Lint GitHub Actions workflow YAML so a malformed workflow (e.g. the
+  # here-doc-in-block-scalar bug that silently broke monthly-capture.yml on
+  # every run) is caught in CI instead of only surfacing as a startup_failure.
+  actionlint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
