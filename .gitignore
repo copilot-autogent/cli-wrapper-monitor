@@ -8,6 +8,9 @@ logs/
 # Generated baseline snapshots (keep schema.json and latest.json)
 baselines/snapshot-*.json
 
+# Generated dashboard (opt-in to commit by removing this line)
+reports/dashboard.html
+
 # Environment
 .env
 .env.local

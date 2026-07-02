@@ -14,6 +14,7 @@
     "validate": "npx ts-node --esm scripts/validate-baselines.ts",
     "archive": "npx ts-node --esm scripts/archive-baselines.ts",
     "health": "npx tsx scripts/capture-health-report.ts",
+    "dashboard": "npx tsx scripts/generate-dashboard.ts",
     "test": "vitest run"
   },
   "dependencies": {
