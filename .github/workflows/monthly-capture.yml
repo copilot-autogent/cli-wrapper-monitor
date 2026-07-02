@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       capture_reason:
-        description: 'Label for this capture (added to branch name, PR title, and notification)'
+        description: 'Label for this capture (added to PR title and notification)'
         required: false
         default: 'scheduled'
         type: string
@@ -58,20 +58,20 @@ jobs:
       - name: Set month variables
         run: |
           YEAR_MONTH=$(date +%Y-%m)
-          # Read capture_reason from the env var injected below (avoids direct
-          # interpolation of the user input into shell, preventing injection).
           echo "YEAR_MONTH=${YEAR_MONTH}" >> "$GITHUB_ENV"
           echo "BRANCH=baseline/${YEAR_MONTH}" >> "$GITHUB_ENV"
+          # Write CAPTURE_REASON using the multiline GITHUB_ENV format to
+          # prevent a newline in the input from injecting extra env entries.
+          {
+            echo "CAPTURE_REASON<<DELIMITER"
+            printf '%s' "${CAPTURE_REASON_RAW}"
+            echo ""
+            echo "DELIMITER"
+          } >> "$GITHUB_ENV"
         env:
-          # CAPTURE_REASON is set here (via env:) rather than embedded directly
-          # in the `run:` block so special characters in the input cannot break
-          # the shell command or be interpreted as shell metacharacters.
-          CAPTURE_REASON: ${{ inputs.capture_reason || 'scheduled' }}
-
-      - name: Export CAPTURE_REASON to GITHUB_ENV
-        run: echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
-        env:
-          CAPTURE_REASON: ${{ inputs.capture_reason || 'scheduled' }}
+          # Injected via env: block (not interpolated into run:) to prevent
+          # shell-level metacharacter injection from the user input.
+          CAPTURE_REASON_RAW: ${{ inputs.capture_reason || 'scheduled' }}
 
       # -----------------------------------------------------------------------
       # 1. Check out the monitor repo (full history for git log in script)
@@ -80,9 +80,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Same-repo checkout/push: the built-in github.token already has
-          # contents:write on this repo (see job permissions), so use it here.
-          # AUTOGENT_PAT is reserved for the cross-repo autogent checkout below.
           token: ${{ github.token }}
 
       # -----------------------------------------------------------------------
@@ -91,15 +88,9 @@ jobs:
       - name: Checkout autogent source
         id: checkout_autogent
         uses: actions/checkout@v4
-        # continue-on-error so the rest of the workflow still runs even
-        # when the secret is missing or the repo is temporarily unavailable.
         continue-on-error: true
         with:
           repository: JackywithaWhiteDog/autogent
-          # Cross-repo read: requires a PAT. No github.token fallback because
-          # github.token cannot read another repository; when AUTOGENT_PAT is
-          # absent this step fails softly (continue-on-error) and capture uses
-          # its static fallback.
           token: ${{ secrets.AUTOGENT_PAT }}
           ref: main
           path: autogent-src
@@ -138,8 +129,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # If the branch already exists on the remote (re-run in same month),
-          # fetch and check it out rather than failing with branch-exists error.
           if git ls-remote --exit-code origin "${BRANCH}" > /dev/null 2>&1; then
             echo "Branch ${BRANCH} already exists — fetching and checking out."
             git fetch origin "${BRANCH}"
@@ -153,33 +142,21 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Run capture
         id: run_capture
-        # continue-on-error keeps the workflow alive when the script exits
-        # non-zero (e.g., regressions detected) so we can still commit the
-        # snapshot artefacts and surface the failure as a red run / Discord alert.
         continue-on-error: true
         env:
-          # Map AUTOGENT_PAT → GITHUB_TOKEN so the refusal-rate
-          # experiment (GitHub Models API) and provenance lookups work.
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run capture
 
       # -----------------------------------------------------------------------
       # 7. Commit artefacts to the capture branch.
-      #    Health log is always staged (failure streak data must be preserved).
-      #    Baseline data artefacts are only staged on a successful capture to
-      #    avoid committing partial or deleted data from a failed run.
       # -----------------------------------------------------------------------
       - name: Commit baseline artefacts
         id: commit
         if: steps.create_branch.outcome == 'success'
         run: |
-          # Always stage the health log — it is append-only and safe to commit
-          # even when the capture itself errored.
           [ -e logs ] && git add logs
 
-          # Only stage data artefacts when capture succeeded to avoid
-          # committing partially-written or deleted files from a failed run.
           if [ "${{ steps.run_capture.outcome }}" = "success" ]; then
             for path in baselines chart.svg reports; do
               [ -e "${path}" ] && git add "${path}"
@@ -192,8 +169,6 @@ jobs:
           else
             CAPTURE_STATUS="${{ steps.run_capture.outcome }}"
             git commit -m "baseline: ${YEAR_MONTH} ${CAPTURE_REASON} capture (${CAPTURE_STATUS}) [skip ci]"
-            # --force-with-lease is safe: we own this branch and it avoids
-            # a non-fast-forward error when a same-month re-run re-pushes.
             git push --force-with-lease origin "${BRANCH}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed and pushed to ${BRANCH}."
@@ -208,8 +183,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # If a PR already exists for this branch (re-run in same month),
-          # reuse it rather than failing with a duplicate-PR error.
           EXISTING=$(gh pr list --head "${BRANCH}" --state open --json url --jq '.[0].url // ""')
           if [ -n "${EXISTING}" ]; then
             echo "PR already open: ${EXISTING}"
@@ -237,11 +210,8 @@ jobs:
       # 9. Discord success notification
       # -----------------------------------------------------------------------
       - name: Notify Discord (success)
-        # Send when capture succeeded AND either:
-        #   - this is a scheduled run (always notify), or
-        #   - this is a manual run with notifications enabled.
-        # inputs.send_discord_notification is a boolean; comparing to `!= false`
-        # correctly handles both the boolean `false` and the absent-input case.
+        # inputs.send_discord_notification is boolean; `!= false` correctly
+        # handles both boolean false and the absent-input case (scheduled runs).
         if: |
           steps.run_capture.outcome == 'success' &&
           steps.commit.outcome != 'failure' &&
@@ -288,8 +258,7 @@ jobs:
             -H "Content-Type: application/json" -d "${PAYLOAD}"
 
       # -----------------------------------------------------------------------
-      # 11. Fail the workflow when the capture exited non-zero so GitHub
-      #     marks the run red and triggers any configured notifications.
+      # 11. Fail the workflow when the capture exited non-zero.
       # -----------------------------------------------------------------------
       - name: Fail on capture error
         if: steps.run_capture.outcome == 'failure'

@@ -3,7 +3,7 @@
 # Runs every Monday at 00:00 UTC.  On each run it:
 #   1. Checks out autogent source (using AUTOGENT_PAT).
 #   2. Captures a fresh baseline snapshot via `npm run capture`.
-#   3. Rebases on latest main and commits the weekly snapshot directly to main.
+#   3. Rebases on latest main and commits baselines/weekly/YYYY-MM-DD.json.
 #   4. Posts a Discord notification only if changes are detected (or on failure).
 #
 # Weekly captures are reference-only snapshots for regression triage.
@@ -11,8 +11,7 @@
 #
 # Secrets required:
 #   AUTOGENT_PAT        — PAT with `contents: read` on
-#                         JackywithaWhiteDog/autogent (for static source
-#                         extraction). Absent → capture degrades to static fallback.
+#                         JackywithaWhiteDog/autogent. Absent → static fallback.
 #   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → no notification.
 name: Weekly Capture (reference snapshots)
 
@@ -33,11 +32,6 @@ on:
         type: boolean
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Weekly capture: fires on schedule and manual workflow_dispatch.
-  # Captures a snapshot, commits to baselines/weekly/YYYY-MM-DD.json on main,
-  # and posts a Discord notification only if changes were detected.
-  # ---------------------------------------------------------------------------
   capture:
     name: Weekly reference snapshot
     runs-on: ubuntu-latest
@@ -48,26 +42,26 @@ jobs:
       cancel-in-progress: false
     steps:
       # -----------------------------------------------------------------------
-      # 0. Initialise date variables immediately so they are available even if
-      #    later steps fail (needed by the Discord failure notification).
+      # 0. Initialise date variables.
       # -----------------------------------------------------------------------
       - name: Set date variables
         run: |
           CAPTURE_DATE=$(date +%Y-%m-%d)
           echo "CAPTURE_DATE=${CAPTURE_DATE}" >> "$GITHUB_ENV"
           echo "WEEKLY_FILE=baselines/weekly/${CAPTURE_DATE}.json" >> "$GITHUB_ENV"
+          # Write CAPTURE_REASON using the multiline GITHUB_ENV format to
+          # prevent a newline in the input from injecting extra env entries.
+          {
+            echo "CAPTURE_REASON<<DELIMITER"
+            printf '%s' "${CAPTURE_REASON_RAW}"
+            echo ""
+            echo "DELIMITER"
+          } >> "$GITHUB_ENV"
         env:
-          # CAPTURE_REASON is read via env: (not embedded in run:) to prevent
-          # shell injection from user-supplied input values.
-          CAPTURE_REASON: ${{ inputs.capture_reason || 'weekly' }}
-
-      - name: Export CAPTURE_REASON to GITHUB_ENV
-        run: echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
-        env:
-          CAPTURE_REASON: ${{ inputs.capture_reason || 'weekly' }}
+          CAPTURE_REASON_RAW: ${{ inputs.capture_reason || 'weekly' }}
 
       # -----------------------------------------------------------------------
-      # 1. Check out the monitor repo (full history for git log in script)
+      # 1. Check out the monitor repo
       # -----------------------------------------------------------------------
       - name: Checkout cli-wrapper-monitor
         uses: actions/checkout@v4
@@ -76,7 +70,7 @@ jobs:
           token: ${{ github.token }}
 
       # -----------------------------------------------------------------------
-      # 2. Check out autogent source for static extraction
+      # 2. Check out autogent source
       # -----------------------------------------------------------------------
       - name: Checkout autogent source
         id: checkout_autogent
@@ -122,6 +116,7 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 6. Run the baseline capture, directing output to baselines/weekly/
+      #    The capture script reads BASELINES_DIR to override the output path.
       # -----------------------------------------------------------------------
       - name: Run capture
         id: run_capture
@@ -129,15 +124,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          # Direct the capture script to write to the weekly directory.
-          # This matches capture.config.json weeklyBaselinesDir.
+          # Override the capture output directory so snapshots go to
+          # baselines/weekly/ instead of the default baselines/.
+          # Matches capture.config.json weeklyBaselinesDir.
           BASELINES_DIR: baselines/weekly
         run: npm run capture
 
       # -----------------------------------------------------------------------
       # 7. Commit the weekly snapshot directly to main.
-      #    Rebase on latest main before push to handle concurrent commits
-      #    (e.g. a monthly capture running on the same day).
+      #    Rebase on latest main before push to avoid non-fast-forward errors
+      #    from concurrent commits (e.g. monthly capture on the same day).
       # -----------------------------------------------------------------------
       - name: Commit weekly snapshot
         id: commit
@@ -150,11 +146,11 @@ jobs:
 
           if git diff --staged --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes detected in weekly snapshot — skipping commit."
+            echo "No changes in weekly snapshot — skipping commit."
           else
             git commit -m "baseline(weekly): ${CAPTURE_DATE} ${CAPTURE_REASON} snapshot [skip ci]"
-            # Pull-rebase before push to handle concurrent commits to main
-            # (e.g. a release commit or another workflow firing simultaneously).
+            # Rebase on latest main before push to prevent non-fast-forward
+            # failures when main has advanced since the checkout.
             git pull --rebase origin main
             git push origin main
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -165,8 +161,6 @@ jobs:
       # 8. Discord notification (only when changes detected and notification enabled)
       # -----------------------------------------------------------------------
       - name: Notify Discord (changes detected)
-        # inputs.send_discord_notification is boolean; `!= false` correctly
-        # handles both boolean false and the absent-input case (scheduled runs).
         if: |
           steps.run_capture.outcome == 'success' &&
           steps.commit.outputs.changed == 'true' &&
@@ -179,7 +173,7 @@ jobs:
             echo "DISCORD_WEBHOOK_URL not set — skipping notification."
             exit 0
           fi
-          MSG="📊 Weekly baseline snapshot committed for \`${CAPTURE_DATE}\` (${CAPTURE_REASON}) → \`${WEEKLY_FILE}\`"
+          MSG="📊 Weekly snapshot committed for \`${CAPTURE_DATE}\` (${CAPTURE_REASON}) → \`${WEEKLY_FILE}\`"
           PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
           curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
             -X POST "${DISCORD_WEBHOOK_URL}" \
@@ -189,10 +183,12 @@ jobs:
       # 9. Discord failure notification
       # -----------------------------------------------------------------------
       - name: Notify Discord (failure)
-        # Gate failure notifications the same way as success: scheduled runs
-        # always notify; manual runs only notify when the input is enabled.
+        # Use steps.run_capture.outcome == 'failure' explicitly because
+        # run_capture has continue-on-error:true, which prevents failure()
+        # from seeing its exit code; other infra failures still trigger
+        # the outer failure() condition.
         if: |
-          failure() &&
+          (failure() || steps.run_capture.outcome == 'failure') &&
           (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
@@ -203,7 +199,7 @@ jobs:
             exit 0
           fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          MSG="❌ Weekly capture workflow failed for \`${CAPTURE_DATE:-unknown}\`. Check run: ${RUN_URL}"
+          MSG="❌ Weekly capture failed for \`${CAPTURE_DATE:-unknown}\`. Check run: ${RUN_URL}"
           PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
           curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
             -X POST "${DISCORD_WEBHOOK_URL}" \
