@@ -376,13 +376,19 @@ async function main(): Promise<void> {
     snapA.hookCount !== undefined &&
     snapB.hookCount !== undefined &&
     snapB.hookCount > snapA.hookCount;
+  // Hook appearing for the first time (baseline predated hook tracking).
+  const hookAppeared =
+    snapA.hookCount === undefined &&
+    snapB.hookCount !== undefined;
+  // hookBodyChanged: report.hookChanged is false when either hash is 'unknown'/undefined
+  // (see diff.ts hookChanged computation), so no false-positive for hash-to-unknown transitions.
   const hookBodyChanged =
     report.hookChanged &&
     snapA.hookCount !== undefined &&
     snapB.hookCount !== undefined &&
     snapA.hookCount === snapB.hookCount;
 
-  if (hookCountDropped || hookCountIncreased) {
+  if (hookCountDropped || hookCountIncreased || hookAppeared) {
     const changeType = hookCountDropped ? 'removed' : 'added';
     await sendHookChangedWebhook(
       changeType,

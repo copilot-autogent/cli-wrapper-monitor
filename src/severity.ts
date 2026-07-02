@@ -198,9 +198,13 @@ export async function sendHookChangedWebhook(
   const countNote =
     counts.before !== undefined && counts.after !== undefined && counts.before !== counts.after
       ? ` (count: ${counts.before} → ${counts.after})`
-      : counts.before !== undefined
-        ? ` (count: ${counts.before})`
-        : '';
+      : counts.before !== undefined && counts.after === undefined
+        ? ` (count: ${counts.before} → missing)`
+        : counts.before !== undefined
+          ? ` (count: ${counts.before})`
+          : counts.after !== undefined
+            ? ` (count: missing → ${counts.after})`
+            : '';
 
   const hashNote = `\`${shortHash(hashes.before)}\` → \`${shortHash(hashes.after)}\``;
 
