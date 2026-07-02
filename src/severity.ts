@@ -160,6 +160,64 @@ export async function sendModelRemovedWebhook(
 }
 
 /**
+ * Send a dedicated Discord webhook alert when hook fingerprints change
+ * between baselines.
+ *
+ * - `changeType` 'added' or 'removed' → BREAKING (hook count changed)
+ * - `changeType` 'body_changed' → WARNING (same count, different source hash)
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. Silently no-ops when the
+ * env var is absent or empty. Network errors are caught and logged as warnings.
+ */
+export async function sendHookChangedWebhook(
+  changeType: 'added' | 'removed' | 'body_changed',
+  counts: { before: number | undefined; after: number | undefined },
+  hashes: { before: string | undefined; after: string | undefined },
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): Promise<void> {
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl || !webhookUrl.trim()) return;
+
+  const DISCORD_MAX_CONTENT = 2000;
+  const shortHash = (h: string | undefined) =>
+    h && h !== 'unknown' ? h.replace(/^sha256:/, '').slice(0, 12) + '…' : 'unknown';
+
+  const isBreaking = changeType === 'added' || changeType === 'removed';
+  const icon = isBreaking ? '🚨' : '🔒';
+  const severityLabel = isBreaking ? 'BREAKING' : 'WARNING';
+
+  const changeLabel =
+    changeType === 'added'
+      ? 'hook added'
+      : changeType === 'removed'
+        ? 'hook removed'
+        : 'hook body changed';
+
+  const countNote =
+    counts.before !== undefined && counts.after !== undefined && counts.before !== counts.after
+      ? ` (count: ${counts.before} → ${counts.after})`
+      : counts.before !== undefined
+        ? ` (count: ${counts.before})`
+        : '';
+
+  const hashNote = `\`${shortHash(hashes.before)}\` → \`${shortHash(hashes.after)}\``;
+
+  let content =
+    `${icon} **${severityLabel}: Hook change detected** — ${dateA} vs ${dateB}` +
+    `\nChange: ${changeLabel}${countNote}` +
+    `\nHash: ${hashNote}` +
+    (ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '');
+
+  if (content.length > DISCORD_MAX_CONTENT) {
+    content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
+  }
+
+  await sendWebhookWithRetry(webhookUrl, { content }, 'hook-changed');
+}
+
+/**
  * Send a Discord webhook with a severity summary line, e.g.
  * "1 BREAKING, 2 WARNING, 3 INFO".
  *

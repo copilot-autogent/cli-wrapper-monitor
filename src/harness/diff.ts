@@ -173,6 +173,8 @@ export function diffSnapshots(
       structuralBreaks.push(`Hook count disappeared (was ${baselineHookCount})`);
     } else if (currentHookCount < baselineHookCount) {
       structuralBreaks.push(`Hook count dropped: ${baselineHookCount} → ${currentHookCount}`);
+    } else if (currentHookCount > baselineHookCount) {
+      structuralBreaks.push(`Hook count increased: ${baselineHookCount} → ${currentHookCount}`);
     }
   }
 
@@ -215,6 +217,23 @@ export function diffSnapshots(
     }
   }
 
+  // ── WARNING-level structural notes ────────────────────────────────────────
+  // Hook body changed without count change: notable but not BREAKING.
+  const warnings: string[] = [];
+  if (
+    hookChanged &&
+    baselineHookCount !== undefined &&
+    currentHookCount !== undefined &&
+    baselineHookCount === currentHookCount
+  ) {
+    const hashSnippet = (h: string | undefined) =>
+      h && h !== 'unknown' ? h.replace(/^sha256:/, '').slice(0, 12) + '…' : 'unknown';
+    warnings.push(
+      `Hook body changed (count unchanged: ${baselineHookCount}): ` +
+        `\`${hashSnippet(baseline.hookSourceHash)}\` → \`${hashSnippet(current.hookSourceHash)}\``,
+    );
+  }
+
   const hasBreaking =
     changes.some((c) => c.severity === 'BREAKING') || structuralBreaks.length > 0;
 
@@ -241,6 +260,7 @@ export function diffSnapshots(
     hasRegressions,
     severitySummary,
     structuralBreaks,
+    warnings,
     binaryChanged,
     systemPromptChanged,
     hookChanged,
@@ -293,6 +313,14 @@ export function formatDiffReport(report: DiffReport): string {
     lines.push('## Structural BREAKING Changes', '');
     for (const sb of report.structuralBreaks) {
       lines.push(`- 🔴 **BREAKING**: ${sb}`);
+    }
+    lines.push('');
+  }
+
+  if (report.warnings.length > 0) {
+    lines.push('## Hook Changes', '');
+    for (const w of report.warnings) {
+      lines.push(`- 🟡 **WARNING**: ${w}`);
     }
     lines.push('');
   }

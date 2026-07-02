@@ -32,6 +32,7 @@ import {
   sendSeveritySummaryWebhook,
   sendToolRemovedWebhook,
   sendModelRemovedWebhook,
+  sendHookChangedWebhook,
   type SeverityLevel,
 } from "../src/severity.js";
 
@@ -228,6 +229,23 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
     lines.push("");
   } else if (snapA.modelPool || snapB.modelPool) lines.push(`## Model Pool Changes`, "", "> No model pool changes detected.", "");
 
+  // ── Hook Changes ──────────────────────────────────────────────────────────
+  const hasHookCountChange =
+    (snapA.hookCount !== undefined && snapB.hookCount !== undefined && snapA.hookCount !== snapB.hookCount) ||
+    (snapA.hookCount !== undefined && snapB.hookCount === undefined);
+  if (report.structuralBreaks.some((s) => s.startsWith("Hook count")) || report.warnings.some((w) => w.startsWith("Hook body"))) {
+    lines.push(`## Hook Changes`, "");
+    for (const sb of report.structuralBreaks.filter((s) => s.startsWith("Hook count") || s.startsWith("Hook"))) {
+      lines.push(`- 🔴 **BREAKING**: ${sb}`);
+    }
+    for (const w of report.warnings.filter((w) => w.startsWith("Hook body"))) {
+      lines.push(`- 🟡 **WARNING**: ${w}`);
+    }
+    lines.push("");
+  } else if (snapA.hookCount !== undefined || snapB.hookCount !== undefined || snapA.hookSourceHash !== undefined || snapB.hookSourceHash !== undefined) {
+    lines.push(`## Hook Changes`, "", "> No hook changes detected.", "");
+  }
+
   const experimentNames = [...new Set([...Object.keys(snapA.experiments), ...Object.keys(snapB.experiments)])].sort();
   lines.push(`## Experiment Metrics`, "");
   for (const expName of experimentNames) {
@@ -348,6 +366,30 @@ async function main(): Promise<void> {
     .filter((c) => c.type === 'removed')
     .map((c) => c.modelId);
   await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
+
+  // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
+  // BREAKING (hook added/removed) and WARNING (body changed) each fire an alert.
+  const hookCountIncreased = report.structuralBreaks.some((s) => s.startsWith('Hook count increased'));
+  const hookCountDropped = report.structuralBreaks.some(
+    (s) => s.startsWith('Hook count dropped') || s.startsWith('Hook count disappeared'),
+  );
+  const hookBodyChanged = report.warnings.some((w) => w.startsWith('Hook body changed'));
+  if (hookCountDropped || hookCountIncreased) {
+    const changeType = hookCountDropped ? 'removed' : 'added';
+    await sendHookChangedWebhook(
+      changeType,
+      { before: snapA.hookCount, after: snapB.hookCount },
+      { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+      dateA, dateB, ciRunUrl,
+    );
+  } else if (hookBodyChanged) {
+    await sendHookChangedWebhook(
+      'body_changed',
+      { before: snapA.hookCount, after: snapB.hookCount },
+      { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+      dateA, dateB, ciRunUrl,
+    );
+  }
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.
   if (report.hasBreaking) {

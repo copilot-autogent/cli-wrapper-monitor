@@ -7,6 +7,7 @@ import {
   sendSeveritySummaryWebhook,
   sendToolRemovedWebhook,
   sendModelRemovedWebhook,
+  sendHookChangedWebhook,
   type SeverityLevel,
   type SeveritySummary,
 } from './severity.js';
@@ -584,11 +585,12 @@ describe('diffSnapshots — severity classification', () => {
     expect(report.structuralBreaks.filter((s) => s.includes('Tool count'))).toHaveLength(0);
   });
 
-  it('does NOT mark BREAKING when hook count increases', () => {
+  it('marks BREAKING when hook count increases (hook added)', () => {
     const baseline = makeSnapshot({ hookCount: 3 });
     const current = makeSnapshot({ hookCount: 4 }); // hook added
     const report = diffSnapshots(baseline, current);
-    expect(report.structuralBreaks.filter((s) => s.includes('Hook count'))).toHaveLength(0);
+    expect(report.structuralBreaks.filter((s) => s.includes('Hook count increased'))).toHaveLength(1);
+    expect(report.hasBreaking).toBe(true);
   });
 
   it('severitySummary counts match changes array', () => {
@@ -610,5 +612,120 @@ describe('diffSnapshots — severity classification', () => {
     // severitySummary counts only metric-change rows; structural breaks are in structuralBreakCount
     expect(totalFromChanges).toBe(report.changes.length);
     expect(report.severitySummary.structuralBreakCount).toBe(report.structuralBreaks.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendHookChangedWebhook (issue #68)
+// ---------------------------------------------------------------------------
+
+describe('sendHookChangedWebhook', () => {
+  let originalEnv: string | undefined;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    originalEnv = process.env['DISCORD_WEBHOOK_URL'];
+    mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env['DISCORD_WEBHOOK_URL'];
+    else process.env['DISCORD_WEBHOOK_URL'] = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is not set', async () => {
+    delete process.env['DISCORD_WEBHOOK_URL'];
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aabb', after: 'sha256:ccdd' }, '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call fetch when DISCORD_WEBHOOK_URL is whitespace-only', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = '   ';
+    await sendHookChangedWebhook('added', { before: 2, after: 4 }, { before: 'sha256:aabb', after: 'sha256:ccdd' }, '2026-05-01', '2026-06-01');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('POSTs when hook is removed (BREAKING)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('POSTs when hook is added (BREAKING)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('added', { before: 2, after: 3 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('POSTs when hook body changed (WARNING)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('body_changed', { before: 3, after: 3 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('body contains BREAKING label for removed hook', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content).toContain('BREAKING');
+    expect(body.content).toContain('hook removed');
+  });
+
+  it('body contains WARNING label for body_changed hook', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('body_changed', { before: 3, after: 3 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content).toContain('WARNING');
+    expect(body.content).toContain('hook body changed');
+  });
+
+  it('body contains date range', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content).toContain('2026-05-01');
+    expect(body.content).toContain('2026-06-01');
+  });
+
+  it('body includes hash snippet', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('body_changed', { before: 3, after: 3 }, { before: 'sha256:aabb1234567890ef', after: 'sha256:ccdd0011223344ff' }, '2026-05-01', '2026-06-01');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content).toContain('aabb12345678');
+    expect(body.content).toContain('ccdd00112233');
+  });
+
+  it('body includes CI run URL when provided', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    const ciUrl = 'https://github.com/org/repo/actions/runs/999';
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01', ciUrl);
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content).toContain(ciUrl);
+  });
+
+  it('body contains count delta for added/removed', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content).toContain('3 →');
+    expect(body.content).toContain('→ 2');
+  });
+
+  it('does NOT throw on network error (graceful no-op)', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    mockFetch.mockRejectedValue(new Error('network failure'));
+    await expect(
+      sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('content length is within Discord 2000-char limit', async () => {
+    process.env['DISCORD_WEBHOOK_URL'] = 'https://discord.example/webhook';
+    const longUrl = 'https://github.com/' + 'x'.repeat(1800) + '/actions/runs/999';
+    await sendHookChangedWebhook('removed', { before: 3, after: 2 }, { before: 'sha256:aaaa', after: 'sha256:bbbb' }, '2026-05-01', '2026-06-01', longUrl);
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(body.content.length).toBeLessThanOrEqual(2000);
   });
 });
