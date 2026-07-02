@@ -367,8 +367,9 @@ async function main(): Promise<void> {
   await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
 
   // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
-  // Derive detection directly from snapshot data to avoid fragile string matching.
-  // BREAKING (hook added/removed) and WARNING (body changed) fire independently.
+  // Only fire when baseline had hook tracking (baselineHookCount defined), matching
+  // diff.ts's gate — avoids false-positive BREAKING on first comparison after
+  // hook tracking was introduced to older baselines.
   const hookCountDropped =
     snapA.hookCount !== undefined &&
     (snapB.hookCount === undefined || snapB.hookCount < snapA.hookCount);
@@ -376,19 +377,10 @@ async function main(): Promise<void> {
     snapA.hookCount !== undefined &&
     snapB.hookCount !== undefined &&
     snapB.hookCount > snapA.hookCount;
-  // Hook appearing for the first time (baseline predated hook tracking).
-  const hookAppeared =
-    snapA.hookCount === undefined &&
-    snapB.hookCount !== undefined;
-  // hookBodyChanged: report.hookChanged is false when either hash is 'unknown'/undefined
-  // (see diff.ts hookChanged computation), so no false-positive for hash-to-unknown transitions.
-  const hookBodyChanged =
-    report.hookChanged &&
-    snapA.hookCount !== undefined &&
-    snapB.hookCount !== undefined &&
-    snapA.hookCount === snapB.hookCount;
+  // Use report.warnings as the source of truth (populated by diff.ts, avoids duplicating logic).
+  const hookBodyWarnings = report.warnings.filter((w) => w.startsWith('Hook body'));
 
-  if (hookCountDropped || hookCountIncreased || hookAppeared) {
+  if (hookCountDropped || hookCountIncreased) {
     const changeType = hookCountDropped ? 'removed' : 'added';
     await sendHookChangedWebhook(
       changeType,
@@ -397,7 +389,7 @@ async function main(): Promise<void> {
       dateA, dateB, ciRunUrl,
     );
   }
-  if (hookBodyChanged) {
+  if (hookBodyWarnings.length > 0) {
     await sendHookChangedWebhook(
       'body_changed',
       { before: snapA.hookCount, after: snapB.hookCount },
