@@ -1,9 +1,9 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env -S npx tsx
 /**
  * Generate a multi-baseline trend report from all historical baselines.
  *
  * Usage:
- *   npx ts-node --esm scripts/trend-report.ts [--output <path>]
+ *   npx tsx scripts/trend-report.ts [--output <path>]
  *
  * Reads all *.json files in baselines/ (excluding schema.json) in chronological order
  * and renders a flat summary table showing key metrics across captures, plus an

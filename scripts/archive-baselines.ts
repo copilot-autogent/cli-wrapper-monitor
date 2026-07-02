@@ -1,4 +1,4 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env -S npx tsx
 /**
  * Baseline retention policy: archive baselines older than N calendar months.
  *
@@ -8,7 +8,7 @@
  *
  * Usage:
  *   npm run archive
- *   npx ts-node --esm scripts/archive-baselines.ts [options]
+ *   npx tsx scripts/archive-baselines.ts [options]
  *
  * Options:
  *   --older-than-months N   Archive files older than N calendar months (default: 6)

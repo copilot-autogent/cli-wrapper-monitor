@@ -1,10 +1,10 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env -S npx tsx
 /**
  * Compare two baseline JSON snapshots and output a structured diff report.
  *
  * Usage:
- *   npx ts-node --esm scripts/compare-baselines.ts <baseline-a> <baseline-b> [options]
- *   npx ts-node --esm scripts/compare-baselines.ts --a <path> --b <path> [options]
+ *   npx tsx scripts/compare-baselines.ts <baseline-a> <baseline-b> [options]
+ *   npx tsx scripts/compare-baselines.ts --a <path> --b <path> [options]
  *
  * Options:
  *   --json          Output raw DiffReport as JSON instead of Markdown

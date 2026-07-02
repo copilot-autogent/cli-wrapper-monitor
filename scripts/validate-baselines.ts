@@ -1,14 +1,14 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env -S npx tsx
 /**
  * Baseline integrity validator — standalone script.
  *
  * Scans all baselines/*.json files (including latest.json if present, excluding
  * schema.json) and validates each against the expected MetricSnapshot schema.
- * Also scans baselines/archive/**/*.json when the archive directory exists.
+ * Also scans nested JSON files under baselines/archive/ when that directory exists.
  *
  * Usage:
  *   npm run validate
- *   npx ts-node --esm scripts/validate-baselines.ts [--dir <path>]
+ *   npx tsx scripts/validate-baselines.ts [--dir <path>]
  *
  * Options:
  *   --dir <path>   Directory to scan (default: baselines/)

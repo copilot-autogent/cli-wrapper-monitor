@@ -5,7 +5,7 @@
  * set of models and produces a comparison table + stored JSON artifact.
  *
  * Usage:
- *   npx ts-node --esm scripts/capture-multi-model.ts
+ *   npx tsx scripts/capture-multi-model.ts
  *
  * Environment variables:
  *   GITHUB_TOKEN        Required for live refusal probes (GitHub Models API)

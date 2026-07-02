@@ -4,15 +4,15 @@
   "description": "Regression detection for Copilot CLI wrapper behavior",
   "type": "module",
   "scripts": {
-    "experiments": "npx ts-node --esm scripts/run-experiments.ts",
-    "capture": "npx ts-node --esm scripts/capture-autogent-baseline.ts",
-    "diff": "npx ts-node --esm scripts/generate-diff-report.ts",
-    "compare": "npx ts-node --esm scripts/compare-baselines.ts",
-    "trend": "npx ts-node --esm scripts/trend-report.ts",
-    "chart": "npx ts-node --esm scripts/generate-chart.ts",
-    "multi-model": "npx ts-node --esm scripts/capture-multi-model.ts",
-    "validate": "npx ts-node --esm scripts/validate-baselines.ts",
-    "archive": "npx ts-node --esm scripts/archive-baselines.ts",
+    "experiments": "npx tsx scripts/run-experiments.ts",
+    "capture": "npx tsx scripts/capture-autogent-baseline.ts",
+    "diff": "npx tsx scripts/generate-diff-report.ts",
+    "compare": "npx tsx scripts/compare-baselines.ts",
+    "trend": "npx tsx scripts/trend-report.ts",
+    "chart": "npx tsx scripts/generate-chart.ts",
+    "multi-model": "npx tsx scripts/capture-multi-model.ts",
+    "validate": "npx tsx scripts/validate-baselines.ts",
+    "archive": "npx tsx scripts/archive-baselines.ts",
     "health": "npx tsx scripts/capture-health-report.ts",
     "dashboard": "npx tsx scripts/generate-dashboard.ts",
     "test": "vitest run"
@@ -23,7 +23,6 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@vitest/coverage-v8": "^4.1.9",
-    "ts-node": "^10.9.2",
     "tsx": "^4.22.4",
     "typescript": "^5.4.5",
     "vitest": "^4.1.9"
