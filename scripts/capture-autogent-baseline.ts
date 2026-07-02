@@ -19,6 +19,7 @@
  *   SKIP_MODEL_POOL=true npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_PROVENANCE=true npx tsx scripts/capture-autogent-baseline.ts
  *   npx tsx scripts/capture-autogent-baseline.ts --dry-run
+ *   npx tsx scripts/capture-autogent-baseline.ts --preflight
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -47,6 +48,7 @@ import {
   hasFailureStreak,
   FAILURE_STREAK_THRESHOLD,
 } from '../src/harness/capture-health.js';
+import { runPreflight } from './preflight.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // BASELINES_DIR can be overridden via the BASELINES_DIR environment variable.
@@ -63,6 +65,7 @@ const SKIP_REFUSAL = process.env['SKIP_REFUSAL'] === 'true';
 const SKIP_MODEL_POOL = process.env['SKIP_MODEL_POOL'] === 'true';
 const SKIP_PROVENANCE = process.env['SKIP_PROVENANCE'] === 'true';
 const DRY_RUN = process.argv.includes('--dry-run');
+const PREFLIGHT = process.argv.includes('--preflight');
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -951,8 +954,17 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
 
 // Only run when invoked directly (not imported in tests)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  captureBaseline().catch((err: unknown) => {
-    console.error(err);
-    process.exit(1);
-  });
+  if (PREFLIGHT) {
+    runPreflight({ baselinesDir: BASELINES_DIR }).then((passed) => {
+      process.exit(passed ? 0 : 1);
+    }).catch((err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    });
+  } else {
+    captureBaseline().catch((err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    });
+  }
 }

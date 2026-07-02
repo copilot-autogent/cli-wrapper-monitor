@@ -16,7 +16,8 @@
     "health": "npx tsx scripts/capture-health-report.ts",
     "dashboard": "npx tsx scripts/generate-dashboard.ts",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "preflight": "npx tsx scripts/preflight.ts"
   },
   "dependencies": {
     "@github/copilot-sdk": "^0.2.2"
