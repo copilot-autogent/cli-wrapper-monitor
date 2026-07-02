@@ -29,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run actionlint
+        # Pin both the installer script (release tag) and the binary version so
+        # CI is reproducible and not exposed to upstream `main` script drift.
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
           ./actionlint -color
