@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * Generate a multi-baseline trend report from all historical baselines.
  *

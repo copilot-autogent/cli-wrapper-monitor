@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * Generate a static SVG trend chart from all historical baseline JSON files.
  *

@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * Compare two baseline JSON snapshots and output a structured diff report.
  *

@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * Baseline retention policy: archive baselines older than N calendar months.
  *

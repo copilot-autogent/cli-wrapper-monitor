@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * Generate a markdown diff report comparing two baseline snapshots.
  *
