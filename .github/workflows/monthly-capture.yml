@@ -1,21 +1,21 @@
 # Monthly baseline capture — PR flow.
 #
 # Runs on the 3rd of every month at 00:00 UTC.  On each run it:
-#   1. Checks out autogent source (using GITHUB_API_TOKEN).
+#   1. Checks out autogent source (using AUTOGENT_PAT).
 #   2. Captures a fresh baseline snapshot via `npm run capture`.
 #   3. Commits the new baseline + health log to a dated branch
 #      (even on capture failure so artefacts are preserved).
 #   4. Opens a PR titled "baseline: YYYY-MM capture".
 #   5. Posts a Discord success or failure notification.
 #
-# A lightweight dry-run job also runs on every push to `main` to verify
-# the capture script still loads without writing any files.
-#
-# Secrets required (already present in repo):
-#   GITHUB_API_TOKEN    — PAT with access to JackywithaWhiteDog/autogent
-#                         and copilot-autogent/cli-wrapper-monitor.
-#                         Also passed as GITHUB_TOKEN to enable the
-#                         refusal-rate experiment (GitHub Models API).
+# Secrets required:
+#   AUTOGENT_PAT        — PAT with `contents: read` on
+#                         JackywithaWhiteDog/autogent (for static source
+#                         extraction). Also passed as GITHUB_TOKEN to enable
+#                         the refusal-rate experiment (GitHub Models API).
+#                         Absent → capture degrades to a static fallback.
+#                         NOTE: an Actions secret must NOT use the reserved
+#                         GITHUB_ prefix, hence AUTOGENT_PAT (not GITHUB_*).
 #   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → no notification.
 name: Monthly Capture (PR flow)
 
@@ -23,42 +23,8 @@ on:
   schedule:
     - cron: '0 0 3 * *'  # 3rd of every month at 00:00 UTC
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Dry-run: fires on every push to main.
-  # Validates that the capture script loads and parses cleanly without
-  # writing any baseline files (--dry-run flag).
-  # ---------------------------------------------------------------------------
-  dry-run:
-    name: Dry-run (validate capture script)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    # Read-only token is sufficient for this job.
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Validate capture script (dry run)
-        # --dry-run causes the script to parse source, compute metrics, and
-        # log a health entry but skip writing baseline JSON files.
-        # AUTOGENT_PATH is set to the workspace so static source extraction
-        # finds the local copy rather than falling back to the /app default.
-        run: npm run capture -- --dry-run
-        env:
-          AUTOGENT_PATH: ${{ github.workspace }}
-
   # ---------------------------------------------------------------------------
   # Full capture: fires on schedule and manual workflow_dispatch.
   # Creates a dated branch, runs the capture, commits artefacts, opens a PR,
@@ -67,12 +33,9 @@ jobs:
   capture:
     name: Capture baseline and open PR
     runs-on: ubuntu-latest
-    if: github.event_name != 'push'
     permissions:
       contents: write
       pull-requests: write
-    # Concurrency guard scoped to the capture job only — dry-run pushes must
-    # not be blocked by a long-running monthly capture.
     concurrency:
       group: monthly-capture
       cancel-in-progress: false
@@ -94,8 +57,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Use GITHUB_API_TOKEN so the subsequent push is authenticated.
-          token: ${{ secrets.GITHUB_API_TOKEN || github.token }}
+          # Use AUTOGENT_PAT so the subsequent push is authenticated (falls
+          token: ${{ secrets.AUTOGENT_PAT || github.token }}
 
       # -----------------------------------------------------------------------
       # 2. Check out autogent source for static extraction
@@ -108,7 +71,7 @@ jobs:
         continue-on-error: true
         with:
           repository: JackywithaWhiteDog/autogent
-          token: ${{ secrets.GITHUB_API_TOKEN }}
+          token: ${{ secrets.AUTOGENT_PAT }}
           ref: main
           path: autogent-src
           fetch-depth: 1
@@ -166,9 +129,9 @@ jobs:
         # snapshot artefacts and surface the failure as a red run / Discord alert.
         continue-on-error: true
         env:
-          # Map GITHUB_API_TOKEN → GITHUB_TOKEN so the refusal-rate
+          # Map AUTOGENT_PAT → GITHUB_TOKEN so the refusal-rate
           # experiment (GitHub Models API) and provenance lookups work.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run capture
 
@@ -214,7 +177,7 @@ jobs:
         id: pr
         if: steps.run_capture.outcome == 'success' && steps.commit.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_API_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.AUTOGENT_PAT || github.token }}
         run: |
           # If a PR already exists for this branch (re-run in same month),
           # reuse it rather than failing with a duplicate-PR error.
@@ -223,14 +186,17 @@ jobs:
             echo "PR already open: ${EXISTING}"
             echo "pr_url=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
-            # Write body to a temp file to avoid shell quoting / backtick issues.
-            cat > /tmp/pr-body.md << EOF
-Automated monthly baseline capture for ${YEAR_MONTH}.
-
-Generated by the \`monthly-capture\` GitHub Actions workflow.
-
-Part of #65
-EOF
+            # Write body to a temp file using indented here-doc lines so the
+            # YAML `run: |` block scalar is not terminated by column-0 content
+            # (a bare unindented here-doc body is invalid YAML and caused the
+            # whole workflow to fail at startup). Use grouped echoes instead.
+            {
+              echo "Automated monthly baseline capture for ${YEAR_MONTH}."
+              echo ""
+              echo 'Generated by the `monthly-capture` GitHub Actions workflow.'
+              echo ""
+              echo "Part of #65"
+            } > /tmp/pr-body.md
             PR_URL=$(gh pr create \
               --repo "${{ github.repository }}" \
               --title "baseline: ${YEAR_MONTH} capture" \
