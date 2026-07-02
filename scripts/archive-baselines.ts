@@ -6,14 +6,19 @@
  * the date parsed from the filename (YYYY-MM-DD prefix). Files that cannot be
  * date-parsed are reported but left in place.
  *
+ * Also archives weekly baselines from baselines/weekly/ → baselines/weekly/archive/YYYY/
+ * using the same retention window, as configured in capture.config.json.
+ *
  * Usage:
  *   npm run archive
  *   npx tsx scripts/archive-baselines.ts [options]
  *
  * Options:
  *   --older-than-months N   Archive files older than N calendar months (default: 6)
- *   --baselines-dir <path>  Baselines root directory (default: baselines/)
+ *   --baselines-dir <path>  Baselines root directory (default: from capture.config.json or baselines/)
+ *   --weekly-dir <path>     Weekly baselines directory (default: from capture.config.json or baselines/weekly/)
  *   --dry-run               Print what would be moved without touching files
+ *   --skip-weekly           Skip archiving of weekly baselines
  *
  * Exit codes:
  *   0  Success (including "nothing to archive")
@@ -23,6 +28,7 @@
 import { readdirSync, mkdirSync, renameSync, existsSync, lstatSync } from 'fs';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
+import { loadCaptureConfig } from './capture-config.js';
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing
@@ -31,14 +37,21 @@ import { fileURLToPath } from 'url';
 interface CliArgs {
   olderThanMonths: number;
   baselinesDir: string;
+  weeklyDir: string;
   dryRun: boolean;
+  skipWeekly: boolean;
 }
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
-  let olderThanMonths = 6;
-  let baselinesDir = 'baselines';
+
+  // Load config file defaults first (falls back to hardcoded defaults if absent)
+  const cfg = loadCaptureConfig();
+  let olderThanMonths = cfg.retentionMonths;
+  let baselinesDir = cfg.monthlyBaselinesDir;
+  let weeklyDir = cfg.weeklyBaselinesDir;
   let dryRun = false;
+  let skipWeekly = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--older-than-months') {
@@ -58,15 +71,23 @@ function parseArgs(): CliArgs {
         process.exit(1);
       }
       baselinesDir = args[++i];
+    } else if (args[i] === '--weekly-dir') {
+      if (!args[i + 1] || args[i + 1].startsWith('--')) {
+        console.error('Error: --weekly-dir requires a value');
+        process.exit(1);
+      }
+      weeklyDir = args[++i];
     } else if (args[i] === '--dry-run') {
       dryRun = true;
+    } else if (args[i] === '--skip-weekly') {
+      skipWeekly = true;
     } else {
       console.error(`Error: unknown flag '${args[i]}'`);
       process.exit(1);
     }
   }
 
-  return { olderThanMonths, baselinesDir, dryRun };
+  return { olderThanMonths, baselinesDir, weeklyDir, dryRun, skipWeekly };
 }
 
 // ---------------------------------------------------------------------------
@@ -221,41 +242,80 @@ export function archiveBaselines(
 // ---------------------------------------------------------------------------
 
 function main(): void {
-  const { olderThanMonths, baselinesDir, dryRun } = parseArgs();
+  const { olderThanMonths, baselinesDir, weeklyDir, dryRun, skipWeekly } = parseArgs();
 
   if (dryRun) {
     console.log(
-      `[dry-run] Would archive baselines older than ${olderThanMonths} months from ${baselinesDir}/`
+      `[dry-run] Would archive baselines older than ${olderThanMonths} months`
     );
   }
 
-  let result: ArchiveResult;
+  // --- Monthly baselines ---
+  let monthlyResult: ArchiveResult;
   try {
-    result = archiveBaselines(baselinesDir, olderThanMonths, dryRun);
+    monthlyResult = archiveBaselines(baselinesDir, olderThanMonths, dryRun);
   } catch (err) {
-    console.error(`Error: ${(err as Error).message}`);
+    console.error(`Error (monthly): ${(err as Error).message}`);
     process.exit(1);
   }
 
-  const { archived, kept, skipped } = result;
+  const { archived: mArchived, kept: mKept, skipped: mSkipped } = monthlyResult;
 
-  if (archived.length === 0) {
-    console.log(`No baselines older than ${olderThanMonths} months to archive.`);
+  if (mArchived.length === 0) {
+    console.log(`No monthly baselines older than ${olderThanMonths} months to archive.`);
   } else {
-    const dates = archived.map((f) => f.slice(0, 10)); // YYYY-MM-DD prefix
-    const minDate = dates[0];
-    const maxDate = dates[dates.length - 1];
+    const dates = mArchived.map((f) => f.slice(0, 10));
     const action = dryRun ? 'Would archive' : 'Archived';
     console.log(
-      `${action} ${archived.length} baseline${archived.length === 1 ? '' : 's'} ` +
-        `(${minDate} to ${maxDate}). ` +
-        `${kept.length} baseline${kept.length === 1 ? '' : 's'} remain in ${baselinesDir}/.`
+      `${action} ${mArchived.length} monthly baseline${mArchived.length === 1 ? '' : 's'} ` +
+        `(${dates[0]} to ${dates[dates.length - 1]}). ` +
+        `${mKept.length} baseline${mKept.length === 1 ? '' : 's'} remain in ${baselinesDir}/.`
     );
   }
 
-  if (skipped.length > 0) {
+  if (mSkipped.length > 0) {
     console.warn(
-      `Skipped ${skipped.length} file(s) with non-date filenames: ${skipped.join(', ')}`
+      `Skipped ${mSkipped.length} monthly file(s) with non-date filenames: ${mSkipped.join(', ')}`
+    );
+  }
+
+  // --- Weekly baselines ---
+  if (skipWeekly) {
+    console.log('Skipping weekly baselines (--skip-weekly).');
+    return;
+  }
+
+  // Weekly dir may not exist yet (no weekly captures have run); that's not an error.
+  if (!existsSync(resolve(weeklyDir))) {
+    console.log(`Weekly baselines directory not found (${weeklyDir}/) — nothing to archive.`);
+    return;
+  }
+
+  let weeklyResult: ArchiveResult;
+  try {
+    weeklyResult = archiveBaselines(weeklyDir, olderThanMonths, dryRun);
+  } catch (err) {
+    console.error(`Error (weekly): ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  const { archived: wArchived, kept: wKept, skipped: wSkipped } = weeklyResult;
+
+  if (wArchived.length === 0) {
+    console.log(`No weekly baselines older than ${olderThanMonths} months to archive.`);
+  } else {
+    const dates = wArchived.map((f) => f.slice(0, 10));
+    const action = dryRun ? 'Would archive' : 'Archived';
+    console.log(
+      `${action} ${wArchived.length} weekly baseline${wArchived.length === 1 ? '' : 's'} ` +
+        `(${dates[0]} to ${dates[dates.length - 1]}). ` +
+        `${wKept.length} baseline${wKept.length === 1 ? '' : 's'} remain in ${weeklyDir}/.`
+    );
+  }
+
+  if (wSkipped.length > 0) {
+    console.warn(
+      `Skipped ${wSkipped.length} weekly file(s) with non-date filenames: ${wSkipped.join(', ')}`
     );
   }
 }

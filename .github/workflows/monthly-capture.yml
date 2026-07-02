@@ -5,7 +5,7 @@
 #   2. Captures a fresh baseline snapshot via `npm run capture`.
 #   3. Commits the new baseline + health log to a dated branch
 #      (even on capture failure so artefacts are preserved).
-#   4. Opens a PR titled "baseline: YYYY-MM capture".
+#   4. Opens a PR titled "baseline: YYYY-MM <capture_reason> capture".
 #   5. Posts a Discord success or failure notification.
 #
 # Secrets required:
@@ -23,13 +23,19 @@ on:
   schedule:
     - cron: '0 0 3 * *'  # 3rd of every month at 00:00 UTC
   workflow_dispatch:
+    inputs:
+      capture_reason:
+        description: 'Label for this capture (added to PR title and notification)'
+        required: false
+        default: 'scheduled'
+        type: string
+      send_discord_notification:
+        description: 'Send Discord notification on completion'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Full capture: fires on schedule and manual workflow_dispatch.
-  # Creates a dated branch, runs the capture, commits artefacts, opens a PR,
-  # and posts a Discord notification for success or failure.
-  # ---------------------------------------------------------------------------
   capture:
     name: Capture baseline and open PR
     runs-on: ubuntu-latest
@@ -41,50 +47,43 @@ jobs:
       cancel-in-progress: false
     steps:
       # -----------------------------------------------------------------------
-      # 0. Initialise month variables immediately so they are available even if
-      #    later steps fail (needed by the Discord failure notification).
+      # 0. Initialise month variables.
       # -----------------------------------------------------------------------
       - name: Set month variables
         run: |
           YEAR_MONTH=$(date +%Y-%m)
           echo "YEAR_MONTH=${YEAR_MONTH}" >> "$GITHUB_ENV"
           echo "BRANCH=baseline/${YEAR_MONTH}" >> "$GITHUB_ENV"
+          # Write CAPTURE_REASON using a unique per-run delimiter to prevent
+          # env-file injection even if the input itself contains newlines.
+          # (A static 'DELIMITER' string could be matched by crafted input.)
+          UNIQUE_DELIM="DELIM_${YEAR_MONTH}_$(head -c 8 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 8)"
+          {
+            echo "CAPTURE_REASON<<${UNIQUE_DELIM}"
+            printf '%s' "${CAPTURE_REASON_RAW}"
+            echo ""
+            echo "${UNIQUE_DELIM}"
+          } >> "$GITHUB_ENV"
+        env:
+          CAPTURE_REASON_RAW: ${{ inputs.capture_reason || 'scheduled' }}
 
-      # -----------------------------------------------------------------------
-      # 1. Check out the monitor repo (full history for git log in script)
-      # -----------------------------------------------------------------------
       - name: Checkout cli-wrapper-monitor
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Same-repo checkout/push: the built-in github.token already has
-          # contents:write on this repo (see job permissions), so use it here.
-          # AUTOGENT_PAT is reserved for the cross-repo autogent checkout below.
           token: ${{ github.token }}
 
-      # -----------------------------------------------------------------------
-      # 2. Check out autogent source for static extraction
-      # -----------------------------------------------------------------------
       - name: Checkout autogent source
         id: checkout_autogent
         uses: actions/checkout@v4
-        # continue-on-error so the rest of the workflow still runs even
-        # when the secret is missing or the repo is temporarily unavailable.
         continue-on-error: true
         with:
           repository: JackywithaWhiteDog/autogent
-          # Cross-repo read: requires a PAT. No github.token fallback because
-          # github.token cannot read another repository; when AUTOGENT_PAT is
-          # absent this step fails softly (continue-on-error) and capture uses
-          # its static fallback.
           token: ${{ secrets.AUTOGENT_PAT }}
           ref: main
           path: autogent-src
           fetch-depth: 1
 
-      # -----------------------------------------------------------------------
-      # 3. Build environment
-      # -----------------------------------------------------------------------
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -94,9 +93,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # -----------------------------------------------------------------------
-      # 4. Resolve AUTOGENT_PATH
-      # -----------------------------------------------------------------------
       - name: Resolve autogent path
         run: |
           if [ "${{ steps.checkout_autogent.outcome }}" = "success" ] && \
@@ -107,16 +103,11 @@ jobs:
             echo "Autogent source not available — capture will use static fallback."
           fi
 
-      # -----------------------------------------------------------------------
-      # 5. Create or reset the capture branch
-      # -----------------------------------------------------------------------
       - name: Create capture branch
         id: create_branch
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # If the branch already exists on the remote (re-run in same month),
-          # fetch and check it out rather than failing with branch-exists error.
           if git ls-remote --exit-code origin "${BRANCH}" > /dev/null 2>&1; then
             echo "Branch ${BRANCH} already exists — fetching and checking out."
             git fetch origin "${BRANCH}"
@@ -125,38 +116,20 @@ jobs:
             git checkout -b "${BRANCH}"
           fi
 
-      # -----------------------------------------------------------------------
-      # 6. Run the baseline capture
-      # -----------------------------------------------------------------------
       - name: Run capture
         id: run_capture
-        # continue-on-error keeps the workflow alive when the script exits
-        # non-zero (e.g., regressions detected) so we can still commit the
-        # snapshot artefacts and surface the failure as a red run / Discord alert.
         continue-on-error: true
         env:
-          # Map AUTOGENT_PAT → GITHUB_TOKEN so the refusal-rate
-          # experiment (GitHub Models API) and provenance lookups work.
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run capture
 
-      # -----------------------------------------------------------------------
-      # 7. Commit artefacts to the capture branch.
-      #    Health log is always staged (failure streak data must be preserved).
-      #    Baseline data artefacts are only staged on a successful capture to
-      #    avoid committing partial or deleted data from a failed run.
-      # -----------------------------------------------------------------------
       - name: Commit baseline artefacts
         id: commit
         if: steps.create_branch.outcome == 'success'
         run: |
-          # Always stage the health log — it is append-only and safe to commit
-          # even when the capture itself errored.
           [ -e logs ] && git add logs
 
-          # Only stage data artefacts when capture succeeded to avoid
-          # committing partially-written or deleted files from a failed run.
           if [ "${{ steps.run_capture.outcome }}" = "success" ]; then
             for path in baselines chart.svg reports; do
               [ -e "${path}" ] && git add "${path}"
@@ -168,36 +141,26 @@ jobs:
             echo "Nothing new to commit — baseline is unchanged."
           else
             CAPTURE_STATUS="${{ steps.run_capture.outcome }}"
-            git commit -m "baseline: ${YEAR_MONTH} capture (${CAPTURE_STATUS}) [skip ci]"
-            # --force-with-lease is safe: we own this branch and it avoids
-            # a non-fast-forward error when a same-month re-run re-pushes.
+            git commit -m "baseline: ${YEAR_MONTH} ${CAPTURE_REASON} capture (${CAPTURE_STATUS}) [skip ci]"
             git push --force-with-lease origin "${BRANCH}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed and pushed to ${BRANCH}."
           fi
 
-      # -----------------------------------------------------------------------
-      # 8. Open the PR (only on successful capture with new artefacts)
-      # -----------------------------------------------------------------------
       - name: Open PR
         id: pr
         if: steps.run_capture.outcome == 'success' && steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # If a PR already exists for this branch (re-run in same month),
-          # reuse it rather than failing with a duplicate-PR error.
           EXISTING=$(gh pr list --head "${BRANCH}" --state open --json url --jq '.[0].url // ""')
           if [ -n "${EXISTING}" ]; then
             echo "PR already open: ${EXISTING}"
             echo "pr_url=${EXISTING}" >> "$GITHUB_OUTPUT"
           else
-            # Write body to a temp file using indented here-doc lines so the
-            # YAML `run: |` block scalar is not terminated by column-0 content
-            # (a bare unindented here-doc body is invalid YAML and caused the
-            # whole workflow to fail at startup). Use grouped echoes instead.
+            PR_TITLE="baseline: ${YEAR_MONTH} ${CAPTURE_REASON} capture"
             {
-              echo "Automated monthly baseline capture for ${YEAR_MONTH}."
+              echo "Automated baseline capture for ${YEAR_MONTH} (${CAPTURE_REASON})."
               echo ""
               echo "Generated by the \`monthly-capture\` GitHub Actions workflow."
               echo ""
@@ -205,7 +168,7 @@ jobs:
             } > /tmp/pr-body.md
             PR_URL=$(gh pr create \
               --repo "${{ github.repository }}" \
-              --title "baseline: ${YEAR_MONTH} capture" \
+              --title "${PR_TITLE}" \
               --body-file /tmp/pr-body.md \
               --base main \
               --head "${BRANCH}")
@@ -214,12 +177,15 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # 9. Discord success notification
+      # Notify Discord (success)
+      # inputs.send_discord_notification is boolean; `!= false` handles both
+      # boolean false and the absent-input case (scheduled runs always notify).
       # -----------------------------------------------------------------------
       - name: Notify Discord (success)
-        # Only fire when capture AND post-capture steps (commit, pr) all succeeded.
-        if: steps.run_capture.outcome == 'success' && steps.commit.outcome != 'failure'
-        # continue-on-error so a curl/jq failure doesn't fail the job run.
+        if: |
+          steps.run_capture.outcome == 'success' &&
+          steps.commit.outcome != 'failure' &&
+          (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -230,25 +196,24 @@ jobs:
           fi
           PR_LINK="${{ steps.pr.outputs.pr_url }}"
           if [ -n "${PR_LINK}" ]; then
-            MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` — PR: ${PR_LINK}"
+            MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` (${CAPTURE_REASON}) — PR: ${PR_LINK}"
           else
-            MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` — baseline unchanged, no PR opened."
+            MSG="✅ Monthly baseline captured for \`${YEAR_MONTH}\` (${CAPTURE_REASON}) — baseline unchanged, no PR opened."
           fi
-          # Use jq to safely build the JSON payload so special chars in MSG are escaped.
           PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
           curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
             -X POST "${DISCORD_WEBHOOK_URL}" \
             -H "Content-Type: application/json" -d "${PAYLOAD}"
 
       # -----------------------------------------------------------------------
-      # 10. Discord failure notification
+      # Notify Discord (failure)
+      # Also explicitly checks run_capture outcome because continue-on-error
+      # prevents run_capture failures from propagating to failure() directly.
       # -----------------------------------------------------------------------
       - name: Notify Discord (failure)
-        # failure() covers all failure cases: infra failures, capture errors,
-        # and post-capture step failures (push, PR creation).
-        if: failure()
-        # continue-on-error so a jq/curl hiccup here doesn't change the job
-        # outcome — the run is already failed; notification is best-effort.
+        if: |
+          (failure() || steps.run_capture.outcome == 'failure') &&
+          (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -258,16 +223,12 @@ jobs:
             exit 0
           fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          MSG="❌ Monthly baseline workflow failed for \`${YEAR_MONTH:-unknown}\`. Check run: ${RUN_URL}"
+          MSG="❌ Monthly baseline workflow failed for \`${YEAR_MONTH:-unknown}\` (${CAPTURE_REASON:-unknown}). Check run: ${RUN_URL}"
           PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
           curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
             -X POST "${DISCORD_WEBHOOK_URL}" \
             -H "Content-Type: application/json" -d "${PAYLOAD}"
 
-      # -----------------------------------------------------------------------
-      # 11. Fail the workflow when the capture exited non-zero so GitHub
-      #     marks the run red and triggers any configured notifications.
-      # -----------------------------------------------------------------------
       - name: Fail on capture error
         if: steps.run_capture.outcome == 'failure'
         run: |

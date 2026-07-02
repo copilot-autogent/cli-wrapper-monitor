@@ -5,13 +5,16 @@
  * Scans all baselines/*.json files (including latest.json if present, excluding
  * schema.json) and validates each against the expected MetricSnapshot schema.
  * Also scans nested JSON files under baselines/archive/ when that directory exists.
+ * Also scans baselines/weekly/ and baselines/weekly/archive/ when they exist.
  *
  * Usage:
  *   npm run validate
- *   npx tsx scripts/validate-baselines.ts [--dir <path>]
+ *   npx tsx scripts/validate-baselines.ts [--dir <path>] [--weekly-dir <path>]
  *
  * Options:
- *   --dir <path>   Directory to scan (default: baselines/)
+ *   --dir <path>         Monthly baselines directory to scan (default: from capture.config.json or baselines/)
+ *   --weekly-dir <path>  Weekly baselines directory to scan (default: from capture.config.json or baselines/weekly/)
+ *   --skip-weekly        Skip scanning weekly baselines
  *
  * Exit codes:
  *   0  All files valid
@@ -21,18 +24,26 @@
 import { readdirSync, existsSync, lstatSync } from 'fs';
 import { resolve, join, relative } from 'path';
 import { validateBaselineFile, type ValidationResult } from '../src/harness/validator.js';
+import { loadCaptureConfig } from './capture-config.js';
 
 interface CliArgs {
   dir: string;
+  weeklyDir: string;
+  skipWeekly: boolean;
 }
 
 function parseArgs(): CliArgs {
+  const cfg = loadCaptureConfig();
   const args = process.argv.slice(2);
-  let dir = 'baselines';
+  let dir = cfg.monthlyBaselinesDir;
+  let weeklyDir = cfg.weeklyBaselinesDir;
+  let skipWeekly = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--dir' && args[i + 1]) dir = args[++i];
+    else if (args[i] === '--weekly-dir' && args[i + 1]) weeklyDir = args[++i];
+    else if (args[i] === '--skip-weekly') skipWeekly = true;
   }
-  return { dir };
+  return { dir, weeklyDir, skipWeekly };
 }
 
 /** Recursively collect all *.json file paths under a directory tree. Symlinks are skipped. */
@@ -53,7 +64,7 @@ function collectJsonFiles(dir: string): string[] {
 }
 
 function main(): void {
-  const { dir } = parseArgs();
+  const { dir, weeklyDir, skipWeekly } = parseArgs();
   const absDir = resolve(dir);
 
   if (!existsSync(absDir)) {
@@ -67,19 +78,45 @@ function main(): void {
     .sort()
     .map((f) => join(absDir, f));
 
-  // Archived baselines (baselines/archive/**/*.json)
+  // Archived monthly baselines (baselines/archive/**/*.json)
   const archiveDir = join(absDir, 'archive');
   const archivedFiles = collectJsonFiles(archiveDir);
 
-  const allFiles = [...rootFiles, ...archivedFiles];
+  // Weekly baselines (baselines/weekly/**/*.json) — includes archive subdir
+  const weeklyFiles: string[] = [];
+  if (!skipWeekly) {
+    const absWeeklyDir = resolve(weeklyDir);
+    // Collect weekly root files (excluding schema.json / latest.json, non-recursive for root)
+    if (existsSync(absWeeklyDir)) {
+      const weeklyRoot = readdirSync(absWeeklyDir)
+        .filter((f) => {
+          if (!f.endsWith('.json') || f === 'schema.json' || f === 'latest.json') return false;
+          const st = lstatSync(join(absWeeklyDir, f));
+          return st.isFile();
+        })
+        .sort()
+        .map((f) => join(absWeeklyDir, f));
+      weeklyFiles.push(...weeklyRoot);
+
+      // Archived weekly baselines (baselines/weekly/archive/**/*.json)
+      const weeklyArchiveDir = join(absWeeklyDir, 'archive');
+      weeklyFiles.push(...collectJsonFiles(weeklyArchiveDir));
+    }
+  }
+
+  const allFiles = [...rootFiles, ...archivedFiles, ...weeklyFiles];
 
   if (allFiles.length === 0) {
     console.log('No baseline files found to validate.');
     process.exit(0);
   }
 
-  if (archivedFiles.length > 0) {
-    console.log(`Validating ${rootFiles.length} active + ${archivedFiles.length} archived baseline file(s)...\n`);
+  const parts: string[] = [];
+  if (rootFiles.length > 0) parts.push(`${rootFiles.length} active monthly`);
+  if (archivedFiles.length > 0) parts.push(`${archivedFiles.length} archived monthly`);
+  if (weeklyFiles.length > 0) parts.push(`${weeklyFiles.length} weekly`);
+  if (parts.length > 1) {
+    console.log(`Validating ${parts.join(' + ')} baseline file(s)...\n`);
   }
 
   // Validate all files in a single pass
@@ -91,10 +128,10 @@ function main(): void {
   let invalidCount = 0;
   for (const { label, result } of results) {
     if (result.valid) {
-      console.log(`  ✓  ${label}`);
+      console.log(`  \u2713  ${label}`);
     } else {
       invalidCount++;
-      console.error(`  ✗  ${label}`);
+      console.error(`  \u2717  ${label}`);
       for (const err of result.errors) {
         console.error(`       [${err.field}] ${err.message}`);
       }
