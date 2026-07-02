@@ -4,6 +4,7 @@
  *
  * Scans all baselines/*.json files (including latest.json if present, excluding
  * schema.json) and validates each against the expected MetricSnapshot schema.
+ * Also scans baselines/archive/**/*.json when the archive directory exists.
  *
  * Usage:
  *   npm run validate
@@ -17,8 +18,8 @@
  *   1  One or more files invalid (or directory not found)
  */
 
-import { readdirSync, existsSync } from 'fs';
-import { resolve, join } from 'path';
+import { readdirSync, existsSync, lstatSync } from 'fs';
+import { resolve, join, relative } from 'path';
 import { validateBaselineFile, type ValidationResult } from '../src/harness/validator.js';
 
 interface CliArgs {
@@ -34,6 +35,23 @@ function parseArgs(): CliArgs {
   return { dir };
 }
 
+/** Recursively collect all *.json file paths under a directory tree. Symlinks are skipped. */
+function collectJsonFiles(dir: string): string[] {
+  const results: string[] = [];
+  if (!existsSync(dir)) return results;
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry);
+    const st = lstatSync(full); // lstatSync does NOT follow symlinks (unlike statSync)
+    if (st.isSymbolicLink()) continue; // skip symlinks to prevent traversal outside archive
+    if (st.isDirectory()) {
+      results.push(...collectJsonFiles(full));
+    } else if (entry.endsWith('.json') && entry !== 'schema.json' && entry !== 'latest.json') {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
 function main(): void {
   const { dir } = parseArgs();
   const absDir = resolve(dir);
@@ -43,39 +61,52 @@ function main(): void {
     process.exit(1);
   }
 
-  const files = readdirSync(absDir)
+  // Root baselines files (non-recursive: skip archive/ subdirectory here)
+  const rootFiles = readdirSync(absDir)
     .filter((f) => f.endsWith('.json') && f !== 'schema.json')
-    .sort();
+    .sort()
+    .map((f) => join(absDir, f));
 
-  if (files.length === 0) {
+  // Archived baselines (baselines/archive/**/*.json)
+  const archiveDir = join(absDir, 'archive');
+  const archivedFiles = collectJsonFiles(archiveDir);
+
+  const allFiles = [...rootFiles, ...archivedFiles];
+
+  if (allFiles.length === 0) {
     console.log('No baseline files found to validate.');
     process.exit(0);
   }
 
-  // Validate all files in a single pass; cache results to avoid double I/O
-  const results: Array<{ file: string; result: ValidationResult }> = files.map((file) => ({
-    file,
-    result: validateBaselineFile(join(absDir, file)),
+  if (archivedFiles.length > 0) {
+    console.log(`Validating ${rootFiles.length} active + ${archivedFiles.length} archived baseline file(s)...\n`);
+  }
+
+  // Validate all files in a single pass
+  const results: Array<{ label: string; result: ValidationResult }> = allFiles.map((filePath) => ({
+    label: relative(absDir, filePath),
+    result: validateBaselineFile(filePath),
   }));
 
   let invalidCount = 0;
-  for (const { file, result } of results) {
+  for (const { label, result } of results) {
     if (result.valid) {
-      console.log(`  ✓  ${file}`);
+      console.log(`  ✓  ${label}`);
     } else {
       invalidCount++;
-      console.error(`  ✗  ${file}`);
+      console.error(`  ✗  ${label}`);
       for (const err of result.errors) {
         console.error(`       [${err.field}] ${err.message}`);
       }
     }
   }
 
+  const total = allFiles.length;
   if (invalidCount === 0) {
-    console.log(`\nAll ${files.length} baseline file${files.length === 1 ? '' : 's'} valid.`);
+    console.log(`\nAll ${total} baseline file${total === 1 ? '' : 's'} valid.`);
     process.exit(0);
   } else {
-    console.error(`\n${invalidCount} of ${files.length} baseline file${files.length === 1 ? '' : 's'} invalid.`);
+    console.error(`\n${invalidCount} of ${total} baseline file${total === 1 ? '' : 's'} invalid.`);
     process.exit(1);
   }
 }
