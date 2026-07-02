@@ -20,7 +20,7 @@
  *   1  Error (directory not found, bad argument)
  */
 
-import { readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { readdirSync, mkdirSync, renameSync, existsSync, lstatSync } from 'fs';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -41,17 +41,28 @@ function parseArgs(): CliArgs {
   let dryRun = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--older-than-months' && args[i + 1]) {
+    if (args[i] === '--older-than-months') {
+      if (!args[i + 1] || args[i + 1].startsWith('--')) {
+        console.error('Error: --older-than-months requires a value');
+        process.exit(1);
+      }
       const n = parseInt(args[++i], 10);
       if (isNaN(n) || n < 1) {
         console.error('Error: --older-than-months must be a positive integer');
         process.exit(1);
       }
       olderThanMonths = n;
-    } else if (args[i] === '--baselines-dir' && args[i + 1]) {
+    } else if (args[i] === '--baselines-dir') {
+      if (!args[i + 1] || args[i + 1].startsWith('--')) {
+        console.error('Error: --baselines-dir requires a value');
+        process.exit(1);
+      }
       baselinesDir = args[++i];
     } else if (args[i] === '--dry-run') {
       dryRun = true;
+    } else {
+      console.error(`Error: unknown flag '${args[i]}'`);
+      process.exit(1);
     }
   }
 
@@ -142,10 +153,14 @@ export function archiveBaselines(
   const cutoff = computeCutoffDate(now, olderThanMonths);
   const archiveBaseDir = join(absDir, 'archive');
 
-  // List only date-named JSON files in the root baselines/ directory.
+  // List only regular (non-symlink) JSON files in the root baselines/ directory.
   // schema.json and latest.json are always kept.
   const files = readdirSync(absDir)
-    .filter((f) => f.endsWith('.json') && f !== 'schema.json' && f !== 'latest.json')
+    .filter((f) => {
+      if (!f.endsWith('.json') || f === 'schema.json' || f === 'latest.json') return false;
+      const st = lstatSync(join(absDir, f));
+      return st.isFile(); // exclude symlinks and directories named *.json
+    })
     .sort();
 
   const archived: string[] = [];
