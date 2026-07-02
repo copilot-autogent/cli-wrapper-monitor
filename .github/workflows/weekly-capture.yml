@@ -1,0 +1,203 @@
+# Weekly lightweight capture — reference snapshot flow.
+#
+# Runs every Monday at 00:00 UTC.  On each run it:
+#   1. Checks out autogent source (using AUTOGENT_PAT).
+#   2. Captures a fresh baseline snapshot via `npm run capture`.
+#   3. Commits the new weekly snapshot to baselines/weekly/YYYY-MM-DD.json directly to main.
+#   4. Posts a Discord notification if changes were detected (or on failure).
+#
+# Weekly captures are reference-only snapshots for regression triage.
+# They do NOT open PRs — only the monthly PR-flow does that.
+#
+# Secrets required:
+#   AUTOGENT_PAT        — PAT with `contents: read` on
+#                         JackywithaWhiteDog/autogent (for static source
+#                         extraction). Absent → capture degrades to static fallback.
+#   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → no notification.
+name: Weekly Capture (reference snapshots)
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # Every Monday at 00:00 UTC
+  workflow_dispatch:
+    inputs:
+      capture_reason:
+        description: 'Label for this capture (added to filename and notification)'
+        required: false
+        default: 'weekly'
+        type: string
+      send_discord_notification:
+        description: 'Send Discord notification when changes are detected'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Weekly capture: fires on schedule and manual workflow_dispatch.
+  # Captures a snapshot, commits to baselines/weekly/YYYY-MM-DD.json on main,
+  # and posts a Discord notification only if changes were detected.
+  # ---------------------------------------------------------------------------
+  capture:
+    name: Weekly reference snapshot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: weekly-capture
+      cancel-in-progress: false
+    steps:
+      # -----------------------------------------------------------------------
+      # 0. Initialise date variables immediately so they are available even if
+      #    later steps fail (needed by the Discord failure notification).
+      # -----------------------------------------------------------------------
+      - name: Set date variables
+        run: |
+          CAPTURE_DATE=$(date +%Y-%m-%d)
+          CAPTURE_REASON="${{ inputs.capture_reason || 'weekly' }}"
+          echo "CAPTURE_DATE=${CAPTURE_DATE}" >> "$GITHUB_ENV"
+          echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
+          # Filename: baselines/weekly/YYYY-MM-DD.json (plain date; no reason suffix)
+          echo "WEEKLY_FILE=baselines/weekly/${CAPTURE_DATE}.json" >> "$GITHUB_ENV"
+
+      # -----------------------------------------------------------------------
+      # 1. Check out the monitor repo (full history for git log in script)
+      # -----------------------------------------------------------------------
+      - name: Checkout cli-wrapper-monitor
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      # -----------------------------------------------------------------------
+      # 2. Check out autogent source for static extraction
+      # -----------------------------------------------------------------------
+      - name: Checkout autogent source
+        id: checkout_autogent
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: JackywithaWhiteDog/autogent
+          token: ${{ secrets.AUTOGENT_PAT }}
+          ref: main
+          path: autogent-src
+          fetch-depth: 1
+
+      # -----------------------------------------------------------------------
+      # 3. Build environment
+      # -----------------------------------------------------------------------
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # 4. Resolve AUTOGENT_PATH
+      # -----------------------------------------------------------------------
+      - name: Resolve autogent path
+        run: |
+          if [ "${{ steps.checkout_autogent.outcome }}" = "success" ] && \
+             [ -d autogent-src/src ]; then
+            echo "AUTOGENT_PATH=${{ github.workspace }}/autogent-src" >> "$GITHUB_ENV"
+            echo "Autogent source available at autogent-src/"
+          else
+            echo "Autogent source not available — capture will use static fallback."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 5. Ensure baselines/weekly/ directory exists
+      # -----------------------------------------------------------------------
+      - name: Ensure weekly baselines directory
+        run: mkdir -p baselines/weekly
+
+      # -----------------------------------------------------------------------
+      # 6. Run the baseline capture, directing output to baselines/weekly/
+      # -----------------------------------------------------------------------
+      - name: Run capture
+        id: run_capture
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Direct the capture script to write to the weekly directory
+          BASELINES_DIR: baselines/weekly
+        run: npm run capture
+
+      # -----------------------------------------------------------------------
+      # 7. Commit the weekly snapshot directly to main.
+      #    Weekly captures commit directly — they are reference snapshots, not
+      #    milestone baselines, so no PR flow is needed.
+      # -----------------------------------------------------------------------
+      - name: Commit weekly snapshot
+        id: commit
+        if: steps.run_capture.outcome == 'success'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add baselines/weekly
+
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected in weekly snapshot — skipping commit."
+          else
+            git commit -m "baseline(weekly): ${CAPTURE_DATE} ${CAPTURE_REASON} snapshot [skip ci]"
+            git push origin main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Committed weekly snapshot for ${CAPTURE_DATE}."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 8. Discord notification (only when changes detected and notification enabled)
+      # -----------------------------------------------------------------------
+      - name: Notify Discord (changes detected)
+        if: |
+          steps.run_capture.outcome == 'success' &&
+          steps.commit.outputs.changed == 'true' &&
+          (github.event_name == 'schedule' || inputs.send_discord_notification == 'true')
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "DISCORD_WEBHOOK_URL not set — skipping notification."
+            exit 0
+          fi
+          MSG="📊 Weekly baseline snapshot committed for \`${CAPTURE_DATE}\` (${CAPTURE_REASON}) → \`${WEEKLY_FILE}\`"
+          PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
+          curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
+            -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" -d "${PAYLOAD}"
+
+      # -----------------------------------------------------------------------
+      # 9. Discord failure notification
+      # -----------------------------------------------------------------------
+      - name: Notify Discord (failure)
+        if: failure()
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "DISCORD_WEBHOOK_URL not set — skipping notification."
+            exit 0
+          fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MSG="❌ Weekly capture workflow failed for \`${CAPTURE_DATE:-unknown}\`. Check run: ${RUN_URL}"
+          PAYLOAD=$(jq -nc --arg content "${MSG}" '{"content":$content}')
+          curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
+            -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" -d "${PAYLOAD}"
+
+      # -----------------------------------------------------------------------
+      # 10. Fail the workflow when the capture exited non-zero.
+      # -----------------------------------------------------------------------
+      - name: Fail on capture error
+        if: steps.run_capture.outcome == 'failure'
+        run: |
+          echo "Capture script exited non-zero. Check logs above for details."
+          exit 1

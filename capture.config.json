@@ -1,0 +1,5 @@
+{
+  "monthlyBaselinesDir": "baselines",
+  "weeklyBaselinesDir": "baselines/weekly",
+  "retentionMonths": 6
+}
