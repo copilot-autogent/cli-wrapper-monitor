@@ -1,9 +1,9 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env npx tsx
 /**
  * Generate a markdown diff report comparing two baseline snapshots.
  *
  * Usage:
- *   npx ts-node --esm scripts/generate-diff-report.ts [--baseline <path>] [--current <path>] [--output <path>]
+ *   npx tsx scripts/generate-diff-report.ts [--baseline <path>] [--current <path>] [--output <path>]
  *
  * Defaults:
  *   --baseline   baselines/latest.json

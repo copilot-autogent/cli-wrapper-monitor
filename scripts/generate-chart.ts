@@ -1,4 +1,4 @@
-#!/usr/bin/env npx ts-node --esm
+#!/usr/bin/env npx tsx
 /**
  * Generate a static SVG trend chart from all historical baseline JSON files.
  *
@@ -6,7 +6,7 @@
  * annotations for key structural events.
  *
  * Usage:
- *   npx ts-node --esm scripts/generate-chart.ts [--output <path>]
+ *   npx tsx scripts/generate-chart.ts [--output <path>]
  *   npm run chart
  *
  * Default output: chart.svg (repo root)
