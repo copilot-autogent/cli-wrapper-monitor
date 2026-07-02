@@ -706,7 +706,7 @@ describe('SecurityPostureScore — injection refusal drop (15 pts)', () => {
 });
 
 describe('SecurityPostureScore — headroom below 50% (5 pts)', () => {
-  it('adds 5 pts when current headroom is below 50%', () => {
+  it('adds 5 pts when current headroom crosses below 50% (baseline had no headroom data)', () => {
     const current = makeSnapshot({
       contextWindowHeadroom: [{
         modelId: 'claude-sonnet-4.6', state: 'enabled',
@@ -716,6 +716,44 @@ describe('SecurityPostureScore — headroom below 50% (5 pts)', () => {
     });
     const diff = diffSnapshots(makeSnapshot(), current);
     expect(diff.securityPostureScore).toBe(5);
+  });
+
+  it('adds 5 pts when current headroom crosses below 50% (baseline was above 50%)', () => {
+    const baseline = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 80_000,
+        headroomTokens: 120_000, promptFillPct: 40, status: 'ok', // 60% headroom
+      }],
+    });
+    const current = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill', // 45% headroom
+      }],
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(5);
+  });
+
+  it('does not add pts when both snapshots are already below 50% (no new regression)', () => {
+    const baseline = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill', // 45% headroom
+      }],
+    });
+    const current = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 120_000,
+        headroomTokens: 80_000, promptFillPct: 60, status: 'high-fill', // 40% headroom
+      }],
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
   });
 
   it('does not add pts when current headroom is exactly 50%', () => {

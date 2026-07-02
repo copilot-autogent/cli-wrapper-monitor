@@ -8,9 +8,9 @@ import { classifyDeltaPct } from '../severity.js';
  *   - Tool removals:          10 pts per removed tool (max 30)
  *   - Model pool drop:        20 pts if any model removed
  *   - Hook count decrease:    20 pts if hook count drops
- *   - Hook body change:        5 pts per body-change event (max 10)
- *   - Injection refusal drop: 15 pts if avg refusal rate drops >5 pp
- *   - Headroom below 50%:      5 pts if current headroom is below 50%
+ *   - Hook body change:        5 pts if any hook body changed (single-hash tracking)
+ *   - Injection refusal drop: 15 pts if any per-experiment refusal rate drops >5 pp
+ *   - Headroom below 50%:      5 pts if headroom crosses below 50% (was ≥50% or absent before)
  *
  * Score 0 = no regressions. Score ≥30 = BREAKING tier. Score 1–29 = WARNING tier.
  */
@@ -42,8 +42,8 @@ export function computeSecurityPostureScore(
     score += 20;
   }
 
-  // Hook body change: 5 pts per change event (max 10).
-  // With single-hash tracking, a body change with unchanged count counts as one event.
+  // Hook body change: 5 pts when hook body changes with same count.
+  // Single-hash tracking means one body-change observation per diff = 5 pts.
   if (
     hookChanged &&
     baselineHookCount !== undefined &&
@@ -53,22 +53,27 @@ export function computeSecurityPostureScore(
     score += 5;
   }
 
-  // Injection refusal drop: 15 pts if avg refusal rate drops >5 percentage points
-  const getAvgInjectionRate = (snap: MetricSnapshot): number | null => {
-    const values: number[] = [];
-    for (const exp of Object.values(snap.experiments ?? {})) {
-      const metric = exp.metrics?.['injectionRefusedRate'];
-      if (metric !== undefined) values.push(metric.value);
+  // Injection refusal drop: 15 pts if any per-experiment refusal rate drops >5 pp.
+  // Only compare experiments present in both snapshots to avoid cross-population artifacts.
+  let injectionDropDetected = false;
+  for (const [expName, baselineExp] of Object.entries(baseline.experiments ?? {})) {
+    const currentExp = current.experiments?.[expName];
+    if (!currentExp) continue;
+    const baselineMetric = baselineExp.metrics?.['injectionRefusedRate'];
+    const currentMetric = currentExp.metrics?.['injectionRefusedRate'];
+    if (baselineMetric !== undefined && currentMetric !== undefined) {
+      if (baselineMetric.value - currentMetric.value > 0.05) {
+        injectionDropDetected = true;
+        break;
+      }
     }
-    return values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : null;
-  };
-  const baselineRate = getAvgInjectionRate(baseline);
-  const currentRate = getAvgInjectionRate(current);
-  if (baselineRate !== null && currentRate !== null && baselineRate - currentRate > 0.05) {
+  }
+  if (injectionDropDetected) {
     score += 15;
   }
 
-  // Headroom drop: 5 pts if current headroom falls below 50%
+  // Headroom drop: 5 pts if headroom crosses below 50% (i.e. was ≥50% or absent before).
+  // Avoids re-penalising snapshots that were already below threshold before the diff.
   const getHeadroomPct = (snap: MetricSnapshot): number | null => {
     const entries = snap.contextWindowHeadroom;
     if (!entries || entries.length === 0) return null;
@@ -80,8 +85,13 @@ export function computeSecurityPostureScore(
     const totalWindow = enabled.reduce((sum, e) => sum + e.contextWindow, 0);
     return (totalHeadroom / totalWindow) * 100;
   };
+  const baselineHeadroom = getHeadroomPct(baseline);
   const currentHeadroom = getHeadroomPct(current);
-  if (currentHeadroom !== null && currentHeadroom < 50) {
+  if (
+    currentHeadroom !== null &&
+    currentHeadroom < 50 &&
+    (baselineHeadroom === null || baselineHeadroom >= 50)
+  ) {
     score += 5;
   }
 
