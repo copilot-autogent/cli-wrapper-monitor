@@ -381,7 +381,6 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
       } else if (ch === '"' || ch === "'") {
         inString = true;
         strChar = ch;
-        depth === 0 && (depth = 1);
       } else if (ch === '{') {
         depth++;
       } else if (ch === '}') {
@@ -390,82 +389,73 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
       }
       i++;
     }
-    return content.slice(start);
+    return content.slice(start); // unterminated block, return rest
   }
 
-  /** Return true if the character at `pos` in `s` is preceded by an odd number of backslashes. */
-  function isEscaped(s: string, pos: number): boolean {
+  /** True when the character at `pos` is preceded by an odd number of backslashes. */
+  function isEscaped(content: string, pos: number): boolean {
     let count = 0;
-    let p = pos - 1;
-    while (p >= 0 && s[p] === '\\') { count++; p--; }
+    let j = pos - 1;
+    while (j >= 0 && content[j] === '\\') { count++; j--; }
     return count % 2 === 1;
   }
 
-  /** Find the closing quote for a string starting at `from` with delimiter `quote`. */
-  function findStringEnd(s: string, from: number, quote: string): number {
-    for (let i = from; i < s.length; i++) {
-      if (s[i] === quote && !isEscaped(s, i)) return i;
+  /** Find the closing quote for a string starting at `from`, where `quoteChar` is `"` or `'`. */
+  function findStringEnd(content: string, from: number, quoteChar: string): number {
+    for (let i = from; i < content.length; i++) {
+      if (content[i] === quoteChar && !isEscaped(content, i)) return i;
     }
     return -1;
   }
 
-  // ── Strategy 1: dist/tools/builtin/*.js ──────────────────────────────────
+  // Strategy 1: read from dist/tools/builtin/
   const distToolsDir = join(autogentPath, 'dist', 'tools', 'builtin');
   if (existsSync(distToolsDir)) {
-    const jsFiles = readdirSync(distToolsDir)
-      .filter((f) => f.endsWith('.js'))
-      .sort();
-    for (const file of jsFiles) {
-      try {
+    try {
+      const files = readdirSync(distToolsDir).filter((f) => f.endsWith('.js'));
+      for (const file of files) {
         const content = readFileSync(join(distToolsDir, file), 'utf-8');
-        // Extract tool name from `name: 'foo'` or `name: "foo"`
-        const nameMatch = content.match(/\bname\s*:\s*['"]([^'"]+)['"]/);
-        const descMatch = content.match(/\bdescription\s*:\s*['"]([^'"]{1,200})['"]/);
-        if (nameMatch) {
+        // Match exported `name` and `description` fields from ToolDefinition objects
+        const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
+        const descMatch = content.match(/description:\s*["']([^"']+)["']/);
+        if (nameMatch && descMatch) {
           const { required, propNames } = extractParamInfo(content);
-          const params: ToolParamSchema | undefined =
-            required.length > 0 || propNames.length > 0
-              ? { required, properties: propNames }
-              : undefined;
           tools.push({
             name: nameMatch[1],
-            description: descMatch ? descMatch[1] : '',
-            parameters: params,
+            description: descMatch[1],
+            parameters: { required, propNames },
           });
         }
-      } catch {
-        // skip unreadable files
       }
+      if (tools.length > 0) {
+        return tools;
+      }
+    } catch {
+      // fall through to next strategy
     }
-    if (tools.length > 0) return tools;
   }
 
-  // ── Strategy 2: src/tools/builtin/*.ts (TypeScript source fallback) ──────
+  // Strategy 2: scan TypeScript source for tool name + description patterns
   const srcToolsDir = join(autogentPath, 'src', 'tools', 'builtin');
   if (existsSync(srcToolsDir)) {
-    const tsFiles = readdirSync(srcToolsDir)
-      .filter((f) => f.endsWith('.ts'))
-      .sort();
-    for (const file of tsFiles) {
-      try {
+    try {
+      const files = readdirSync(srcToolsDir).filter((f) => f.endsWith('.ts'));
+      for (const file of files) {
+        if (file === 'index.ts' || file === 'edit-instructions.ts') continue;
         const content = readFileSync(join(srcToolsDir, file), 'utf-8');
-        const nameMatch = content.match(/\bname\s*:\s*['"]([^'"]+)['"]/);
-        const descMatch = content.match(/\bdescription\s*:\s*['"]([^'"]{1,200})['"]/);
-        if (nameMatch) {
+        const nameMatch = content.match(/name:\s*["']([^"']+)["']/);
+        const descMatch = content.match(/description:\s*["']([^"']+)["']/);
+        if (nameMatch && descMatch) {
           const { required, propNames } = extractParamInfo(content);
-          const params: ToolParamSchema | undefined =
-            required.length > 0 || propNames.length > 0
-              ? { required, properties: propNames }
-              : undefined;
           tools.push({
             name: nameMatch[1],
-            description: descMatch ? descMatch[1] : '',
-            parameters: params,
+            description: descMatch[1],
+            parameters: { required, propNames },
           });
         }
-      } catch {
-        // skip unreadable files
       }
+    } catch {
+      // fall through
     }
   }
 
@@ -473,73 +463,86 @@ function extractToolDefs(autogentPath: string): ToolDef[] {
 }
 
 /**
- * Build a normalized per-tool parameter schema map and compute a hash over
- * the full set. Used to detect tool signature changes across baselines.
+ * Build per-tool ToolParamSchema records from a list of extracted tool definitions.
+ * Returns a map keyed by tool name, and the sha256 hash of the whole schema set
+ * (canonical JSON sorted by name). Both are used as change signals in diff reports.
  */
-function buildToolSchemas(toolDefs: ToolDef[]): {
-  schemas: Record<string, ToolParamSchema>;
-  hash: string;
-} {
+function buildToolSchemas(
+  tools: ToolDef[],
+): { schemas: Record<string, ToolParamSchema>; hash: string } {
   const schemas: Record<string, ToolParamSchema> = {};
-  for (const tool of toolDefs) {
-    if (tool.parameters && typeof tool.parameters === 'object') {
-      const p = tool.parameters as ToolParamSchema;
-      schemas[tool.name] = {
-        required: (p.required ?? []).slice().sort(),
-        properties: (p.properties ?? []).slice().sort(),
-      };
-    }
+
+  for (const tool of tools) {
+    // Parameters are now stored as { required: string[]; propNames: string[] }
+    // from the regex-based extractor in extractToolDefs.
+    const params = tool.parameters as { required?: string[]; propNames?: string[] } | undefined;
+    const required = params?.required ?? [];
+    const propNames = params?.propNames ?? [];
+
+    // Union all known param names (required + all property names from propNames)
+    const allParamNames = [...new Set([...required, ...propNames])].sort();
+    // Only report required params that are actually present in the parameter list
+    const filteredRequired = required.filter((p) => allParamNames.includes(p));
+    const requiredSet = new Set(filteredRequired);
+    const optionalParams = allParamNames.filter((p) => !requiredSet.has(p));
+
+    schemas[tool.name] = {
+      parameterCount: allParamNames.length,
+      requiredParams: filteredRequired,
+      optionalParams,
+      descriptionHash: sha256(tool.description),
+    };
   }
-  const hash = 'sha256:' + sha256(JSON.stringify(schemas));
+
+  // Sort by name for a canonical, stable JSON representation (binary compare for locale stability)
+  const sorted = Object.fromEntries(
+    Object.entries(schemas).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  const hash = 'sha256:' + sha256(JSON.stringify(sorted));
   return { schemas, hash };
 }
 
-// ---------------------------------------------------------------------------
-// System prompt extraction
-// ---------------------------------------------------------------------------
-
 /**
- * Extract the assembled system prompt from the autogent workspace.
+ * Extract the assembled system prompt.
  *
- * Priority order:
- *   1. SOUL.md from the autogent workspace directory
- *   2. src/session.ts string template (legacy path)
- *   3. Empty string when neither is found
+ * Strategy 1: Concatenate bootstrap files from the workspace directory
+ * (SOUL.md, PLAYBOOK.md, CONTEXT.md, USER.md) — this is the primary
+ * component of the actual runtime system prompt.
+ *
+ * Strategy 2: Scan the TypeScript source for hardcoded template literals.
  */
 function extractSystemPrompt(autogentPath: string, workspacePath: string): string {
-  // 1. Workspace bootstrap files (SOUL.md, PLAYBOOK.md, CONTEXT.md, USER.md)
-  //    These are the actual runtime files injected by the autogent CLI.
+  // Strategy 1: read bootstrap files from workspace
   const bootstrapFiles = ['SOUL.md', 'PLAYBOOK.md', 'CONTEXT.md', 'USER.md'];
-  const workspaceChunks: string[] = [];
+  const parts: string[] = [];
 
-  for (const file of bootstrapFiles) {
-    const filePath = join(workspacePath, file);
-    if (existsSync(filePath)) {
-      try {
-        workspaceChunks.push(readFileSync(filePath, 'utf-8'));
-      } catch {
-        // skip unreadable bootstrap files
+  if (existsSync(workspacePath)) {
+    for (const file of bootstrapFiles) {
+      const filePath = join(workspacePath, file);
+      if (existsSync(filePath)) {
+        parts.push(readFileSync(filePath, 'utf-8'));
       }
     }
   }
 
-  if (workspaceChunks.length > 0) {
-    return workspaceChunks.join('\n\n');
+  if (parts.length > 0) {
+    return parts.join('\n\n---\n\n');
   }
 
-  // 2. src/session.ts — extract string literals from the system prompt template
-  const sessionPath = join(autogentPath, 'src', 'session.ts');
-  if (existsSync(sessionPath)) {
-    try {
-      const source = readFileSync(sessionPath, 'utf-8');
-      // Extract system prompt from template literal or string assignment
-      const templateMatch = source.match(/systemPrompt\s*=\s*`([^`]+)`/s);
-      if (templateMatch) return templateMatch[1];
-      const stringMatch = source.match(/systemPrompt\s*=\s*['"]([^'"]+)['"]/);
-      if (stringMatch) return stringMatch[1];
-    } catch {
-      // fall through
-    }
+  // Strategy 2: scan TypeScript source for template literals
+  const candidates = [
+    join(autogentPath, 'src', 'workspace', 'index.ts'),
+    join(autogentPath, 'src', 'workspace', 'system-prompt.ts'),
+    join(autogentPath, 'src', 'session.ts'),
+  ];
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    const content = readFileSync(candidate, 'utf-8');
+    const templateMatch = content.match(/`(You are[\s\S]{200,?}?)`/);
+    if (templateMatch) return templateMatch[1];
+    const stringMatch = content.match(/"(You are[^"]{200,?})"/);
+    if (stringMatch) return stringMatch[1];
   }
 
   return '';
