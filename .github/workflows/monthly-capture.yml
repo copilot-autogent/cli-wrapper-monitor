@@ -32,7 +32,7 @@ on:
       send_discord_notification:
         description: 'Send Discord notification on completion'
         required: false
-        default: 'true'
+        default: true
         type: boolean
 
 jobs:
@@ -58,12 +58,20 @@ jobs:
       - name: Set month variables
         run: |
           YEAR_MONTH=$(date +%Y-%m)
-          CAPTURE_REASON="${{ inputs.capture_reason || 'scheduled' }}"
+          # Read capture_reason from the env var injected below (avoids direct
+          # interpolation of the user input into shell, preventing injection).
           echo "YEAR_MONTH=${YEAR_MONTH}" >> "$GITHUB_ENV"
-          echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
           echo "BRANCH=baseline/${YEAR_MONTH}" >> "$GITHUB_ENV"
-          # Emit SEND_DISCORD so the notification steps can gate on it.
-          echo "SEND_DISCORD=${{ inputs.send_discord_notification || 'true' }}" >> "$GITHUB_ENV"
+        env:
+          # CAPTURE_REASON is set here (via env:) rather than embedded directly
+          # in the `run:` block so special characters in the input cannot break
+          # the shell command or be interpreted as shell metacharacters.
+          CAPTURE_REASON: ${{ inputs.capture_reason || 'scheduled' }}
+
+      - name: Export CAPTURE_REASON to GITHUB_ENV
+        run: echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
+        env:
+          CAPTURE_REASON: ${{ inputs.capture_reason || 'scheduled' }}
 
       # -----------------------------------------------------------------------
       # 1. Check out the monitor repo (full history for git log in script)
@@ -229,10 +237,15 @@ jobs:
       # 9. Discord success notification
       # -----------------------------------------------------------------------
       - name: Notify Discord (success)
+        # Send when capture succeeded AND either:
+        #   - this is a scheduled run (always notify), or
+        #   - this is a manual run with notifications enabled.
+        # inputs.send_discord_notification is a boolean; comparing to `!= false`
+        # correctly handles both the boolean `false` and the absent-input case.
         if: |
           steps.run_capture.outcome == 'success' &&
           steps.commit.outcome != 'failure' &&
-          (github.event_name == 'schedule' || env.SEND_DISCORD == 'true')
+          (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -258,7 +271,7 @@ jobs:
       - name: Notify Discord (failure)
         if: |
           failure() &&
-          (github.event_name == 'schedule' || env.SEND_DISCORD == 'true')
+          (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

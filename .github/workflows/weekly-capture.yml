@@ -3,8 +3,8 @@
 # Runs every Monday at 00:00 UTC.  On each run it:
 #   1. Checks out autogent source (using AUTOGENT_PAT).
 #   2. Captures a fresh baseline snapshot via `npm run capture`.
-#   3. Commits the new weekly snapshot to baselines/weekly/YYYY-MM-DD.json directly to main.
-#   4. Posts a Discord notification if changes were detected (or on failure).
+#   3. Rebases on latest main and commits the weekly snapshot directly to main.
+#   4. Posts a Discord notification only if changes are detected (or on failure).
 #
 # Weekly captures are reference-only snapshots for regression triage.
 # They do NOT open PRs — only the monthly PR-flow does that.
@@ -22,14 +22,14 @@ on:
   workflow_dispatch:
     inputs:
       capture_reason:
-        description: 'Label for this capture (added to filename and notification)'
+        description: 'Label for this capture (added to commit message)'
         required: false
         default: 'weekly'
         type: string
       send_discord_notification:
-        description: 'Send Discord notification when changes are detected'
+        description: 'Send Discord notification on completion'
         required: false
-        default: 'true'
+        default: true
         type: boolean
 
 jobs:
@@ -54,11 +54,17 @@ jobs:
       - name: Set date variables
         run: |
           CAPTURE_DATE=$(date +%Y-%m-%d)
-          CAPTURE_REASON="${{ inputs.capture_reason || 'weekly' }}"
           echo "CAPTURE_DATE=${CAPTURE_DATE}" >> "$GITHUB_ENV"
-          echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
-          # Filename: baselines/weekly/YYYY-MM-DD.json (plain date; no reason suffix)
           echo "WEEKLY_FILE=baselines/weekly/${CAPTURE_DATE}.json" >> "$GITHUB_ENV"
+        env:
+          # CAPTURE_REASON is read via env: (not embedded in run:) to prevent
+          # shell injection from user-supplied input values.
+          CAPTURE_REASON: ${{ inputs.capture_reason || 'weekly' }}
+
+      - name: Export CAPTURE_REASON to GITHUB_ENV
+        run: echo "CAPTURE_REASON=${CAPTURE_REASON}" >> "$GITHUB_ENV"
+        env:
+          CAPTURE_REASON: ${{ inputs.capture_reason || 'weekly' }}
 
       # -----------------------------------------------------------------------
       # 1. Check out the monitor repo (full history for git log in script)
@@ -123,14 +129,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          # Direct the capture script to write to the weekly directory
+          # Direct the capture script to write to the weekly directory.
+          # This matches capture.config.json weeklyBaselinesDir.
           BASELINES_DIR: baselines/weekly
         run: npm run capture
 
       # -----------------------------------------------------------------------
       # 7. Commit the weekly snapshot directly to main.
-      #    Weekly captures commit directly — they are reference snapshots, not
-      #    milestone baselines, so no PR flow is needed.
+      #    Rebase on latest main before push to handle concurrent commits
+      #    (e.g. a monthly capture running on the same day).
       # -----------------------------------------------------------------------
       - name: Commit weekly snapshot
         id: commit
@@ -146,6 +153,9 @@ jobs:
             echo "No changes detected in weekly snapshot — skipping commit."
           else
             git commit -m "baseline(weekly): ${CAPTURE_DATE} ${CAPTURE_REASON} snapshot [skip ci]"
+            # Pull-rebase before push to handle concurrent commits to main
+            # (e.g. a release commit or another workflow firing simultaneously).
+            git pull --rebase origin main
             git push origin main
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed weekly snapshot for ${CAPTURE_DATE}."
@@ -155,10 +165,12 @@ jobs:
       # 8. Discord notification (only when changes detected and notification enabled)
       # -----------------------------------------------------------------------
       - name: Notify Discord (changes detected)
+        # inputs.send_discord_notification is boolean; `!= false` correctly
+        # handles both boolean false and the absent-input case (scheduled runs).
         if: |
           steps.run_capture.outcome == 'success' &&
           steps.commit.outputs.changed == 'true' &&
-          (github.event_name == 'schedule' || inputs.send_discord_notification == 'true')
+          (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -177,7 +189,11 @@ jobs:
       # 9. Discord failure notification
       # -----------------------------------------------------------------------
       - name: Notify Discord (failure)
-        if: failure()
+        # Gate failure notifications the same way as success: scheduled runs
+        # always notify; manual runs only notify when the input is enabled.
+        if: |
+          failure() &&
+          (github.event_name == 'schedule' || inputs.send_discord_notification != false)
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
