@@ -5,6 +5,7 @@
  */
 
 import type { MetricSnapshot } from "./types.js";
+import { diffSnapshots } from "./diff.js";
 
 // ---------------------------------------------------------------------------
 // Row model
@@ -19,6 +20,11 @@ export interface TrendRow {
   headroomPct: number | null;
   /** Average injectionRefusedRate across all experiments; null when absent. */
   injectionRefusedRate: number | null;
+  /**
+   * Security posture score (0–100) comparing this snapshot to the previous one.
+   * Null for the first snapshot (no previous to compare against).
+   */
+  securityPostureScore: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -28,8 +34,12 @@ export interface TrendRow {
 /**
  * Extract a flat TrendRow from a MetricSnapshot.
  * All fields fall back to null when the source data is absent (older baselines).
+ *
+ * @param snapshot - The snapshot to extract a row from.
+ * @param previous - Optional previous snapshot; when provided, the security posture
+ *                   score is computed as a diff between previous and snapshot.
  */
-export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
+export function extractTrendRow(snapshot: MetricSnapshot, previous?: MetricSnapshot): TrendRow {
   const contextTax = snapshot.experiments?.["context-tax"];
 
   const systemPromptChars =
@@ -75,6 +85,7 @@ export function extractTrendRow(snapshot: MetricSnapshot): TrendRow {
     toolCount,
     headroomPct,
     injectionRefusedRate,
+    securityPostureScore: previous !== undefined ? diffSnapshots(previous, snapshot).securityPostureScore : null,
   };
 }
 
@@ -162,7 +173,7 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
     lines.push("");
   }
 
-  const rows = sorted.map(extractTrendRow);
+  const rows = sorted.map((snap, i) => extractTrendRow(snap, i > 0 ? sorted[i - 1] : undefined));
   const firstDate = rows[0].date;
   const lastDate = rows[rows.length - 1].date;
 
@@ -177,9 +188,9 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
 
   // Table
   const header =
-    "| Date | systemPromptChars | systemPromptTokens | toolCount | headroomPct | injectionRefusedRate | Δ chars |";
+    "| Date | systemPromptChars | systemPromptTokens | toolCount | headroomPct | injectionRefusedRate | securityPostureScore | Δ chars |";
   const sep =
-    "|------|-------------------|--------------------|-----------|-------------|----------------------|---------|";
+    "|------|-------------------|--------------------|-----------|-------------|----------------------|----------------------|---------|";
   lines.push(header);
   lines.push(sep);
 
@@ -197,8 +208,13 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
       r.injectionRefusedRate !== null
         ? `${(r.injectionRefusedRate * 100).toFixed(1)}%`
         : "—";
+    // securityPostureScore: null for first row (no previous snapshot to diff against)
+    const scoreDisplay =
+      r.securityPostureScore !== null
+        ? `${r.securityPostureScore}/100`
+        : "—";
     lines.push(
-      `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${injDisplay} | ${d} |`
+      `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${injDisplay} | ${scoreDisplay} | ${d} |`
     );
   }
 

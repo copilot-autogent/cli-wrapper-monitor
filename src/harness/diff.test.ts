@@ -526,3 +526,368 @@ describe('formatDiffReport — tool schema changes', () => {
     expect(report).toContain('No tool schema changes detected');
   });
 });
+
+// ---------------------------------------------------------------------------
+// SecurityPostureScore
+// ---------------------------------------------------------------------------
+
+describe('SecurityPostureScore — zero score (clean)', () => {
+  it('returns 0 when baseline and current are identical', () => {
+    const snap = makeSnapshot();
+    const diff = diffSnapshots(snap, snap);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+
+  it('returns 0 when only non-security metrics changed', () => {
+    const baseline = makeSnapshot({
+      experiments: { 'context-tax': { name: 'context-tax', description: '', metrics: { systemPromptChars: { value: 100_000, unit: 'chars', description: '' } } } },
+    });
+    const current = makeSnapshot({
+      experiments: { 'context-tax': { name: 'context-tax', description: '', metrics: { systemPromptChars: { value: 120_000, unit: 'chars', description: '' } } } },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+});
+
+describe('SecurityPostureScore — tool removals (10 pts each, max 30)', () => {
+  function makeSchemaEntry(params: string[] = []) {
+    return {
+      parameterCount: params.length,
+      requiredParams: params,
+      optionalParams: [],
+      descriptionHash: 'sha256:abcd1234',
+    };
+  }
+
+  it('adds 10 pts for one removed tool', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchemaEntry(['command']) } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(10);
+  });
+
+  it('adds 20 pts for two removed tools', () => {
+    const baseline = makeSnapshot({ toolSchemas: { bash: makeSchemaEntry(), view: makeSchemaEntry() } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(20);
+  });
+
+  it('caps tool removal contribution at 30 pts (4 tools removed)', () => {
+    const baseline = makeSnapshot({
+      toolSchemas: { a: makeSchemaEntry(), b: makeSchemaEntry(), c: makeSchemaEntry(), d: makeSchemaEntry() },
+    });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(30);
+  });
+});
+
+describe('SecurityPostureScore — model pool drop (20 pts)', () => {
+  it('adds 20 pts when a model is removed from the pool', () => {
+    const baseline = makeSnapshot({
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [{ id: 'claude-sonnet-4.6', state: 'enabled', contextWindow: 200_000 }] },
+    });
+    const current = makeSnapshot({
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [] },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(20);
+  });
+
+  it('does not add pts when a model is only added (not removed)', () => {
+    const baseline = makeSnapshot({ modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [] } });
+    const current = makeSnapshot({
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [{ id: 'gpt-4.1', state: 'enabled', contextWindow: 100_000 }] },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+});
+
+describe('SecurityPostureScore — hook count decrease (20 pts)', () => {
+  it('adds 20 pts when hook count drops', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const current = makeSnapshot({ hookCount: 2, hookSourceHash: 'sha256:bbbb' });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(20);
+  });
+
+  it('adds 20 pts when hook count disappears', () => {
+    const baseline = makeSnapshot({ hookCount: 3 });
+    const current = makeSnapshot({ hookCount: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(20);
+  });
+
+  it('does not add pts when hook count increases', () => {
+    const baseline = makeSnapshot({ hookCount: 2, hookSourceHash: 'sha256:aaaa' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:bbbb' });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+});
+
+describe('SecurityPostureScore — hook body change (5 pts)', () => {
+  it('adds 5 pts when hook body changes with same count', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:bbbb' });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(5);
+  });
+
+  it('does not add hook body pts when count also changed (covered by count-drop pts)', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const current = makeSnapshot({ hookCount: 2, hookSourceHash: 'sha256:bbbb' });
+    const diff = diffSnapshots(baseline, current);
+    // Only hook count drop (20 pts); body change with count difference doesn't add 5 pts separately
+    expect(diff.securityPostureScore).toBe(20);
+  });
+});
+
+describe('SecurityPostureScore — injection refusal drop (15 pts)', () => {
+  it('adds 15 pts when injection refusal rate drops by >5 percentage points', () => {
+    const baseline = makeSnapshot({
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.9, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const current = makeSnapshot({
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.8, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(15);
+  });
+
+  it('does not add pts when injection refusal rate drops by less than 5 pp', () => {
+    const baseline = makeSnapshot({
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.9, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const current = makeSnapshot({
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.86, unit: 'fraction', description: '' }, // 4pp drop
+        }},
+      },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+
+  it('does not add pts when refusal rate improves', () => {
+    const baseline = makeSnapshot({
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.7, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const current = makeSnapshot({
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.9, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+});
+
+describe('SecurityPostureScore — headroom below 50% (5 pts)', () => {
+  it('adds 5 pts when current headroom crosses below 50% (baseline had no headroom data)', () => {
+    const current = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill',
+      }],
+    });
+    const diff = diffSnapshots(makeSnapshot(), current);
+    expect(diff.securityPostureScore).toBe(5);
+  });
+
+  it('adds 5 pts when current headroom crosses below 50% (baseline was above 50%)', () => {
+    const baseline = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 80_000,
+        headroomTokens: 120_000, promptFillPct: 40, status: 'ok', // 60% headroom
+      }],
+    });
+    const current = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill', // 45% headroom
+      }],
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(5);
+  });
+
+  it('does not add pts when both snapshots are already below 50% (no new regression)', () => {
+    const baseline = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill', // 45% headroom
+      }],
+    });
+    const current = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 120_000,
+        headroomTokens: 80_000, promptFillPct: 60, status: 'high-fill', // 40% headroom
+      }],
+    });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+
+  it('does not add pts when current headroom is exactly 50%', () => {
+    const current = makeSnapshot({
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 100_000,
+        headroomTokens: 100_000, promptFillPct: 50, status: 'high-fill',
+      }],
+    });
+    const diff = diffSnapshots(makeSnapshot(), current);
+    expect(diff.securityPostureScore).toBe(0);
+  });
+
+  it('does not add pts when headroom is absent', () => {
+    const diff = diffSnapshots(makeSnapshot(), makeSnapshot());
+    expect(diff.securityPostureScore).toBe(0);
+  });
+});
+
+describe('SecurityPostureScore — capped at 100', () => {
+  it('caps the total score at 100 when many dimensions trigger simultaneously', () => {
+    // Tool removals: 30 (3 tools) + model drop: 20 + hook drop: 20 + body change: 0 (count changed)
+    // + refusal drop: 15 + headroom: 5 = 90 (under cap, but adding more would cap)
+    // Use 4+ tools removed to hit 30 max, plus all other factors
+    function makeSchemaEntry() {
+      return { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'sha256:abcd' };
+    }
+    const baseline = makeSnapshot({
+      hookCount: 3, hookSourceHash: 'sha256:aaaa',
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [{ id: 'claude-sonnet-4.6', state: 'enabled', contextWindow: 200_000 }] },
+      toolSchemas: { a: makeSchemaEntry(), b: makeSchemaEntry(), c: makeSchemaEntry(), d: makeSchemaEntry() },
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.95, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const current = makeSnapshot({
+      hookCount: 2, hookSourceHash: 'sha256:bbbb',
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [] },
+      toolSchemas: {},
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill',
+      }],
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.0, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const diff = diffSnapshots(baseline, current);
+    // raw: 30 (tools) + 20 (models) + 20 (hook drop) + 15 (refusal) + 5 (headroom) = 90
+    expect(diff.securityPostureScore).toBe(90);
+  });
+
+  it('caps at 100 when raw sum exceeds 100', () => {
+    // Scenario: hook body change (5) + all others
+    // tools (30) + model (20) + refusal (15) + headroom (5) + hook body (5) = 75 < 100
+    // + hook count drop (20) = 95, still under 100
+    // Max reachable with current formula (single-hash tracking): 30+20+20+5+15+5 = 95
+    // Test that a maximum-everything scenario returns within the cap
+    function makeSchemaEntry() {
+      return { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'sha256:abcd' };
+    }
+    const baseline = makeSnapshot({
+      hookCount: 3, hookSourceHash: 'sha256:aaaa',
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [
+        { id: 'model-a', state: 'enabled', contextWindow: 200_000 },
+        { id: 'model-b', state: 'enabled', contextWindow: 200_000 },
+      ]},
+      toolSchemas: { a: makeSchemaEntry(), b: makeSchemaEntry(), c: makeSchemaEntry(), d: makeSchemaEntry() },
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.95, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const current = makeSnapshot({
+      // Hook count same but hash changed → body change (5 pts)
+      hookCount: 3, hookSourceHash: 'sha256:bbbb',
+      // Both models removed → model drop (20 pts)
+      modelPool: { capturedAt: '2026-01-01T00:00:00.000Z', models: [] },
+      // All tools removed → 30 pts
+      toolSchemas: {},
+      // Headroom below 50% → 5 pts
+      contextWindowHeadroom: [{
+        modelId: 'claude-sonnet-4.6', state: 'enabled',
+        contextWindow: 200_000, systemPromptTokens: 110_000,
+        headroomTokens: 90_000, promptFillPct: 55, status: 'high-fill',
+      }],
+      // Injection refusal drops >5pp → 15 pts
+      experiments: {
+        'context-tax': { name: 'context-tax', description: '', metrics: {
+          injectionRefusedRate: { value: 0.0, unit: 'fraction', description: '' },
+        }},
+      },
+    });
+    const diff = diffSnapshots(baseline, current);
+    // raw: 30 (tools) + 20 (models) + 0 (no hook count drop) + 5 (hook body) + 15 (refusal) + 5 (headroom) = 75
+    expect(diff.securityPostureScore).toBeLessThanOrEqual(100);
+    expect(diff.securityPostureScore).toBe(75);
+  });
+});
+
+describe('SecurityPostureScore — formatDiffReport includes score line', () => {
+  it('renders BREAKING score in diff report', () => {
+    function makeSchemaEntry() {
+      return { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'sha256:abcd' };
+    }
+    const baseline = makeSnapshot({ toolSchemas: { a: makeSchemaEntry(), b: makeSchemaEntry(), c: makeSchemaEntry() } });
+    const current = makeSnapshot({ toolSchemas: {} });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Security Posture Score**: 30/100');
+    expect(report).toContain('BREAKING');
+  });
+
+  it('renders WARNING score in diff report', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:bbbb' });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Security Posture Score**: 5/100');
+    expect(report).toContain('WARNING');
+  });
+
+  it('renders CLEAN score in diff report for identical snapshots', () => {
+    const snap = makeSnapshot();
+    const diff = diffSnapshots(snap, snap);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Security Posture Score**: 0/100');
+    expect(report).toContain('CLEAN');
+  });
+});

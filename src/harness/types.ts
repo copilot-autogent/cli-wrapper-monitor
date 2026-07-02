@@ -211,6 +211,13 @@ export interface DiffReport {
   toolSchemaChanged: boolean;
   /** Per-tool schema changes: added/removed tools and parameter/description diffs */
   toolSchemaChanges: ToolSchemaChange[];
+  /**
+   * Aggregate security regression score (0–100, higher = more regressed).
+   * Components: tool removals (30 max), model pool drop (20), hook count drop (20),
+   * hook body change (5), injection refusal drop >5pp (15), headroom crosses below 50% (5).
+   * Score 0 = no regressions; ≥30 = BREAKING tier; 1–29 = WARNING tier.
+   */
+  securityPostureScore: number;
 }
 
 // ---------------------------------------------------------------------------

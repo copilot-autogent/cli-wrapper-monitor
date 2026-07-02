@@ -304,3 +304,56 @@ describe("generateTrendReport", () => {
     expect(report).toContain("systemPromptChars sparkline");
   });
 });
+
+// ---------------------------------------------------------------------------
+// extractTrendRow — securityPostureScore
+// ---------------------------------------------------------------------------
+
+describe("extractTrendRow — securityPostureScore", () => {
+  it("returns null securityPostureScore when no previous snapshot provided", () => {
+    const row = extractTrendRow(SNAP_A);
+    expect(row.securityPostureScore).toBeNull();
+  });
+
+  it("returns 0 when previous and current snapshots are identical", () => {
+    const row = extractTrendRow(SNAP_A, SNAP_A);
+    expect(row.securityPostureScore).toBe(0);
+  });
+
+  it("returns a positive score when there is a regression between snapshots", () => {
+    const withHookChange = makeSnapshot("2026-06-01T00:00:00.000Z", 100_000, 28, {
+      hookCount: 3, hookSourceHash: "sha256:bbbb",
+    });
+    const prev = makeSnapshot("2026-05-01T00:00:00.000Z", 50_000, 25, {
+      hookCount: 3, hookSourceHash: "sha256:aaaa",
+    });
+    const row = extractTrendRow(withHookChange, prev);
+    // hook body changed with same count → 5 pts
+    expect(row.securityPostureScore).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateTrendReport — securityPostureScore column
+// ---------------------------------------------------------------------------
+
+describe("generateTrendReport — securityPostureScore column", () => {
+  it("includes securityPostureScore column header", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B, SNAP_C]);
+    expect(report).toContain("securityPostureScore");
+  });
+
+  it("shows '—' for the first row (no previous to compare)", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B, SNAP_C]);
+    const rows = report.split("\n").filter((line) => line.startsWith("| 2026-"));
+    // First row should have '—' in score column
+    expect(rows[0]).toContain("| — |");
+  });
+
+  it("shows '0/100' for subsequent rows with no regression", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B, SNAP_C]);
+    const rows = report.split("\n").filter((line) => line.startsWith("| 2026-"));
+    // SNAP_A and SNAP_B have no security-relevant diff → 0/100
+    expect(rows[1]).toContain("0/100");
+  });
+});
