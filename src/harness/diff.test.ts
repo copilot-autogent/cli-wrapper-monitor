@@ -125,8 +125,115 @@ describe('formatDiffReport — hook change', () => {
 });
 
 // ---------------------------------------------------------------------------
-// binaryChanged / systemPromptChanged (regression guard)
+// diffSnapshots — hook fingerprint structural BREAKING + WARNING (#68)
 // ---------------------------------------------------------------------------
+
+describe('diffSnapshots — hook count BREAKING', () => {
+  it('adds to structuralBreaks when hook count drops (removed)', () => {
+    const baseline = makeSnapshot({ hookCount: 3 });
+    const current = makeSnapshot({ hookCount: 2 });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.structuralBreaks.some((s) => s.includes('Hook count dropped'))).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('3 → 2'))).toBe(true);
+    expect(diff.hasBreaking).toBe(true);
+    expect(diff.warnings).toHaveLength(0);
+  });
+
+  it('adds to structuralBreaks when hook count increases (added)', () => {
+    const baseline = makeSnapshot({ hookCount: 2 });
+    const current = makeSnapshot({ hookCount: 4 });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.structuralBreaks.some((s) => s.includes('Hook count increased'))).toBe(true);
+    expect(diff.structuralBreaks.some((s) => s.includes('2 → 4'))).toBe(true);
+    expect(diff.hasBreaking).toBe(true);
+    expect(diff.warnings).toHaveLength(0);
+  });
+
+  it('adds to structuralBreaks when hook count disappears', () => {
+    const baseline = makeSnapshot({ hookCount: 3 });
+    const current = makeSnapshot({ hookCount: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.structuralBreaks.some((s) => s.includes('Hook count disappeared'))).toBe(true);
+    expect(diff.hasBreaking).toBe(true);
+  });
+
+  it('does NOT add to structuralBreaks when hook count is unchanged', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.structuralBreaks.some((s) => s.includes('Hook count'))).toBe(false);
+    expect(diff.warnings).toHaveLength(0);
+  });
+
+  it('does NOT produce false positives when hookCount is absent from both', () => {
+    const baseline = makeSnapshot({ hookCount: undefined });
+    const current = makeSnapshot({ hookCount: undefined });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.structuralBreaks.some((s) => s.includes('Hook'))).toBe(false);
+    expect(diff.warnings).toHaveLength(0);
+  });
+});
+
+describe('diffSnapshots — hook body changed WARNING', () => {
+  it('adds to warnings when hook hash differs but count is unchanged', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa1234567890ab' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:bbbbccddeeff0011' });
+    const diff = diffSnapshots(baseline, current);
+    expect(diff.warnings.some((w) => w.includes('Hook body changed'))).toBe(true);
+    expect(diff.warnings.some((w) => w.includes('count unchanged: 3'))).toBe(true);
+    expect(diff.hasBreaking).toBe(false);
+    expect(diff.structuralBreaks.some((s) => s.includes('Hook count'))).toBe(false);
+  });
+
+  it('includes hash snippet in warning message', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa1234567890ab' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:bbbbccddeeff0011' });
+    const diff = diffSnapshots(baseline, current);
+    const w = diff.warnings.find((w) => w.includes('Hook body changed'))!;
+    expect(w).toBeTruthy();
+    // hashSnippet slices first 12 hex chars after stripping 'sha256:' prefix
+    expect(w).toContain('aaaa12345678');
+    expect(w).toContain('bbbbccddeeff');
+  });
+
+  it('does NOT add to warnings when hook hash is unchanged', () => {
+    const snap = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa1234' });
+    const diff = diffSnapshots(snap, snap);
+    expect(diff.warnings).toHaveLength(0);
+  });
+
+  it('does NOT add to warnings when hookSourceHash is absent or unknown', () => {
+    const b1 = makeSnapshot({ hookCount: 3, hookSourceHash: undefined });
+    const c1 = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:bbbb' });
+    expect(diffSnapshots(b1, c1).warnings).toHaveLength(0);
+
+    const b2 = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa' });
+    const c2 = makeSnapshot({ hookCount: 3, hookSourceHash: 'unknown' });
+    expect(diffSnapshots(b2, c2).warnings).toHaveLength(0);
+  });
+});
+
+describe('formatDiffReport — hook body warning section', () => {
+  it('renders Hook Changes section with WARNING when hook body changed', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aabb1234567890cd' });
+    const current = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:eeff00112233445566' });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Hook Changes');
+    expect(report).toContain('WARNING');
+    expect(report).toContain('Hook body changed');
+  });
+
+  it('renders hook count drop in Structural BREAKING Changes section', () => {
+    const baseline = makeSnapshot({ hookCount: 3, hookSourceHash: 'sha256:aaaa1234' });
+    const current = makeSnapshot({ hookCount: 2, hookSourceHash: 'sha256:bbbb5678' });
+    const diff = diffSnapshots(baseline, current);
+    const report = formatDiffReport(diff);
+    expect(report).toContain('Structural BREAKING Changes');
+    expect(report).toContain('BREAKING');
+    expect(report).toContain('Hook count dropped');
+  });
+});
 
 describe('diffSnapshots — other hash tracking', () => {
   it('detects binary hash change', () => {

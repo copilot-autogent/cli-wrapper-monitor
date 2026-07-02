@@ -193,6 +193,12 @@ export interface DiffReport {
    * hook count drop) that are BREAKING regardless of percentage threshold.
    */
   structuralBreaks: string[];
+  /**
+   * Descriptions of WARNING-level hook changes (hook body changed without count change).
+   * These are rendered under `## Hook Changes` in the formatted report.
+   * All entries are currently hook-related; extend the renderer if new warning types are added.
+   */
+  warnings: string[];
   /** True when the monitored CLI binary hash changed between snapshots */
   binaryChanged: boolean;
   /** True when the assembled system prompt hash changed between snapshots */
