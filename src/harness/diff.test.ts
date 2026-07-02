@@ -813,13 +813,11 @@ describe('SecurityPostureScore — capped at 100', () => {
   });
 
   it('caps at 100 when raw sum exceeds 100', () => {
-    // Add hook body change (5) + everything else from above to exceed 100
-    // Create a scenario where count stays same but hash changes PLUS all others
-    // We can add an extra tool-schema-less scenario to push past 100 by mocking
-    // Actually: tools (30) + model (20) + refusal (15) + headroom (5) + hook body (5) = 75 < 100
-    // + hook count drop (20) = 95 still < 100
-    // Can't exceed 100 with current formula (max = 30+20+20+10+15+5 = 100)
-    // Test that a maximum-everything scenario returns exactly 100
+    // Scenario: hook body change (5) + all others
+    // tools (30) + model (20) + refusal (15) + headroom (5) + hook body (5) = 75 < 100
+    // + hook count drop (20) = 95, still under 100
+    // Max reachable with current formula (single-hash tracking): 30+20+20+5+15+5 = 95
+    // Test that a maximum-everything scenario returns within the cap
     function makeSchemaEntry() {
       return { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'sha256:abcd' };
     }

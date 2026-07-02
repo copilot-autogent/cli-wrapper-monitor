@@ -257,14 +257,14 @@ export async function sendSeveritySummaryWebhook(
       : warning > 0 || scoreWarning
         ? '🟡'
         : '🟢';
-  const summaryLine = [
+  const severityParts = [
     breaking > 0 ? `${breaking} BREAKING` : null,
     structuralBreakCount > 0 ? `${structuralBreakCount} structural BREAKING` : null,
     warning > 0 ? `${warning} WARNING` : null,
     info > 0 ? `${info} INFO` : null,
-  ]
-    .filter(Boolean)
-    .join(', ');
+    scoreBreaking ? 'score BREAKING' : scoreWarning ? 'score WARNING' : null,
+  ].filter(Boolean);
+  const summaryLine = severityParts.join(', ') || 'no metric regressions';
 
   const ciLine = ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '';
   const scoreLine =
