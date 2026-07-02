@@ -53,22 +53,58 @@ Tracking this over time reveals when hook or system prompt changes silently alte
 
 ## Automated Capture
 
-Captures run automatically on the **3rd of every month** via GitHub Actions. Two workflows handle this:
+Captures run automatically on a regular schedule via GitHub Actions.
 
-| Workflow | Schedule | Behaviour |
-|----------|----------|-----------|
-| [Monthly Capture (PR flow)](./.github/workflows/monthly-capture.yml) | 3rd of month, 00:00 UTC | Captures baseline, opens a PR titled `baseline: YYYY-MM capture`, posts Discord notification |
-| [Monthly Baseline Capture](./.github/workflows/monthly-baseline.yml) | 1st of month, 06:00 UTC | Captures baseline and commits directly to `main` |
+### Capture Schedule
+
+| Workflow | Trigger | Location | PR opened? | Purpose |
+|----------|---------|----------|------------|----------|
+| [Monthly Capture (PR flow)](./.github/workflows/monthly-capture.yml) | 3rd of month, 00:00 UTC | `baselines/YYYY-MM-DD.json` | **Yes** — `baseline: YYYY-MM capture` | Milestone baseline; reviewed before merging |
+| [Weekly Capture (reference snapshots)](./.github/workflows/weekly-capture.yml) | Every Monday, 00:00 UTC | `baselines/weekly/YYYY-MM-DD.json` | **No** | Lightweight reference; catches regressions within the month |
 
 Both workflows can also be triggered manually via *Actions → \<workflow name\> → Run workflow*.
 
-### What the workflow does
+**When to use each:**
+
+- **Monthly (PR flow)** — the authoritative baseline for blog posts, trend analysis, and the retention policy. Every run opens a PR so a human can review before the snapshot is merged to `main`.
+- **Weekly (reference)** — committed directly to `main` without a PR. Useful for spotting a silent regression mid-month before the next monthly capture. A Discord notification fires only when changes are detected.
+
+### workflow_dispatch inputs
+
+Both workflows accept manual-trigger inputs:
+
+| Input | Monthly | Weekly | Default | Effect |
+|-------|---------|--------|---------|--------|
+| `capture_reason` | ✓ | ✓ | `scheduled` / `weekly` | Label added to the PR title (monthly) or commit message |
+| `send_discord_notification` | ✓ | ✓ | `true` | Send Discord notification on completion / when changes detected |
+
+### Capture configuration
+
+Directory layout and retention are configured via [`capture.config.json`](./capture.config.json) in the repository root:
+
+```json
+{
+  "monthlyBaselinesDir": "baselines",
+  "weeklyBaselinesDir":  "baselines/weekly",
+  "retentionMonths":    6
+}
+```
+
+All three fields are optional — the defaults above apply when the file is absent.
+
+### What the monthly workflow does
 
 1. Checks out both this repo and `JackywithaWhiteDog/autogent` (for tool-count and source extraction)
 2. Runs `npm run capture` — exits non-zero if any metric regresses by >10%
 3. Generates a markdown diff report and writes it to the workflow run summary
-4. Commits the new baseline and diff report back to `main` (tagged `[skip ci]` to avoid loops)
+4. Commits the new baseline and diff report back to a dated branch, then opens a PR
 5. Fails the workflow run when regressions are detected so GitHub notifies the maintainer
+
+### What the weekly workflow does
+
+1. Same checkout + capture steps as monthly
+2. Commits `baselines/weekly/YYYY-MM-DD.json` directly to `main` (no PR)
+3. Sends a Discord notification only when the snapshot changed (i.e. wrapper layer changed)
 
 ### One-time setup
 
@@ -102,7 +138,9 @@ Steps:
 cli-wrapper-monitor/
 ├── .github/
 │   └── workflows/
-│       └── monthly-baseline.yml  # Scheduled monthly capture + diff report
+│       ├── monthly-capture.yml  # Monthly PR-flow capture (3rd of month)
+│       ├── weekly-capture.yml   # Weekly reference snapshot (every Monday)
+│       └── ci.yml               # CI: lint + test on PRs
 ├── src/
 │   ├── harness/
 │   │   ├── types.ts         # Core types: Experiment, MetricSnapshot, DiffReport
@@ -113,16 +151,21 @@ cli-wrapper-monitor/
 │       ├── context-tax.ts   # Token overhead of system prompt + tool definitions
 │       └── refusal-rate.ts  # Refusal behavior on standard probe set (sprint 2)
 ├── scripts/
-│   ├── run-experiments.ts          # Run all experiments, save snapshot
-│   ├── capture-autogent-baseline.ts # Capture live autogent session baseline
-│   ├── generate-diff-report.ts     # Compare two snapshots, output markdown diff
-│   └── trend-report.ts             # Show all historical baselines as trend table
-└── baselines/
-    ├── schema.json          # JSON Schema for snapshot files
-    ├── latest.json          # Most recent baseline
-    ├── 2026-05-20.json      # Second baseline — 🔴 +24% regression detected
-    ├── 2026-05-27.json      # Third baseline — 🟡 +2.3% (cumulative: +27.3% from May 4)
-    └── 2026-05-31.json      # Fourth baseline — post-fix (+105% system prompt, 0 truncation)
+│   ├── capture-autogent-baseline.ts  # Capture live autogent session baseline
+│   ├── capture-config.ts             # Config loader for capture.config.json
+│   ├── archive-baselines.ts          # Archive old baselines (monthly + weekly)
+│   ├── validate-baselines.ts         # Validate all baseline files (monthly + weekly)
+│   ├── generate-diff-report.ts       # Compare two snapshots, output markdown diff
+│   └── trend-report.ts               # Show all historical baselines as trend table
+├── baselines/
+│   ├── schema.json          # JSON Schema for snapshot files
+│   ├── latest.json          # Most recent monthly baseline
+│   ├── YYYY-MM-DD.json      # Monthly baseline snapshots
+│   ├── archive/YYYY/        # Archived monthly baselines (> 6 months old)
+│   └── weekly/              # Weekly reference snapshots
+│       ├── YYYY-MM-DD.json  # Weekly snapshot
+│       └── archive/YYYY/    # Archived weekly baselines (> 6 months old)
+└── capture.config.json  # Capture directory layout + retention policy
 ```
 
 ## Usage
@@ -161,7 +204,7 @@ npm run trend
 # Save trend report to file
 npm run trend -- --output reports/trend-2026-05.md
 
-# Archive baselines older than 6 months (moves to baselines/archive/YYYY/)
+# Archive baselines older than 6 months (monthly + weekly)
 npm run archive
 
 # Preview what would be archived (dry run)
@@ -169,6 +212,15 @@ npm run archive -- --dry-run
 
 # Archive with custom retention window (12 months)
 npm run archive -- --older-than-months 12
+
+# Archive only monthly baselines (skip weekly)
+npm run archive -- --skip-weekly
+
+# Validate all baselines (monthly + weekly)
+npm run validate
+
+# Validate only monthly baselines
+npm run validate -- --skip-weekly
 
 # Generate a self-contained HTML dashboard from all baselines
 npm run dashboard
@@ -187,31 +239,32 @@ Starting with the May 27 baseline, each bootstrap file entry includes a `content
 
 ## Baseline Retention Policy
 
-Monthly captures accumulate over time. To keep the repository lean, baselines older than **6 calendar months** can be moved to `baselines/archive/YYYY/` using the archive script:
+Captures accumulate over time. To keep the repository lean, baselines older than **6 calendar months** can be moved to `archive/YYYY/` subdirectories using the archive script. The policy applies to both monthly and weekly directories.
 
 ```bash
-# Archive baselines older than 6 months (default)
+# Archive baselines older than 6 months (default — covers both monthly and weekly)
 npm run archive
 
 # Preview without moving files
 npm run archive -- --dry-run
 
-# Custom retention window (e.g. keep 12 months in baselines/)
+# Custom retention window (e.g. keep 12 months)
 npm run archive -- --older-than-months 12
 ```
 
 **Behaviour:**
 
 - Files are moved by date prefix in the filename (`YYYY-MM-DD`). Files whose names don't start with a date (e.g. `schema.json`, `latest.json`) are always left in place.
-- `baselines/archive/YYYY/*.json` — archived files organised by year.
-- `npm run trend` and `npm run validate` automatically include the archive directory so historical data is never lost — trend lines remain intact.
+- Monthly: `baselines/archive/YYYY/*.json` — archived files organised by year.
+- Weekly: `baselines/weekly/archive/YYYY/*.json` — same structure.
+- `npm run trend` and `npm run validate` automatically include both archive directories so historical data is never lost.
 - The script is **idempotent**: running it twice has no side effects.
-- The `--older-than-months N` flag overrides the default 6-month threshold.
+- Retention window and directory layout are read from [`capture.config.json`](./capture.config.json).
 
 ## Regression Thresholds
 
 | Severity | Threshold |
-|----------|-----------|
+|----------|----------|
 | ⚪ Info | < 5% change |
 | 🟡 Warning | 5–10% change |
 | 🔴 Regression | > 10% change |
@@ -240,7 +293,7 @@ The dashboard is **zero-dependency** (no JS frameworks, no CDN links) and can be
 ## Published Reports
 
 | Date | Report | Summary |
-|------|--------|--------|
+|------|--------|-------|
 | 2026-05-04 | [Context Tax Baseline](./reports/context-tax-baseline-2026-05-04.md) | 12,956 tokens overhead (6.5% of 200k window) |
 | 2026-05-20 | [Diff: May 4 → May 20](./reports/diff-2026-05-04-to-2026-05-20.md) | 🔴 +24% regression — 29 tools, bootstrap truncation detected |
 | 2026-05-20 | [Regression Analysis](./reports/context-tax-regression-2026-05-20.md) | Root cause: PLAYBOOK/CONTEXT exceed 20k truncation limit |
@@ -254,10 +307,10 @@ The dashboard is **zero-dependency** (no JS frameworks, no CDN links) and can be
 
 ## Methodology Notes
 
-- **Monthly cadence** — captures run automatically via GitHub Actions: PR-flow on the 3rd (`monthly-capture.yml`), direct-commit on the 1st (`monthly-baseline.yml`); not CI on every commit
+- **Dual cadence** — monthly PR-flow captures (3rd of month) for authoritative baselines; weekly reference snapshots (every Monday) for early regression detection
 - **Copilot CLI/SDK only** — no cross-CLI comparison (resource constraint)
 - **Static + live modes** — context-tax works without credentials; refusal-rate needs a live session
-- **Results in repo** — snapshots committed to `baselines/`, diff reports to `reports/`
+- **Results in repo** — monthly snapshots in `baselines/`, weekly in `baselines/weekly/`, diff reports in `reports/`
 - **Blog only on interesting findings** — this is not a vanity metric dashboard
 - **Content hashes** — each bootstrap file entry includes MD5 hash to detect rewrites that preserve length
 - **RN-005**: LLM SDK 0.20a2 introduces interleaved reasoning via `/v1/responses` — live-mode baselines should check for reasoning token overhead
@@ -294,8 +347,8 @@ The dashboard is **zero-dependency** (no JS frameworks, no CDN links) and can be
 
 ### Sprint 6 — Monthly Automation ✅
 - Fourth baseline captured (May 31, 2026) — post-fix: +105% system prompt chars, truncation resolved
-- Monthly baseline capture automated via GitHub Actions ([`.github/workflows/monthly-baseline.yml`](./.github/workflows/monthly-baseline.yml))
-- Workflow fires on the 1st of each month; commits baselines and diff reports back to `main`
+- Monthly baseline capture automated via GitHub Actions ([`.github/workflows/monthly-capture.yml`](./.github/workflows/monthly-capture.yml))
+- Workflow fires on the 3rd of each month; commits baselines and diff reports back to a dated branch; opens a PR
 - Regressions surface as red workflow runs with step-summary diff report
 
 ### Sprint 7 — Growth Analysis + Restructuring Recommendation ✅
@@ -303,7 +356,15 @@ The dashboard is **zero-dependency** (no JS frameworks, no CDN links) and can be
 - [PLAYBOOK restructuring feasibility analysis](./reports/playbook-restructuring-feasibility-2026-06-14.md) published
 - Two-phase recommendation: content archiving (immediate) + on-demand section loading (engineering sprint)
 
-### Sprint 8 — Next Steps
+### Sprint 8 — Configurable Capture Schedule ✅
+- `weekly-capture.yml`: weekly reference snapshots every Monday at 00:00 UTC
+- `monthly-capture.yml`: `workflow_dispatch` inputs for `capture_reason` and `send_discord_notification`
+- `capture.config.json`: repo-level config for directory layout and retention
+- `archive-baselines.ts`: extended to archive both monthly and weekly directories
+- `validate-baselines.ts`: extended to scan `baselines/weekly/` and its archive
+- `capture-config.ts`: config loader + directory routing logic with full unit-test coverage
+
+### Sprint 9 — Next Steps
 - Add `AUTOGENT_PAT` secret and validate first automated capture fires correctly (July 1)
 - Begin refusal-rate live experiment with standardized probe set
 - File upstream issue: on-demand `playbook/` section loading
