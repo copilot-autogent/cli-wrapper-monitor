@@ -191,7 +191,7 @@ npx tsx scripts/capture-autogent-baseline.ts --preflight
 | Check | What it verifies | Failure action |
 |---|---|---|
 | **Auth** | Calls `listModels()` via CopilotClient to confirm SDK auth is valid | Run `/login` in Copilot CLI |
-| **Webhook** | POSTs a `{"type":"preflight-test"}` ping to `DISCORD_WEBHOOK_URL` (skipped if unset) | Check URL or network connectivity |
+| **Webhook** | POSTs a `{"content":"preflight-test"}` ping to `DISCORD_WEBHOOK_URL` (skipped if unset) | Check URL or network connectivity |
 | **Disk space** | Verifies ≥ 10 MB free in `baselines/` | Clear old baselines or free disk space |
 | **TypeScript** | Runs `tsc --noEmit` to catch pre-existing type errors | Fix type errors shown in output |
 
