@@ -24,12 +24,12 @@ function estimateTokens(charCount: number): number {
 
 /** Patterns that map raw header text to a canonical section bucket. */
 const SECTION_PATTERNS: Array<{ pattern: RegExp; canonical: string }> = [
-  // Tools / tool definitions
+  // Tools / tool definitions / functions / capabilities
   { pattern: /\btools?\b|\bfunctions?\b|\bcapabilit/i, canonical: 'Tools' },
-  // Safety / security / permissions
-  { pattern: /\bsafety\b|\bsecurity\b|\bpermission|\bpolic|\bguideline|\brule|\binstruction/i, canonical: 'Safety' },
-  // Introduction / identity / overview / context
-  { pattern: /\bintro|\bidentity|\boverview|\bcontext|\bpurpose|\bbackground|\byou are\b|\bwho you/i, canonical: 'Introduction' },
+  // Safety / security — keep narrow to avoid misclassifying "General Instructions"
+  { pattern: /\bsafety\b|\bsecurity\b|\bpermission|\bpolic/i, canonical: 'Safety' },
+  // Introduction / identity / overview / context / instructions
+  { pattern: /\bintro|\bidentity|\boverview|\bcontext|\bpurpose|\bbackground|\binstruction|\brule|\bguideline|\byou are\b|\bwho you/i, canonical: 'Introduction' },
 ];
 
 function canonicalise(rawHeader: string): string {

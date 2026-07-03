@@ -30,6 +30,7 @@ import {
   type RegressionEntry,
   type ModelPoolEntry,
   type SparklinePoint,
+  type PromptSectionBar,
 } from "../src/harness/dashboard.js";
 import {
   buildTrendMatrix,
@@ -387,7 +388,7 @@ function renderChangeVelocity(snapshots: MetricSnapshot[]): string {
 // Prompt section breakdown chart renderer
 // ---------------------------------------------------------------------------
 
-function renderPromptSectionBreakdown(bars: import("../src/harness/dashboard.js").PromptSectionBar[]): string {
+function renderPromptSectionBreakdown(bars: PromptSectionBar[]): string {
   const svg = generatePromptSectionStackedBarSVG(bars, { width: 700, height: 180 });
   const legendItems = ['Introduction', 'Safety', 'Tools', 'Other']
     .map((name) => {

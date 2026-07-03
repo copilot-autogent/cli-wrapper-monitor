@@ -291,7 +291,7 @@ export function extractModelPoolHistory(snapshots: MetricSnapshot[]): ModelPoolE
 /** One bar entry in the section stacked bar chart. */
 export interface PromptSectionBar {
   date: string;
-  /** Sections in stable render order (Tools, Safety, Introduction, Other) */
+  /** Sections in stable render order (Introduction, Safety, Tools, Other) */
   sections: Array<{ name: string; charCount: number }>;
   /** Total char count across all sections */
   totalChars: number;

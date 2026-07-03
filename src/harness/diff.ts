@@ -352,7 +352,8 @@ export function diffSnapshots(
 
   const promptSectionChanges = diffPromptSections(baseline.promptSections, current.promptSections);
   const promptSectionsAvailable =
-    baseline.promptSections !== undefined || current.promptSections !== undefined;
+    (baseline.promptSections !== undefined && baseline.promptSections.length > 0) ||
+    (current.promptSections !== undefined && current.promptSections.length > 0);
 
   return {
     baseline,

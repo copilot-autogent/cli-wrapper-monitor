@@ -712,9 +712,10 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     snapshot.toolSchemaHash = toolSchemaHash;
   }
 
-  // Attach raw system prompt and section breakdown when prompt content is available
+  // Attach section breakdown when prompt content is available.
+  // rawSystemPrompt is intentionally NOT persisted in the snapshot to avoid
+  // bloating baseline files with potentially sensitive/large content.
   if (systemPrompt.length > 0) {
-    snapshot.rawSystemPrompt = systemPrompt;
     snapshot.promptSections = parsePromptSections(systemPrompt);
     console.log(`Prompt sections: ${snapshot.promptSections.map((s) => `${s.name}(${s.charCount})`).join(', ')}`);
   }

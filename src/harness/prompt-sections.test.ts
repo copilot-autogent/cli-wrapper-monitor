@@ -220,6 +220,14 @@ describe('diffPromptSections', () => {
 
   it('computes correct delta for a section that shrank', () => {
     const baseline = [{ name: 'Safety', charCount: 800, tokenEstimate: 200 }];
+    const current = [{ name: 'Safety', charCount: 600, tokenEstimate: 150 }];
+    const [change] = diffPromptSections(baseline, current);
+    expect(change.deltaAbsolute).toBe(-200);
+    expect(change.deltaPct).toBeCloseTo(-25.0, 0);
+  });
+
+  it('computes zero delta for an unchanged section', () => {
+    const baseline = [{ name: 'Safety', charCount: 800, tokenEstimate: 200 }];
     const current = [{ name: 'Safety', charCount: 800, tokenEstimate: 200 }];
     const [change] = diffPromptSections(baseline, current);
     expect(change.deltaAbsolute).toBe(0);
