@@ -453,12 +453,13 @@ async function main(): Promise<void> {
 
     // Build the final alert list: severity summary first (if present), then specific events.
     // Pass specificAlerts.length as issueCount so the header reflects only distinct regression
-    // events, not the summary entry.
+    // events, not the summary entry. When there are no specific events, allAlerts has at most
+    // 1 entry (the summary) and bundleWebhooks uses the single-alert path — issueCount is ignored.
     const allAlerts: WebhookAlert[] = [
       ...(summaryAlert ? [summaryAlert] : []),
       ...specificAlerts,
     ];
-    await bundleWebhooks(allAlerts, undefined, specificAlerts.length || undefined);
+    await bundleWebhooks(allAlerts, undefined, specificAlerts.length);
   }
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.

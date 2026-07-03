@@ -176,13 +176,34 @@ export async function bundleWebhooks(
   const highestSeverity = SEVERITY_ORDER.find((s) => alerts.some((a) => a.severity === s)) ?? 'INFO';
   const emoji = highestSeverity === 'BREAKING' ? '🚨' : highestSeverity === 'WARNING' ? '⚠️' : '🟢';
   const count = issueCount ?? alerts.length;
+  const issueWord = count === 1 ? 'issue' : 'issues';
 
-  const header = `${emoji} **${highestSeverity} (${count} issues detected)**`;
-  const sections = alerts.map((a) => a.content).join('\n\n―――――――――――――――\n\n');
-  const full = `${header}\n\n${sections}`;
+  const header = `${emoji} **${highestSeverity} (${count} ${issueWord} detected)**`;
 
-  const content =
-    full.length > DISCORD_MAX_CONTENT ? full.slice(0, DISCORD_MAX_CONTENT - 1) + '…' : full;
+  // Greedily include as many alert sections as fit within the Discord 2000-char limit.
+  // If any sections are dropped, append an informative "(N sections omitted)" note rather
+  // than silently truncating mid-text.
+  const SEPARATOR = '\n\n―――――――――――――――\n\n';
+  let body = '';
+  let included = 0;
+  for (const alert of alerts) {
+    const sep = included > 0 ? SEPARATOR : '';
+    const candidate = body + sep + alert.content;
+    // Reserve 60 chars for a potential "N sections omitted" suffix
+    if (header.length + 2 + candidate.length <= DISCORD_MAX_CONTENT - 60) {
+      body = candidate;
+      included++;
+    }
+  }
+  const omitted = alerts.length - included;
+  const suffix = omitted > 0
+    ? `\n\n…(${omitted} alert section${omitted > 1 ? 's' : ''} omitted — Discord 2000-char limit)`
+    : '';
+  let content = `${header}\n\n${body}${suffix}`;
+  // Final safety clamp in case header+suffix alone are too long.
+  if (content.length > DISCORD_MAX_CONTENT) {
+    content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
+  }
 
   await sendWebhookWithRetry(url, { content }, 'bundled-alert');
 }

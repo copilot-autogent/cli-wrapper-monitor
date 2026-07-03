@@ -288,16 +288,21 @@ describe('bundleWebhooks', () => {
   });
 
   it('single alert: passes through the original alertType to sendWebhookWithRetry (dead-letter label)', async () => {
-    // alertType is passed as the third arg to sendWebhookWithRetry, which uses it for dead-letter
-    // entries. We verify it reaches the fetch call by ensuring the payload content is unchanged
-    // (the alertType is not embedded in the Discord payload body).
+    // alertType is passed as the 3rd arg to sendWebhookWithRetry for dead-letter entries.
+    // To verify it is forwarded correctly, trigger a delivery failure and inspect the dead-letter
+    // log entry written by appendFileSync.
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetch.mockResolvedValue(new Response(null, { status: 500 }));
     const alert = makeAlert('Model removed: gpt-4', 'BREAKING', 'model-removed');
-    await bundleWebhooks([alert]);
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [calledUrl, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(init.body as string) as { content: string };
-    expect(calledUrl).toBe(WEBHOOK_URL);
-    expect(body.content).toBe(alert.content);
+
+    const promise = bundleWebhooks([alert]);
+    await vi.runAllTimersAsync();
+    await promise;
+
+    const written = (appendFileSync as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    const entry = JSON.parse(written?.trim() ?? '{}') as { alertType: string };
+    expect(entry.alertType).toBe('model-removed');
+    consoleSpy.mockRestore();
   });
 
   // ---- Multi-alert merging -----------------------------------------------
@@ -354,7 +359,7 @@ describe('bundleWebhooks', () => {
     expect(body.content).toContain('🟢');
   });
 
-  it('multiple alerts: header includes the issue count', async () => {
+  it('multiple alerts: header includes the issue count with correct pluralisation', async () => {
     await bundleWebhooks([
       makeAlert('A', 'BREAKING'),
       makeAlert('B', 'WARNING'),
@@ -365,18 +370,30 @@ describe('bundleWebhooks', () => {
     expect(body.content).toContain('3 issues detected');
   });
 
-  it('multiple alerts: issueCount override controls the count in the header', async () => {
-    // Simulates compare-baselines including a meta summary alert that should not
-    // be counted as an "issue detected".
+  it('multiple alerts: issueCount=1 uses singular "issue detected"', async () => {
     await bundleWebhooks(
       [makeAlert('Summary', 'BREAKING'), makeAlert('Tool removed', 'BREAKING')],
       undefined,
-      1, // only 1 real issue, not 2
+      1,
     );
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
-    expect(body.content).toContain('1 issues detected');
-    expect(body.content).not.toContain('2 issues detected');
+    expect(body.content).toContain('1 issue detected');
+    expect(body.content).not.toContain('1 issues detected');
+    expect(body.content).not.toContain('2 issue');
+  });
+
+  it('multiple alerts: issueCount=0 falls back to alert count for pluralisation', async () => {
+    // issueCount=0 → issueCount ?? alerts.length uses 0, which is falsy but valid;
+    // 0 is treated as "0 issues detected"
+    await bundleWebhooks(
+      [makeAlert('Summary only', 'WARNING'), makeAlert('Another', 'WARNING')],
+      undefined,
+      0,
+    );
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('0 issues detected');
   });
 
   // ---- Webhook URL override ----------------------------------------------
@@ -390,14 +407,25 @@ describe('bundleWebhooks', () => {
     expect(calledUrl).toBe(overrideUrl);
   });
 
-  // ---- 2000-char truncation ----------------------------------------------
+  // ---- 2000-char truncation / section omission ---------------------------
 
-  it('truncates merged content to 2000 chars when it exceeds Discord limit', async () => {
+  it('omits sections that would overflow the 2000-char limit and appends an informative note', async () => {
+    // Each alert body is long enough that both can't fit together with the header.
     const longContent = 'x'.repeat(1500);
     await bundleWebhooks([makeAlert(longContent, 'INFO'), makeAlert(longContent, 'INFO')]);
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
     expect(body.content.length).toBeLessThanOrEqual(2000);
-    expect(body.content.endsWith('…')).toBe(true);
+    // The dropped section should produce an informative note, not a silent mid-text slice.
+    expect(body.content).toContain('section omitted');
+  });
+
+  it('does not add omission note when all sections fit', async () => {
+    await bundleWebhooks([makeAlert('Short A', 'INFO'), makeAlert('Short B', 'INFO')]);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).not.toContain('sections omitted');
+    expect(body.content).toContain('Short A');
+    expect(body.content).toContain('Short B');
   });
 });
