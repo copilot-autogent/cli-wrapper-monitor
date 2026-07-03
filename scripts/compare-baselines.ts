@@ -24,6 +24,7 @@ import { resolve } from "path";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { diffSnapshots } from "../src/harness/diff.js";
 import { validateBaselineFile } from "../src/harness/validator.js";
+import { migrate, CURRENT_SCHEMA_VERSION } from "../src/harness/baseline-migrator.js";
 import {
   BREAKING_THRESHOLD_PCT,
   WARNING_THRESHOLD_PCT,
@@ -70,11 +71,15 @@ function parseArgs(): CliArgs {
 function loadSnapshot(path: string): MetricSnapshot {
   const abs = resolve(path);
   if (!existsSync(abs)) throw new Error(`Snapshot not found: ${abs}`);
+  let parsed: unknown;
   try {
-    return JSON.parse(readFileSync(abs, "utf-8")) as MetricSnapshot;
+    parsed = JSON.parse(readFileSync(abs, "utf-8"));
   } catch (err) {
     throw new Error(`Invalid JSON in ${abs}: ${String(err)}`);
   }
+  // Auto-migrate to current schema before comparing so schema mismatches
+  // don't cause undefined-field errors or silent data skips.
+  return migrate(parsed, CURRENT_SCHEMA_VERSION);
 }
 
 function shortDate(capturedAt: unknown): string {
@@ -318,18 +323,27 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
 async function main(): Promise<void> {
   const { a, b, json: jsonMode, output } = parseArgs();
 
-  // Pre-validate both input files before attempting the diff
+  // Pre-validate both input files before attempting the diff.
+  // Validation runs on the raw file; migration happens inside loadSnapshot().
   for (const [label, filePath] of [["file-a", a], ["file-b", b]] as [string, string][]) {
     const result = validateBaselineFile(resolve(filePath));
     if (!result.valid) {
-      console.error(`Error: baseline integrity check failed for ${label} (${filePath}):`);
-      for (const err of result.errors) {
-        console.error(`  [${err.field}] ${err.message}`);
+      // Check if the only errors are about the (optional) schemaVersion field;
+      // those are handled by auto-migration in loadSnapshot(), not fatal here.
+      const nonMigrationErrors = result.errors.filter(
+        (e) => e.field !== 'schemaVersion',
+      );
+      if (nonMigrationErrors.length > 0) {
+        console.error(`Error: baseline integrity check failed for ${label} (${filePath}):`);
+        for (const err of nonMigrationErrors) {
+          console.error(`  [${err.field}] ${err.message}`);
+        }
+        process.exit(1);
       }
-      process.exit(1);
     }
   }
 
+  // loadSnapshot auto-migrates each baseline to the current schema version.
   const snapA = loadSnapshot(a), snapB = loadSnapshot(b);
   const report = diffSnapshots(snapA, snapB);
   let content: string;

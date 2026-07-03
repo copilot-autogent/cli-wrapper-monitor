@@ -12,6 +12,7 @@
     "chart": "npx tsx scripts/generate-chart.ts",
     "multi-model": "npx tsx scripts/capture-multi-model.ts",
     "validate": "npx tsx scripts/validate-baselines.ts",
+    "migrate": "npx tsx scripts/migrate-baselines.ts",
     "archive": "npx tsx scripts/archive-baselines.ts",
     "health": "npx tsx scripts/capture-health-report.ts",
     "dashboard": "npx tsx scripts/generate-dashboard.ts",

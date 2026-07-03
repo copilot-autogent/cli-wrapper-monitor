@@ -147,5 +147,11 @@
   "binaryHash": "sha256:2ce57cb28adc008d83fd61910c5005b32640efc974bbe3db2db4bc72bde57486",
   "systemPromptHash": "sha256:c01466da21c5cba51ed7887b3c8ee9c81bca16b4f7b9a3a014d7bb76cd7cfbe5",
   "hookCount": 3,
-  "hookSourceHash": "sha256:4b9c40d37715ff656b33b47e8c846b6681e460ae0e89abcc2533a9988e1d9dd3"
+  "hookSourceHash": "sha256:4b9c40d37715ff656b33b47e8c846b6681e460ae0e89abcc2533a9988e1d9dd3",
+  "schemaVersion": "1.0",
+  "modelPool": null,
+  "contextWindowHeadroom": null,
+  "possibleCauses": null,
+  "toolSchemas": null,
+  "toolSchemaHash": null
 }

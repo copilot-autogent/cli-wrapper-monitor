@@ -87,6 +87,11 @@ export interface ProvenanceLinkEntry {
 
 /** A complete snapshot of all experiment results at a point in time */
 export interface MetricSnapshot {
+  /**
+   * Schema version for migration support.
+   * "1.0" = current; absent (or undefined) = legacy "0.9" (pre-versioning).
+   */
+  schemaVersion?: string;
   /** ISO 8601 timestamp */
   capturedAt: string;
   /** Short git SHA of the monitor repo at capture time */
