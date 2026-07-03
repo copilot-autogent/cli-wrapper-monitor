@@ -129,15 +129,22 @@ export function migrate(
     );
   }
 
-  // Apply each step between current and target
+  // Apply each step between current and target.
+  // steps[i] is the migration from VERSION_ORDER[i] to VERSION_ORDER[i+1].
+  // If a step is missing in the array, throw rather than silently skip.
   const steps: Array<(b: RawBaseline) => RawBaseline> = [
     migrate09to10, // 0.9 → 1.0  (index 0→1)
   ];
 
-  const startIdx = Math.max(fromIdx, 0);
-  for (let i = startIdx; i < toIdx; i++) {
+  for (let i = fromIdx; i < toIdx; i++) {
     const step = steps[i];
-    if (step) current = step(current);
+    if (!step) {
+      throw new Error(
+        `No migration step defined for ${VERSION_ORDER[i]} → ${VERSION_ORDER[i + 1]}. ` +
+        `This is a bug in the migrator.`,
+      );
+    }
+    current = step(current);
   }
 
   return current as unknown as MetricSnapshot;

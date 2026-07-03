@@ -98,9 +98,25 @@ function processFile(filePath: string, write: boolean): FileMigrationResult {
     return { path: filePath, fromVersion: '?', toVersion: CURRENT_SCHEMA_VERSION, status: 'error', error: `Invalid JSON: ${String(err)}` };
   }
 
-  const fromVersion = effectiveSchemaVersion(parsed as Record<string, unknown>);
+  // Guard against non-object JSON files (null, arrays, primitives)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { path: filePath, fromVersion: '?', toVersion: CURRENT_SCHEMA_VERSION, status: 'error', error: 'JSON root is not an object' };
+  }
+
+  let fromVersion: string;
+  try {
+    fromVersion = effectiveSchemaVersion(parsed as Record<string, unknown>);
+  } catch (err) {
+    return { path: filePath, fromVersion: '?', toVersion: CURRENT_SCHEMA_VERSION, status: 'error', error: String(err) };
+  }
 
   if (fromVersion === CURRENT_SCHEMA_VERSION) {
+    // Still validate so we surface corruption in already-migrated files
+    const validation = validateSnapshot(parsed);
+    if (!validation.valid) {
+      const errMsgs = validation.errors.map((e) => `[${e.field}] ${e.message}`).join('; ');
+      return { path: filePath, fromVersion, toVersion: CURRENT_SCHEMA_VERSION, status: 'error', error: `Validation failed: ${errMsgs}` };
+    }
     return { path: filePath, fromVersion, toVersion: CURRENT_SCHEMA_VERSION, status: 'already-current' };
   }
 
