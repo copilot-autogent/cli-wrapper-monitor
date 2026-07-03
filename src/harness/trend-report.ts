@@ -280,10 +280,10 @@ export function buildTrendMatrix(
     cells: refs.map((ref) =>
       makeCell((_ref, refRow) => {
         if (currentRow.systemPromptChars === null || refRow.systemPromptChars === null) return "—";
-        const delta = currentRow.systemPromptChars - refRow.systemPromptChars;
-        const absDelta = fmtDeltaAbsolute(delta);
+        const charsDelta = currentRow.systemPromptChars - refRow.systemPromptChars;
+        const absDelta = fmtDeltaAbsolute(charsDelta);
         if (refRow.systemPromptChars !== 0) {
-          const pct = Math.abs(((delta) / refRow.systemPromptChars) * 100);
+          const pct = Math.abs((charsDelta / refRow.systemPromptChars) * 100);
           if (pct >= 10) return fmtDeltaPct(currentRow.systemPromptChars, refRow.systemPromptChars);
         }
         return absDelta;
@@ -353,14 +353,18 @@ export function buildTrendMatrixMarkdown(matrix: TrendMatrix): string {
     return "> **Not enough snapshots to build a trend matrix.** Capture at least 2 baselines.";
   }
 
+  // Escape pipe characters in cell text to avoid breaking the Markdown table.
+  const escapeMd = (s: string) => s.replace(/\|/g, "\\|");
+
   const windowLabels = matrix.windows.map((w) => w.label);
-  const header = `| Metric | ${windowLabels.join(" | ")} |`;
-  const sep = `|--------|${windowLabels.map(() => "------").join("|")}|`;
+  const header = `| Metric | ${windowLabels.map(escapeMd).join(" | ")} |`;
+  // Separator cells are at least 8 dashes wide (accommodates "3-month"/"6-month").
+  const sep = `|--------|${windowLabels.map((l) => "-".repeat(Math.max(8, l.length + 2))).join("|")}|`;
   const lines: string[] = [header, sep];
 
   for (const row of matrix.rows) {
-    const cells = row.cells.map((c) => c.formatted);
-    lines.push(`| ${row.metric} | ${cells.join(" | ")} |`);
+    const cells = row.cells.map((c) => escapeMd(c.formatted));
+    lines.push(`| ${escapeMd(row.metric)} | ${cells.join(" | ")} |`);
   }
 
   return lines.join("\n");

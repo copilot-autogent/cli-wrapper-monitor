@@ -119,7 +119,13 @@ function main(): void {
   let output: string | null = null;
   let matrixMode = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--output" && args[i + 1] && !args[i + 1].startsWith("--")) output = args[++i];
+    if (args[i] === "--output") {
+      if (!args[i + 1] || args[i + 1].startsWith("--")) {
+        console.error("Error: --output requires a path argument");
+        process.exit(1);
+      }
+      output = args[++i];
+    }
     if (args[i] === "--matrix") matrixMode = true;
   }
 
