@@ -47,8 +47,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate and post weekly digest
-        continue-on-error: true
+      # Baseline read + diff errors are hard failures (exit 1).
+      # Webhook delivery failures exit 0 (the script handles them internally),
+      # so continue-on-error only protects against unexpected process crashes
+      # in the generate step — not baseline errors.
+      - name: Generate weekly digest
+        id: generate_digest
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
@@ -57,3 +61,16 @@ jobs:
           else
             npx tsx scripts/weekly-stability-digest.ts
           fi
+
+      - name: Notify on digest failure
+        if: failure() && steps.generate_digest.outcome == 'failure'
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then exit 0; fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -nc --arg c "❌ Weekly stability digest failed — check run: ${RUN_URL}" '{"content":$c}')
+          curl -s -o /dev/null -w "Discord response: %{http_code}\n" \
+            -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" -d "${PAYLOAD}"

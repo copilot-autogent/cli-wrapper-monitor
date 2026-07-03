@@ -5,9 +5,10 @@ import { diffSnapshots } from './diff.js';
 import type { DiffReport } from './types.js';
 
 /**
- * Resolve the two most recent ISO-date-sorted baseline files from `baselines/`.
+ * Resolve the two most recent ISO-date-sorted baseline files from `baselinesDir`.
  * Files named `latest.json` and `schema.json` are excluded.
- * Returns [penultimate, latest] sorted ascending by filename.
+ * Subdirectories (e.g. `weekly/`) are not traversed — only root-level monthly baselines.
+ * Returns absolute paths: [penultimate, latest] sorted ascending by filename.
  */
 export function resolveLatestBaselinePair(
   baselinesDir: string = 'baselines',
@@ -21,8 +22,11 @@ export function resolveLatestBaselinePair(
     throw new Error(`No baseline files found in ${dir}`);
   }
 
-  const latest = join(baselinesDir, files[files.length - 1]);
-  const penultimate = files.length >= 2 ? join(baselinesDir, files[files.length - 2]) : null;
+  const latestFile = files[files.length - 1] as string;
+  const penultimateFile = files.length >= 2 ? (files[files.length - 2] as string) : null;
+
+  const latest = join(dir, latestFile);
+  const penultimate = penultimateFile ? join(dir, penultimateFile) : null;
   return [penultimate, latest];
 }
 
@@ -56,6 +60,20 @@ function isoToDate(iso: string): string {
   return iso.slice(0, 10);
 }
 
+/** Discord message content limit. */
+const DISCORD_CONTENT_LIMIT = 2000;
+const TRUNCATION_SUFFIX = '\n…(truncated — see baselines/ for full diff)';
+
+/**
+ * Truncate a message to fit within Discord's 2000-character content limit.
+ * Appends a notice when truncation occurs.
+ */
+function truncateForDiscord(msg: string): string {
+  if (msg.length <= DISCORD_CONTENT_LIMIT) return msg;
+  const cutoff = DISCORD_CONTENT_LIMIT - TRUNCATION_SUFFIX.length;
+  return msg.slice(0, cutoff) + TRUNCATION_SUFFIX;
+}
+
 /**
  * Build a compact Discord-ready digest message from two snapshots.
  *
@@ -79,13 +97,13 @@ export function buildDigestMessage(
   if (prior === null) {
     lines.push(`✅ First baseline captured (${captureDate}) — no prior snapshot to compare.`);
     lines.push(...buildMetricLines(current));
-    return lines.join('\n');
+    return truncateForDiscord(lines.join('\n'));
   }
 
   const report = diffSnapshots(prior, current);
   lines.push(...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)));
   lines.push(...buildMetricLines(current, report));
-  return lines.join('\n');
+  return truncateForDiscord(lines.join('\n'));
 }
 
 /**

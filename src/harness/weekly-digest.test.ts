@@ -179,42 +179,59 @@ describe('buildDigestMessage — headroom', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveLatestBaselinePair', () => {
-  const tmpDir = join(tmpdir(), `weekly-digest-test-${process.pid}`);
+  // Each test gets its own unique temp dir to ensure full isolation.
+  function makeTmpDir(suffix: string): string {
+    const dir = join(tmpdir(), `weekly-digest-test-${process.pid}-${suffix}`);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
 
   it('returns [null, latest] when only one file exists', () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, '2026-01-01.json'), '{}');
-    const [prior, latest] = resolveLatestBaselinePair(tmpDir);
-    expect(prior).toBeNull();
-    expect(latest).toContain('2026-01-01.json');
-    rmSync(tmpDir, { recursive: true });
+    const dir = makeTmpDir('single');
+    try {
+      writeFileSync(join(dir, '2026-01-01.json'), '{}');
+      const [prior, latest] = resolveLatestBaselinePair(dir);
+      expect(prior).toBeNull();
+      expect(latest).toContain('2026-01-01.json');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 
   it('returns the two latest files sorted ascending', () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, '2026-01-01.json'), '{}');
-    writeFileSync(join(tmpDir, '2026-02-01.json'), '{}');
-    writeFileSync(join(tmpDir, '2026-03-01.json'), '{}');
-    const [prior, latest] = resolveLatestBaselinePair(tmpDir);
-    expect(prior).toContain('2026-02-01.json');
-    expect(latest).toContain('2026-03-01.json');
-    rmSync(tmpDir, { recursive: true });
+    const dir = makeTmpDir('multi');
+    try {
+      writeFileSync(join(dir, '2026-01-01.json'), '{}');
+      writeFileSync(join(dir, '2026-02-01.json'), '{}');
+      writeFileSync(join(dir, '2026-03-01.json'), '{}');
+      const [prior, latest] = resolveLatestBaselinePair(dir);
+      expect(prior).toContain('2026-02-01.json');
+      expect(latest).toContain('2026-03-01.json');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 
   it('excludes schema.json and latest.json', () => {
-    mkdirSync(tmpDir, { recursive: true });
-    writeFileSync(join(tmpDir, 'schema.json'), '{}');
-    writeFileSync(join(tmpDir, 'latest.json'), '{}');
-    writeFileSync(join(tmpDir, '2026-05-01.json'), '{}');
-    const [prior, latest] = resolveLatestBaselinePair(tmpDir);
-    expect(prior).toBeNull();
-    expect(latest).toContain('2026-05-01.json');
-    rmSync(tmpDir, { recursive: true });
+    const dir = makeTmpDir('exclude');
+    try {
+      writeFileSync(join(dir, 'schema.json'), '{}');
+      writeFileSync(join(dir, 'latest.json'), '{}');
+      writeFileSync(join(dir, '2026-05-01.json'), '{}');
+      const [prior, latest] = resolveLatestBaselinePair(dir);
+      expect(prior).toBeNull();
+      expect(latest).toContain('2026-05-01.json');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 
   it('throws when no baseline files exist', () => {
-    mkdirSync(tmpDir, { recursive: true });
-    expect(() => resolveLatestBaselinePair(tmpDir)).toThrow(/No baseline files found/);
-    rmSync(tmpDir, { recursive: true });
+    const dir = makeTmpDir('empty');
+    try {
+      expect(() => resolveLatestBaselinePair(dir)).toThrow(/No baseline files found/);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 });
