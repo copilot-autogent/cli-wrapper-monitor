@@ -25,7 +25,7 @@ import { FAILURE_STREAK_THRESHOLD } from '../src/harness/capture-health.js';
 // ---------------------------------------------------------------------------
 
 function makeDate(isoDate: string): Date {
-  return new Date(isoDate + 'T12:00:00Z');
+  return new Date(isoDate + 'T06:00:00Z'); // simulate 06:00 UTC when check runs
 }
 
 function makeEntry(status: 'success' | 'error'): HealthLogEntry {
@@ -71,6 +71,12 @@ describe('extractDateFromFilename', () => {
   it('returns null for partial date patterns', () => {
     expect(extractDateFromFilename('2026-06.json')).toBeNull();
     expect(extractDateFromFilename('26-06-03.json')).toBeNull();
+  });
+
+  it('returns null for semantically invalid dates (e.g. month 99)', () => {
+    expect(extractDateFromFilename('2026-99-01.json')).toBeNull();
+    expect(extractDateFromFilename('2026-01-99.json')).toBeNull();
+    expect(extractDateFromFilename('9999-99-99.json')).toBeNull();
   });
 });
 
@@ -223,12 +229,14 @@ describe('checkWeeklyBaseline', () => {
   });
 
   it('IS stale when last capture is exactly at threshold', () => {
-    const now = makeDate('2026-07-16');
+    // now = 2026-07-16, lastDate = 2026-07-07 → 9 calendar days apart (stale)
+    const now = new Date('2026-07-16T06:00:00Z');
+    const lastDate = '2026-07-07'; // exactly 9 days before 2026-07-16
     const deps = makeDeps({
       now,
       weeklyDir: '/baselines/weekly',
       readdirSyncFn: (dir) => {
-        if (dir === '/baselines/weekly') return [`2026-07-0${16 - WEEKLY_STALENESS_THRESHOLD_DAYS}.json`]; // 9 days ago
+        if (dir === '/baselines/weekly') return [`${lastDate}.json`];
         return [];
       },
     });

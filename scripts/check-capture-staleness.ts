@@ -44,7 +44,7 @@ export const MONTHLY_GRACE_DAYS = 1;
 // than this many days (7-day cadence + 2-day grace buffer).
 export const WEEKLY_STALENESS_THRESHOLD_DAYS = 9;
 
-// Regex matching baseline filename dates: YYYY-MM-DD.json
+// Regex matching baseline filename dates: YYYY-MM-DD (with optional suffix).
 const DATE_FILE_RE = /^(\d{4}-\d{2}-\d{2})(?:-.+)?\.json$/;
 
 // ---------------------------------------------------------------------------
@@ -87,11 +87,17 @@ export interface StalenessCheckDeps {
 
 /**
  * Extract the date string (YYYY-MM-DD) from a baseline filename, or null
- * when the filename does not match the expected pattern.
+ * when the filename does not match the expected pattern or contains an
+ * invalid calendar date (e.g. 2026-99-99).
  */
 export function extractDateFromFilename(filename: string): string | null {
   const m = DATE_FILE_RE.exec(filename);
-  return m ? (m[1] ?? null) : null;
+  if (!m) return null;
+  const dateStr = m[1]!;
+  // Validate that it parses as a real calendar date.
+  const ts = Date.parse(dateStr + 'T00:00:00Z');
+  if (Number.isNaN(ts)) return null;
+  return dateStr;
 }
 
 /**
@@ -104,7 +110,7 @@ export function findMostRecentBaseline(
   deps: Pick<StalenessCheckDeps, 'readdirSyncFn' | 'existsSyncFn'> = {},
 ): string | null {
   const existsFn = deps.existsSyncFn ?? existsSync;
-  const readdirFn = deps.readdirSyncFn ?? readdirSync;
+  const readdirFn = deps.readdirSyncFn ?? ((dir: string) => readdirSync(dir, { encoding: 'utf8' }));
 
   if (!existsFn(dir)) return null;
 
@@ -188,8 +194,11 @@ export function checkWeeklyBaseline(deps: StalenessCheckDeps = {}): CheckResult 
     message = `⚠️  Weekly: no weekly baselines found in ${dir}.`;
   } else {
     const lastMs = new Date(lastDate + 'T00:00:00Z').getTime();
-    const ageMs = now.getTime() - lastMs;
-    const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    // Use start of today (UTC midnight) so the age is counted in whole calendar
+    // days regardless of the time the check runs (e.g. 06:00 UTC).
+    const startOfTodayMs =
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const ageDays = Math.floor((startOfTodayMs - lastMs) / (1000 * 60 * 60 * 24));
 
     stale = ageDays >= WEEKLY_STALENESS_THRESHOLD_DAYS;
     if (stale) {
