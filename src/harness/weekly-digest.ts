@@ -14,9 +14,18 @@ export function resolveLatestBaselinePair(
   baselinesDir: string = 'baselines',
 ): [string, string] | [null, string] {
   const dir = resolve(baselinesDir);
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith('.json') && f !== 'schema.json' && f !== 'latest.json')
-    .sort(); // ISO-date prefix sorts lexicographically === chronologically
+  let files: string[];
+  try {
+    files = readdirSync(dir)
+      .filter((f) => f.endsWith('.json') && f !== 'schema.json' && f !== 'latest.json')
+      .sort(); // ISO-date prefix sorts lexicographically === chronologically
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      throw new Error(`Baselines directory not found: ${dir}`);
+    }
+    throw err;
+  }
 
   if (files.length === 0) {
     throw new Error(`No baseline files found in ${dir}`);
@@ -175,7 +184,6 @@ function buildMetricLines(
 
   if (hookCount !== undefined) {
     const hookBodyChanged = report?.hookChanged ?? false;
-    const mark = hookBodyChanged ? ' 🔄' : '';
     lines.push(`• Hooks: ${hookCount} (fingerprint${hookBodyChanged ? ' changed 🔄' : ' stable'})`);
   }
 
@@ -200,7 +208,7 @@ function buildMetricLines(
  * Run the digest end-to-end: find latest two baselines, diff, and return the
  * Discord message string.  Uses the provided baselines directory.
  */
-export async function runWeeklyDigest(baselinesDir: string = 'baselines'): Promise<string> {
+export function runWeeklyDigest(baselinesDir: string = 'baselines'): string {
   const [priorPath, latestPath] = resolveLatestBaselinePair(baselinesDir);
   const current = loadSnapshot(latestPath);
   const prior = priorPath ? loadSnapshot(priorPath) : null;

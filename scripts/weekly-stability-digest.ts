@@ -45,7 +45,7 @@ async function main() {
 
   let message: string;
   try {
-    message = await runWeeklyDigest(baselinesDir);
+    message = runWeeklyDigest(baselinesDir);
   } catch (err) {
     console.error('❌ Failed to generate weekly digest:', String(err));
     process.exit(1);
@@ -76,4 +76,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error('❌ Unexpected fatal error:', err);
+  process.exit(1);
+});

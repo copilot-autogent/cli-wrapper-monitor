@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildDigestMessage, resolveLatestBaselinePair, loadSnapshot } from './weekly-digest.js';
+import { buildDigestMessage, resolveLatestBaselinePair } from './weekly-digest.js';
 import type { MetricSnapshot } from './types.js';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -180,14 +180,12 @@ describe('buildDigestMessage — headroom', () => {
 
 describe('resolveLatestBaselinePair', () => {
   // Each test gets its own unique temp dir to ensure full isolation.
-  function makeTmpDir(suffix: string): string {
-    const dir = join(tmpdir(), `weekly-digest-test-${process.pid}-${suffix}`);
-    mkdirSync(dir, { recursive: true });
-    return dir;
+  function makeTmpDir(): string {
+    return mkdtempSync(join(tmpdir(), 'weekly-digest-test-'));
   }
 
   it('returns [null, latest] when only one file exists', () => {
-    const dir = makeTmpDir('single');
+    const dir = makeTmpDir();
     try {
       writeFileSync(join(dir, '2026-01-01.json'), '{}');
       const [prior, latest] = resolveLatestBaselinePair(dir);
@@ -199,7 +197,7 @@ describe('resolveLatestBaselinePair', () => {
   });
 
   it('returns the two latest files sorted ascending', () => {
-    const dir = makeTmpDir('multi');
+    const dir = makeTmpDir();
     try {
       writeFileSync(join(dir, '2026-01-01.json'), '{}');
       writeFileSync(join(dir, '2026-02-01.json'), '{}');
@@ -213,7 +211,7 @@ describe('resolveLatestBaselinePair', () => {
   });
 
   it('excludes schema.json and latest.json', () => {
-    const dir = makeTmpDir('exclude');
+    const dir = makeTmpDir();
     try {
       writeFileSync(join(dir, 'schema.json'), '{}');
       writeFileSync(join(dir, 'latest.json'), '{}');
@@ -227,7 +225,7 @@ describe('resolveLatestBaselinePair', () => {
   });
 
   it('throws when no baseline files exist', () => {
-    const dir = makeTmpDir('empty');
+    const dir = makeTmpDir();
     try {
       expect(() => resolveLatestBaselinePair(dir)).toThrow(/No baseline files found/);
     } finally {
