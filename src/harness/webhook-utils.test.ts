@@ -383,9 +383,8 @@ describe('bundleWebhooks', () => {
     expect(body.content).not.toContain('2 issue');
   });
 
-  it('multiple alerts: issueCount=0 falls back to alert count for pluralisation', async () => {
-    // issueCount=0 → issueCount ?? alerts.length uses 0, which is falsy but valid;
-    // 0 is treated as "0 issues detected"
+  it('multiple alerts: issueCount=0 yields "0 issues detected" (no fallback to alerts.length)', async () => {
+    // issueCount ?? alerts.length: since 0 is not null/undefined, it is used directly.
     await bundleWebhooks(
       [makeAlert('Summary only', 'WARNING'), makeAlert('Another', 'WARNING')],
       undefined,

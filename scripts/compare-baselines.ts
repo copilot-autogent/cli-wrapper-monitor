@@ -432,6 +432,10 @@ async function main(): Promise<void> {
       buildModelRemovedAlert(removedModels, dateA, dateB, ciRunUrl),
     ].filter((a): a is WebhookAlert => a !== null);
 
+    // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
+    // Only fire when baseline had hook tracking (baselineHookCount defined), matching
+    // diff.ts's gate — avoids false-positive BREAKING on first comparison after
+    // hook tracking was introduced to older baselines.
     if (hookCountDropped || hookCountIncreased) {
       const changeType = hookCountDropped ? 'removed' : 'added';
       specificAlerts.push(buildHookChangedAlert(
@@ -451,13 +455,16 @@ async function main(): Promise<void> {
       ));
     }
 
-    // Build the final alert list: severity summary first (if present), then specific events.
-    // Pass specificAlerts.length as issueCount so the header reflects only distinct regression
-    // events, not the summary entry. When there are no specific events, allAlerts has at most
-    // 1 entry (the summary) and bundleWebhooks uses the single-alert path — issueCount is ignored.
+    // Specific event alerts are listed first so they are prioritised by the greedy bundler when
+    // space is tight. The severity summary (a meta overview) is appended last so it's the section
+    // most likely to be dropped if the combined content nears the 2000-char limit.
+    // Pass specificAlerts.length as issueCount so the bundle header counts only distinct regression
+    // events — not the summary entry itself.
+    // When there are no specific events, allAlerts has at most 1 entry (the summary) and
+    // bundleWebhooks uses the single-alert pass-through path — issueCount is not consulted.
     const allAlerts: WebhookAlert[] = [
-      ...(summaryAlert ? [summaryAlert] : []),
       ...specificAlerts,
+      ...(summaryAlert ? [summaryAlert] : []),
     ];
     await bundleWebhooks(allAlerts, undefined, specificAlerts.length);
   }

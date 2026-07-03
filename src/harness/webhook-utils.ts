@@ -181,20 +181,31 @@ export async function bundleWebhooks(
   const header = `${emoji} **${highestSeverity} (${count} ${issueWord} detected)**`;
 
   // Greedily include as many alert sections as fit within the Discord 2000-char limit.
-  // If any sections are dropped, append an informative "(N sections omitted)" note rather
-  // than silently truncating mid-text.
+  // Two-pass approach: first attempt without reserving space for the omission suffix (to avoid
+  // unnecessarily dropping sections that all fit). If any sections are dropped, redo with
+  // space reserved for the "(N sections omitted)" note.
   const SEPARATOR = '\n\n―――――――――――――――\n\n';
-  let body = '';
-  let included = 0;
-  for (const alert of alerts) {
-    const sep = included > 0 ? SEPARATOR : '';
-    const candidate = body + sep + alert.content;
-    // Reserve 60 chars for a potential "N sections omitted" suffix
-    if (header.length + 2 + candidate.length <= DISCORD_MAX_CONTENT - 60) {
-      body = candidate;
-      included++;
+
+  function fitSections(reserveSuffix: boolean): { body: string; included: number } {
+    const OMISSION_SUFFIX_BUDGET = 70; // chars reserved for "(N alert sections omitted…)" note
+    let body = '';
+    let included = 0;
+    for (const alert of alerts) {
+      const sep = included > 0 ? SEPARATOR : '';
+      const candidate = body + sep + alert.content;
+      const budget = DISCORD_MAX_CONTENT - header.length - 2 - (reserveSuffix ? OMISSION_SUFFIX_BUDGET : 0);
+      if (candidate.length <= budget) {
+        body = candidate;
+        included++;
+      }
     }
+    return { body, included };
   }
+
+  const firstPass = fitSections(false);
+  const { body, included } =
+    firstPass.included === alerts.length ? firstPass : fitSections(true);
+
   const omitted = alerts.length - included;
   const suffix = omitted > 0
     ? `\n\n…(${omitted} alert section${omitted > 1 ? 's' : ''} omitted — Discord 2000-char limit)`
