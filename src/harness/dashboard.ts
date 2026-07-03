@@ -285,8 +285,147 @@ export function extractModelPoolHistory(snapshots: MetricSnapshot[]): ModelPoolE
 }
 
 // ---------------------------------------------------------------------------
-// SVG sparkline generator
+// Prompt section stacked bar chart
 // ---------------------------------------------------------------------------
+
+/** One bar entry in the section stacked bar chart. */
+export interface PromptSectionBar {
+  date: string;
+  /** Sections in stable render order (Introduction, Safety, Tools, Other) */
+  sections: Array<{ name: string; charCount: number }>;
+  /** Total char count across all sections */
+  totalChars: number;
+}
+
+/** Stable display order for section colours. */
+const SECTION_ORDER = ['Introduction', 'Safety', 'Tools', 'Other'];
+
+/** Colour palette for each section bucket. */
+export const SECTION_COLORS: Record<string, string> = {
+  Introduction: '#3498db',
+  Safety: '#e74c3c',
+  Tools: '#2ecc71',
+  Other: '#95a5a6',
+};
+
+/**
+ * Extract per-snapshot prompt section data for a stacked bar chart.
+ * Snapshots without `promptSections` are skipped.
+ */
+export function extractPromptSectionBars(snapshots: MetricSnapshot[]): PromptSectionBar[] {
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+  );
+
+  const bars: PromptSectionBar[] = [];
+  for (const snap of sorted) {
+    if (!snap.promptSections || snap.promptSections.length === 0) continue;
+    const sectionMap = new Map(snap.promptSections.map((s) => [s.name, s.charCount]));
+    const sections = SECTION_ORDER.map((name) => ({
+      name,
+      charCount: sectionMap.get(name) ?? 0,
+    }));
+    bars.push({
+      date: snap.capturedAt.slice(0, 10),
+      sections,
+      totalChars: snap.promptSections.reduce((sum, s) => sum + s.charCount, 0),
+    });
+  }
+  return bars;
+}
+
+/**
+ * Generate a stacked bar chart SVG showing prompt section breakdown over time.
+ * Returns an SVG string suitable for inline embedding, or an "No data" placeholder.
+ */
+export function generatePromptSectionStackedBarSVG(
+  bars: PromptSectionBar[],
+  opts: {
+    width?: number;
+    height?: number;
+    label?: string;
+  } = {},
+): string {
+  const { width = 700, height = 180, label = 'System Prompt Section Breakdown (chars)' } = opts;
+
+  if (bars.length === 0) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" font-size="11" fill="#999">No section data available</text></svg>`;
+  }
+
+  const PAD = { top: 20, right: 20, bottom: 50, left: 60 };
+  const pw = width - PAD.left - PAD.right;
+  const ph = height - PAD.top - PAD.bottom;
+
+  const maxTotal = bars.reduce((m, b) => Math.max(m, b.totalChars), 0) || 1;
+  const barW = Math.max(4, Math.floor(pw / bars.length) - 2);
+
+  const lines: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="system-ui,-apple-system,sans-serif">`,
+    `<rect width="${width}" height="${height}" fill="#f8f9fa" rx="6"/>`,
+    `<rect x="${PAD.left}" y="${PAD.top}" width="${pw}" height="${ph}" fill="#ffffff" rx="3" stroke="#dee2e6" stroke-width="1"/>`,
+  ];
+
+  // Y-axis: max label
+  const fmtK = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v);
+  lines.push(
+    `<text x="${PAD.left - 4}" y="${PAD.top + 9}" text-anchor="end" font-size="9" fill="#666">${fmtK(maxTotal)}</text>`,
+    `<text x="${PAD.left - 4}" y="${PAD.top + ph}" text-anchor="end" font-size="9" fill="#666">0</text>`,
+  );
+
+  // Bars — accumulate exact fractional heights and use floor to emit integer
+  // pixel segments. This ensures the total rendered height never exceeds `ph`.
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i];
+    const x = PAD.left + Math.round((i / bars.length) * pw) + 1;
+    let yBase = PAD.top + ph;
+    let heightAccum = 0;
+
+    for (const sec of bar.sections) {
+      if (sec.charCount === 0) continue;
+      const exactH = (sec.charCount / maxTotal) * ph;
+      heightAccum += exactH;
+      const segH = Math.floor(heightAccum);
+      heightAccum -= segH;
+      if (segH <= 0) continue; // skip sub-pixel segments
+      yBase -= segH;
+      const colour = SECTION_COLORS[sec.name] ?? '#bdc3c7';
+      lines.push(
+        `<rect x="${x}" y="${yBase}" width="${barW}" height="${segH}" fill="${colour}"><title>${bar.date} – ${sec.name}: ${sec.charCount.toLocaleString()} chars</title></rect>`,
+      );
+    }
+
+    // X-axis date label (every bar or thinned when many bars)
+    if (bars.length <= 10 || i % Math.ceil(bars.length / 10) === 0) {
+      lines.push(
+        `<text x="${x + barW / 2}" y="${PAD.top + ph + 14}" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-35 ${x + barW / 2} ${PAD.top + ph + 14})">${bar.date}</text>`,
+      );
+    }
+  }
+
+  // Legend
+  let lx = PAD.left;
+  const ly = height - 10;
+  for (const name of SECTION_ORDER) {
+    const colour = SECTION_COLORS[name] ?? '#bdc3c7';
+    lines.push(
+      `<rect x="${lx}" y="${ly - 8}" width="10" height="10" fill="${colour}"/>`,
+      `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#555">${name}</text>`,
+    );
+    lx += 80;
+  }
+
+  // Title label
+  if (label) {
+    lines.push(
+      `<text x="${width / 2}" y="${height - 35}" text-anchor="middle" font-size="10" fill="#555" font-weight="600">${label}</text>`,
+    );
+  }
+
+  lines.push('</svg>');
+  return lines.join('\n');
+}
+
+
 
 /**
  * Generate a compact SVG sparkline for a series of data points.

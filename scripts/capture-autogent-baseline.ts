@@ -42,6 +42,7 @@ import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
 import type { ModelPool, ToolParamSchema } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
+import { parsePromptSections } from '../src/harness/prompt-sections.js';
 import {
   appendHealthLog,
   readHealthLog,
@@ -709,6 +710,14 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   if (Object.keys(toolSchemas).length > 0) {
     snapshot.toolSchemas = toolSchemas;
     snapshot.toolSchemaHash = toolSchemaHash;
+  }
+
+  // Attach section breakdown when prompt content is available.
+  // rawSystemPrompt is intentionally NOT persisted in the snapshot to avoid
+  // bloating baseline files with potentially sensitive/large content.
+  if (systemPrompt.length > 0) {
+    snapshot.promptSections = parsePromptSections(systemPrompt);
+    console.log(`Prompt sections: ${snapshot.promptSections.map((s) => `${s.name}(${s.charCount})`).join(', ')}`);
   }
 
   // Capture model pool
