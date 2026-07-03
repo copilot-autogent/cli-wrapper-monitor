@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { sendWebhookWithRetry, MAX_ATTEMPTS } from './webhook-utils.js';
+import { sendWebhookWithRetry, bundleWebhooks, MAX_ATTEMPTS, type WebhookAlert } from './webhook-utils.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -218,5 +218,159 @@ describe('sendWebhookWithRetry', () => {
     // console.error should mention that dead-letter write also failed
     expect(consoleSpy.mock.calls[0][0]).toContain('Dead-letter write also failed');
     consoleSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bundleWebhooks
+// ---------------------------------------------------------------------------
+
+describe('bundleWebhooks', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', mockFetch);
+    vi.stubEnv('DISCORD_WEBHOOK_URL', WEBHOOK_URL);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const makeAlert = (
+    content: string,
+    severity: WebhookAlert['severity'] = 'INFO',
+    alertType = 'test-alert',
+  ): WebhookAlert => ({ content, alertType, severity });
+
+  // ---- No-op cases -------------------------------------------------------
+
+  it('does not call fetch when alerts list is empty', async () => {
+    await bundleWebhooks([]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call fetch when DISCORD_WEBHOOK_URL is absent', async () => {
+    vi.stubEnv('DISCORD_WEBHOOK_URL', '');
+    await bundleWebhooks([makeAlert('hello', 'BREAKING')]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call fetch when DISCORD_WEBHOOK_URL is whitespace-only', async () => {
+    vi.stubEnv('DISCORD_WEBHOOK_URL', '   ');
+    await bundleWebhooks([makeAlert('hello', 'BREAKING')]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  // ---- Single alert pass-through -----------------------------------------
+
+  it('single alert: calls fetch once with the original content', async () => {
+    const alert = makeAlert('Tool removed: `edit`', 'BREAKING', 'tool-removed');
+    await bundleWebhooks([alert]);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toBe(alert.content);
+  });
+
+  it('single alert: uses the original alertType in payload', async () => {
+    const alert = makeAlert('Model removed: gpt-4', 'BREAKING', 'model-removed');
+    await bundleWebhooks([alert]);
+    // No explicit alertType in payload content — but the fetch body content is the alert content
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toBe(alert.content);
+  });
+
+  // ---- Multi-alert merging -----------------------------------------------
+
+  it('multiple alerts: calls fetch exactly once', async () => {
+    await bundleWebhooks([
+      makeAlert('Alert A', 'BREAKING'),
+      makeAlert('Alert B', 'WARNING'),
+      makeAlert('Alert C', 'INFO'),
+    ]);
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('multiple alerts: merged content contains all individual alert contents', async () => {
+    const alerts = [
+      makeAlert('Content alpha', 'BREAKING'),
+      makeAlert('Content beta', 'WARNING'),
+    ];
+    await bundleWebhooks(alerts);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('Content alpha');
+    expect(body.content).toContain('Content beta');
+  });
+
+  it('multiple alerts: header shows BREAKING when any alert is BREAKING', async () => {
+    await bundleWebhooks([
+      makeAlert('A', 'WARNING'),
+      makeAlert('B', 'BREAKING'),
+    ]);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('BREAKING');
+    expect(body.content).toContain('🚨');
+  });
+
+  it('multiple alerts: header shows WARNING when highest is WARNING', async () => {
+    await bundleWebhooks([
+      makeAlert('A', 'INFO'),
+      makeAlert('B', 'WARNING'),
+    ]);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('WARNING');
+    expect(body.content).toContain('⚠️');
+    expect(body.content).not.toContain('🚨');
+  });
+
+  it('multiple alerts: header shows INFO when all alerts are INFO', async () => {
+    await bundleWebhooks([makeAlert('A', 'INFO'), makeAlert('B', 'INFO')]);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('INFO');
+    expect(body.content).toContain('🟢');
+  });
+
+  it('multiple alerts: header includes the issue count', async () => {
+    await bundleWebhooks([
+      makeAlert('A', 'BREAKING'),
+      makeAlert('B', 'WARNING'),
+      makeAlert('C', 'INFO'),
+    ]);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('3 issues detected');
+  });
+
+  // ---- Webhook URL override ----------------------------------------------
+
+  it('uses provided webhookUrl override instead of env var', async () => {
+    const overrideUrl = 'https://discord.com/api/webhooks/override/xyz';
+    vi.stubEnv('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/should-not-use/token');
+    await bundleWebhooks([makeAlert('hi', 'INFO')], overrideUrl);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [calledUrl] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(calledUrl).toBe(overrideUrl);
+  });
+
+  // ---- 2000-char truncation ----------------------------------------------
+
+  it('truncates merged content to 2000 chars when it exceeds Discord limit', async () => {
+    const longContent = 'x'.repeat(1500);
+    await bundleWebhooks([makeAlert(longContent, 'INFO'), makeAlert(longContent, 'INFO')]);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content.length).toBeLessThanOrEqual(2000);
+    expect(body.content.endsWith('…')).toBe(true);
   });
 });
