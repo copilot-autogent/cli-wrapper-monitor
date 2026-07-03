@@ -61,6 +61,7 @@ Captures run automatically on a regular schedule via GitHub Actions.
 |----------|---------|----------|------------|----------|
 | [Monthly Capture (PR flow)](./.github/workflows/monthly-capture.yml) | 3rd of month, 00:00 UTC | `baselines/YYYY-MM-DD.json` | **Yes** — `baseline: YYYY-MM capture` | Milestone baseline; reviewed before merging |
 | [Weekly Capture (reference snapshots)](./.github/workflows/weekly-capture.yml) | Every Monday, 00:00 UTC | `baselines/weekly/YYYY-MM-DD.json` | **No** | Lightweight reference; catches regressions within the month |
+| [Weekly Stability Digest](./.github/workflows/weekly-stability-digest.yml) | Every Monday, 08:00 UTC | n/a (Discord notification only) | **No** | Heartbeat confirming baseline is unchanged; fires even when nothing changed |
 
 Both workflows can also be triggered manually via *Actions → \<workflow name\> → Run workflow*.
 
@@ -105,6 +106,26 @@ All three fields are optional — the defaults above apply when the file is abse
 1. Same checkout + capture steps as monthly
 2. Commits `baselines/weekly/YYYY-MM-DD.json` directly to `main` (no PR)
 3. Sends a Discord notification only when the snapshot changed (i.e. wrapper layer changed)
+
+### Weekly Digest
+
+A separate weekly heartbeat workflow (`weekly-stability-digest.yml`) runs every **Monday at 08:00 UTC** and posts a compact Discord notification summarising the current baseline state.  Unlike the alert webhooks (which only fire on regressions), the digest fires every week to confirm the monitor is alive and the baseline is unchanged.
+
+Example output:
+```
+📊 CLI Wrapper Monitor — Weekly Digest (2026-07-07)
+✅ No regressions detected since last capture (2026-06-16)
+  Latest snapshot: 2026-06-16
+• Tools: 21
+• Models (enabled): 8
+• Hooks: 3 (fingerprint stable)
+• System prompt: 156,244 chars / 39,061 tokens
+• Headroom: 80% (above 50% threshold) ✅
+```
+
+When regressions are present (e.g. run mid-capture-cycle), emoji indicators change to 🔴 BREAKING or 🟡 WARNING with brief details.
+
+**`workflow_dispatch`** is supported for manual status pings — navigate to *Actions → Weekly Stability Digest → Run workflow*.  Set *dry_run* to `true` to print the digest to the log without posting to Discord.
 
 ### One-time setup
 
