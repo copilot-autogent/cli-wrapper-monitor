@@ -1,0 +1,59 @@
+# Weekly stability digest — Discord heartbeat confirming the baseline is unchanged.
+#
+# Runs every Monday at 08:00 UTC.  On each run it:
+#   1. Reads the two most recent baseline snapshots from `baselines/`.
+#   2. Diffs them and generates a compact summary with emoji indicators.
+#   3. Posts the summary to Discord via DISCORD_WEBHOOK_URL.
+#
+# This is a "heartbeat" workflow — it always runs regardless of regressions.
+# A silent monitor is indistinguishable from a broken one; this proves liveness.
+#
+# Distinct from the reactive alert webhooks (#57/#67/#68): this is a scheduled
+# digest, not a regression alert.
+#
+# Secrets required:
+#   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → skips notification.
+name: Weekly Stability Digest
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Every Monday at 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print digest to log only; do not post to Discord'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  digest:
+    name: Generate and post stability digest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate and post weekly digest
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            npx tsx scripts/weekly-stability-digest.ts --dry-run
+          else
+            npx tsx scripts/weekly-stability-digest.ts
+          fi
