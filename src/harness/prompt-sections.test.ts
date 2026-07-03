@@ -109,13 +109,11 @@ describe('parsePromptSections', () => {
     expect(safety!.charCount).toBeGreaterThan(0);
   });
 
-  it('total charCount sums to approximately input length (±newlines)', () => {
+  it('total charCount sums to exactly input length', () => {
     const raw = MARKDOWN_H2_PROMPT;
     const sections = parsePromptSections(raw);
     const total = sections.reduce((sum, s) => sum + s.charCount, 0);
-    // The parser adds 1 for each newline from split; total should be near raw.length
-    expect(total).toBeGreaterThanOrEqual(raw.length);
-    expect(total).toBeLessThanOrEqual(raw.length + 5);
+    expect(total).toBe(raw.length);
   });
 
   it('handles bold-label sections', () => {

@@ -372,8 +372,8 @@ export function generatePromptSectionStackedBarSVG(
     `<text x="${PAD.left - 4}" y="${PAD.top + ph}" text-anchor="end" font-size="9" fill="#666">0</text>`,
   );
 
-  // Bars — use integer pixel heights and accumulate a running error term to
-  // prevent rounding drift from stacking segments outside the plot boundary.
+  // Bars — accumulate exact fractional heights and use floor to emit integer
+  // pixel segments. This ensures the total rendered height never exceeds `ph`.
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
     const x = PAD.left + Math.round((i / bars.length) * pw) + 1;
@@ -384,8 +384,9 @@ export function generatePromptSectionStackedBarSVG(
       if (sec.charCount === 0) continue;
       const exactH = (sec.charCount / maxTotal) * ph;
       heightAccum += exactH;
-      const segH = Math.max(1, Math.floor(heightAccum));
+      const segH = Math.floor(heightAccum);
       heightAccum -= segH;
+      if (segH <= 0) continue; // skip sub-pixel segments
       yBase -= segH;
       const colour = SECTION_COLORS[sec.name] ?? '#bdc3c7';
       lines.push(

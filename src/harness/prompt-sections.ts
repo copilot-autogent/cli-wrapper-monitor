@@ -58,10 +58,6 @@ function detectHeader(line: string): string | null {
   const boldMatch = trimmed.match(/^(?:\*\*|__)([^*_]+)(?:\*\*|__)[:.]?\s*$/);
   if (boldMatch) return canonicalise(boldMatch[1]);
 
-  // Standalone ALL-CAPS label (≥4 chars, optionally followed by colon)
-  const capsMatch = trimmed.match(/^([A-Z][A-Z\s]{3,})(?::.*)?$/);
-  if (capsMatch && !/[a-z]/.test(capsMatch[1])) return canonicalise(capsMatch[1]);
-
   return null;
 }
 
@@ -88,14 +84,17 @@ export function parsePromptSections(raw: string): PromptSection[] {
     buckets.set(name, (buckets.get(name) ?? 0) + n);
 
   let currentSection = 'Other';
+  const lines = raw.split('\n');
 
-  for (const line of raw.split('\n')) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const header = detectHeader(line);
     if (header !== null) {
       currentSection = header;
     }
-    // Account for the newline that was consumed by split
-    addChars(currentSection, line.length + 1);
+    // Add the line length; add 1 for the '\n' that split consumed, except
+    // on the final segment which had no trailing newline in the original string.
+    addChars(currentSection, line.length + (i < lines.length - 1 ? 1 : 0));
   }
 
   // Build output, filtering out zero-size buckets
