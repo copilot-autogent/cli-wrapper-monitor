@@ -201,6 +201,15 @@ describe('checkMonthlyBaseline', () => {
     expect(result.message).toContain('never');
   });
 
+  it('IS stale when only a future-dated baseline exists this month', () => {
+    const deps = makeDeps({
+      now: makeDate('2026-07-10'),
+      readdirSyncFn: () => ['2026-07-31.json'], // future date this month
+    });
+    const result = checkMonthlyBaseline(deps);
+    expect(result.stale).toBe(true);
+  });
+
   it('is NOT stale when monthly dir does not exist but today is in grace period', () => {
     const deps = makeDeps({
       now: makeDate('2026-07-02'),
@@ -235,7 +244,7 @@ describe('checkWeeklyBaseline', () => {
 
   it('IS stale when last capture is exactly at threshold', () => {
     // now = 2026-07-16, lastDate = 2026-07-07 → 9 calendar days apart (stale)
-    const now = new Date('2026-07-16T06:00:00Z');
+    const now = makeDate('2026-07-16');
     const lastDate = '2026-07-07'; // exactly 9 days before 2026-07-16
     const deps = makeDeps({
       now,
@@ -289,6 +298,17 @@ describe('checkWeeklyBaseline', () => {
     const result = checkWeeklyBaseline(deps);
     expect(result.stale).toBe(false);
     expect(result.message).toContain('8 day(s)');
+  });
+
+  it('is NOT stale when last baseline is future-dated (treats as 0 days old)', () => {
+    const now = makeDate('2026-07-10');
+    const deps = makeDeps({
+      now,
+      readdirSyncFn: () => ['2026-07-31.json'], // future date
+    });
+    const result = checkWeeklyBaseline(deps);
+    expect(result.stale).toBe(false);
+    expect(result.message).toContain('0 day(s)');
   });
 
   it('picks the most recent file from multiple weekly captures', () => {

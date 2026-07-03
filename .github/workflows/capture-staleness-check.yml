@@ -27,6 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    concurrency:
+      group: capture-staleness-check
+      cancel-in-progress: false
     steps:
       - name: Checkout cli-wrapper-monitor
         uses: actions/checkout@v4
@@ -56,8 +59,11 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          if [ "${{ steps.staleness.outputs.exit_code }}" = "0" ]; then
+          EXIT_CODE="${{ steps.staleness.outputs.exit_code }}"
+          if [ "${EXIT_CODE}" = "0" ]; then
             echo "✅ All capture checks fresh." >> "$GITHUB_STEP_SUMMARY"
-          else
+          elif [ "${EXIT_CODE}" = "1" ]; then
             echo "⚠️ Capture staleness detected. Check script output above; a Discord alert was fired if DISCORD_WEBHOOK_URL is configured." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ Staleness check did not run or encountered an infrastructure error (exit_code='${EXIT_CODE}')." >> "$GITHUB_STEP_SUMMARY"
           fi

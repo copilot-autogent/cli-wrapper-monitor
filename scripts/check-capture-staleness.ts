@@ -163,7 +163,13 @@ export function checkMonthlyBaseline(deps: StalenessCheckDeps = {}): CheckResult
     lastDate !== null &&
     (() => {
       const d = new Date(lastDate + 'T00:00:00Z');
-      return d.getUTCFullYear() === todayYear && d.getUTCMonth() === todayMonth;
+      // Reject future-dated baselines (clock-skew / misnamed files).
+      const startOfTodayMs = Date.UTC(todayYear, todayMonth, todayDom);
+      return (
+        d.getUTCFullYear() === todayYear &&
+        d.getUTCMonth() === todayMonth &&
+        d.getTime() <= startOfTodayMs
+      );
     })();
 
   const pastGracePeriod = todayDom >= alertThresholdDom;
@@ -207,12 +213,15 @@ export function checkWeeklyBaseline(deps: StalenessCheckDeps = {}): CheckResult 
     const startOfTodayMs =
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     const ageDays = Math.floor((startOfTodayMs - lastMs) / (1000 * 60 * 60 * 24));
+    // A negative age means the file is future-dated (clock-skew / misnamed);
+    // treat as fresh (0 days old) rather than masking as stale indefinitely.
+    const effectiveAgeDays = Math.max(0, ageDays);
 
-    stale = ageDays >= WEEKLY_STALENESS_THRESHOLD_DAYS;
+    stale = effectiveAgeDays >= WEEKLY_STALENESS_THRESHOLD_DAYS;
     if (stale) {
-      message = `⚠️  Weekly: last capture was ${ageDays} day(s) ago (${lastDate}) — threshold: ${WEEKLY_STALENESS_THRESHOLD_DAYS} days.`;
+      message = `⚠️  Weekly: last capture was ${effectiveAgeDays} day(s) ago (${lastDate}) — threshold: ${WEEKLY_STALENESS_THRESHOLD_DAYS} days.`;
     } else {
-      message = `✅ Weekly: captured ${ageDays} day(s) ago (${lastDate}).`;
+      message = `✅ Weekly: captured ${effectiveAgeDays} day(s) ago (${lastDate}).`;
     }
   }
 
