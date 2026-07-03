@@ -1,3 +1,32 @@
+// ---------------------------------------------------------------------------
+// Prompt section types
+// ---------------------------------------------------------------------------
+
+/** A named section of the system prompt with size measurements. */
+export interface PromptSection {
+  /** Canonical section name: "Tools", "Safety", "Introduction", or "Other" */
+  name: string;
+  /** Number of characters in this section */
+  charCount: number;
+  /** Rough token estimate (charCount / 4) */
+  tokenEstimate: number;
+}
+
+/** A per-section character-count delta between two snapshots. */
+export interface PromptSectionChange {
+  name: string;
+  /** null when the section did not exist in the baseline */
+  baselineCharCount: number | null;
+  /** null when the section was removed in the current snapshot */
+  currentCharCount: number | null;
+  /** current − baseline (or ±current when one side is missing) */
+  deltaAbsolute: number;
+  /** Percentage change; null when baseline was absent (can't compute %) */
+  deltaPct: number | null;
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Captured parameter-level schema for a single tool definition.
  * Enables detection of parameter additions, removals, and description drift.
@@ -134,6 +163,18 @@ export interface MetricSnapshot {
    * Absent in older baselines.
    */
   toolSchemaHash?: string;
+  /**
+   * Raw system prompt text captured at baseline time.
+   * Used for section-level parsing. Absent in older baselines.
+   * Not present in all capture configurations (e.g. when autogent source is unavailable).
+   */
+  rawSystemPrompt?: string;
+  /**
+   * Per-section character and token breakdown of the system prompt.
+   * Sections: "Tools", "Safety", "Introduction", "Other".
+   * Absent in older baselines that pre-date section attribution.
+   */
+  promptSections?: PromptSection[];
   /** Experiment results indexed by experiment name */
   experiments: Record<string, ExperimentResult>;
 }
@@ -216,6 +257,16 @@ export interface DiffReport {
   toolSchemaChanged: boolean;
   /** Per-tool schema changes: added/removed tools and parameter/description diffs */
   toolSchemaChanges: ToolSchemaChange[];
+  /**
+   * Per-section character-count deltas between the two snapshots.
+   * Empty when neither snapshot has promptSections data.
+   */
+  promptSectionChanges: PromptSectionChange[];
+  /**
+   * True when at least one of the two snapshots has promptSections data.
+   * False means section comparison is unavailable (show "section data unavailable").
+   */
+  promptSectionsAvailable: boolean;
   /**
    * Aggregate security regression score (0–100, higher = more regressed).
    * Components: tool removals (30 max), model pool drop (20), hook count drop (20),

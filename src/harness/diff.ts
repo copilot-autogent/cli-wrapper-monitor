@@ -1,5 +1,6 @@
-import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, ToolParamSchema, ToolSchemaChange } from './types.js';
+import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, PromptSectionChange, ToolParamSchema, ToolSchemaChange } from './types.js';
 import { classifyDeltaPct } from '../severity.js';
+import { diffPromptSections } from './prompt-sections.js';
 
 /**
  * Compute an aggregate security regression score (0–100, higher = more regressed).
@@ -349,6 +350,10 @@ export function diffSnapshots(
   const LEGACY_REGRESSION_THRESHOLD_PCT = 10;
   const hasRegressions = changes.some((c) => Math.abs(c.deltaPct) >= LEGACY_REGRESSION_THRESHOLD_PCT);
 
+  const promptSectionChanges = diffPromptSections(baseline.promptSections, current.promptSections);
+  const promptSectionsAvailable =
+    baseline.promptSections !== undefined || current.promptSections !== undefined;
+
   return {
     baseline,
     current,
@@ -364,6 +369,8 @@ export function diffSnapshots(
     modelPoolChanges,
     toolSchemaChanged,
     toolSchemaChanges,
+    promptSectionChanges,
+    promptSectionsAvailable,
     securityPostureScore: computeSecurityPostureScore(
       baseline,
       current,
@@ -516,6 +523,32 @@ export function formatDiffReport(report: DiffReport): string {
     }
   } else if (report.baseline.toolSchemas !== undefined && report.current.toolSchemas !== undefined) {
     lines.push('', '## Tool Schema Changes', '', '> No tool schema changes detected.', '');
+  }
+
+  // Prompt section changes
+  lines.push('', '## Prompt Section Changes', '');
+  if (!report.promptSectionsAvailable) {
+    lines.push('> _Section data unavailable — baselines pre-date section attribution._');
+  } else if (report.promptSectionChanges.length === 0) {
+    lines.push('> No prompt section changes detected.');
+  } else {
+    for (const change of report.promptSectionChanges) {
+      const sign = change.deltaAbsolute >= 0 ? '+' : '';
+      const pctStr =
+        change.deltaPct !== null ? ` (${sign}${change.deltaPct.toFixed(1)}%)` : ' (new)';
+      const icon = change.deltaAbsolute > 0 ? '📈' : change.deltaAbsolute < 0 ? '📉' : '🟢';
+      const from =
+        change.baselineCharCount !== null
+          ? `${change.baselineCharCount.toLocaleString()} chars`
+          : '_(new)_';
+      const to =
+        change.currentCharCount !== null
+          ? `${change.currentCharCount.toLocaleString()} chars`
+          : '_(removed)_';
+      lines.push(
+        `${icon} **${change.name}**: ${from} → ${to} (${sign}${change.deltaAbsolute.toLocaleString()} chars${pctStr})`,
+      );
+    }
   }
 
   return lines.join('\n');

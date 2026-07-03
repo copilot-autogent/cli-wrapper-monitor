@@ -23,6 +23,9 @@ import {
   extractRegressions,
   extractModelPoolHistory,
   generateSparklineSVG,
+  extractPromptSectionBars,
+  generatePromptSectionStackedBarSVG,
+  SECTION_COLORS,
   type SummaryCardData,
   type RegressionEntry,
   type ModelPoolEntry,
@@ -381,6 +384,33 @@ function renderChangeVelocity(snapshots: MetricSnapshot[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt section breakdown chart renderer
+// ---------------------------------------------------------------------------
+
+function renderPromptSectionBreakdown(bars: import("../src/harness/dashboard.js").PromptSectionBar[]): string {
+  const svg = generatePromptSectionStackedBarSVG(bars, { width: 700, height: 180 });
+  const legendItems = ['Introduction', 'Safety', 'Tools', 'Other']
+    .map((name) => {
+      const colour = SECTION_COLORS[name] ?? '#bdc3c7';
+      return `<span class="legend-dot" style="background:${colour}"></span>${name}`;
+    })
+    .join(' ');
+
+  return `
+<section class="section sparklines-section">
+  <h2>System Prompt Section Breakdown</h2>
+  <p style="font-size:0.85em;color:#666;margin:0 0 0.5rem">Character distribution across named prompt sections over time. Old baselines show "No section data available".</p>
+  <div class="chart-wrap">${svg}</div>
+  <div class="legend" style="font-size:0.8em;margin-top:0.5rem;display:flex;gap:1rem;flex-wrap:wrap">
+    ${legendItems}
+  </div>
+</section>
+<style>
+  .legend-dot { display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:3px;vertical-align:middle; }
+</style>`;
+}
+
+// ---------------------------------------------------------------------------
 // Full HTML generation
 // ---------------------------------------------------------------------------
 
@@ -397,12 +427,14 @@ function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
   const injectionSeries = extractInjectionRefusalSeries(snapshots);
   const regressions = extractRegressions(snapshots);
   const modelHistory = extractModelPoolHistory(snapshots);
+  const sectionBars = extractPromptSectionBars(snapshots);
 
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
   const sparklinesSection = renderSparklines(toolSeries, tokensSeries, injectionSeries);
   const velocitySection = renderChangeVelocity(snapshots);
   const regressionsSection = renderRegressionTimeline(regressions, snapshotCount);
   const modelPoolSection = renderModelPool(modelHistory, snapshotCount);
+  const sectionBreakdownSection = renderPromptSectionBreakdown(sectionBars);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -638,6 +670,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
   <main>
     ${summarySection}
     ${sparklinesSection}
+    ${sectionBreakdownSection}
     ${velocitySection}
     ${regressionsSection}
     ${modelPoolSection}
