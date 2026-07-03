@@ -70,12 +70,20 @@ describe('effectiveSchemaVersion', () => {
     expect(effectiveSchemaVersion(legacyBaseline09())).toBe('0.9');
   });
 
+  it('returns "0.9" for null schemaVersion', () => {
+    expect(effectiveSchemaVersion({ schemaVersion: null })).toBe('0.9');
+  });
+
+  it('returns "0.9" for numeric schemaVersion (non-string)', () => {
+    expect(effectiveSchemaVersion({ schemaVersion: 1 })).toBe('0.9');
+  });
+
   it('returns "1.0" for a 1.0 baseline', () => {
     expect(effectiveSchemaVersion({ schemaVersion: '1.0' })).toBe('1.0');
   });
 
-  it('returns "0.9" for unknown version (treats as legacy)', () => {
-    expect(effectiveSchemaVersion({ schemaVersion: 'X.Y' })).toBe('0.9');
+  it('throws for an unrecognised future version string', () => {
+    expect(() => effectiveSchemaVersion({ schemaVersion: '99.0' })).toThrow(/Unrecognised schemaVersion/);
   });
 });
 
@@ -202,6 +210,14 @@ describe('migrate — already at target', () => {
 describe('migrate — error cases', () => {
   it('throws for unknown target version', () => {
     expect(() => migrate(legacyBaseline09(), 'X.Y')).toThrow(/Unknown target schema version/);
+  });
+
+  it('throws on downgrade attempt (1.0 → 0.9)', () => {
+    expect(() => migrate(currentBaseline10(), '0.9')).toThrow(/Cannot downgrade/);
+  });
+
+  it('throws for a future unrecognised source version', () => {
+    expect(() => migrate({ ...legacyBaseline09(), schemaVersion: '99.0' })).toThrow(/Unrecognised schemaVersion/);
   });
 
   it('throws for null input', () => {

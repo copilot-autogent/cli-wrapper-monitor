@@ -71,10 +71,22 @@ function versionIndex(version: string): number {
   return VERSION_ORDER.indexOf(version);
 }
 
-/** Determine the effective schema version of a raw baseline object. */
+/**
+ * Determine the effective schema version of a raw baseline object.
+ *
+ * - Missing or non-string `schemaVersion` → "0.9" (legacy, pre-versioning).
+ * - A string value that is NOT in VERSION_ORDER (e.g. a future "1.1") →
+ *   throws, because silently treating it as 0.9 would corrupt newer fields.
+ */
 export function effectiveSchemaVersion(baseline: RawBaseline): string {
   const v = baseline['schemaVersion'];
-  return typeof v === 'string' && versionIndex(v) !== -1 ? v : '0.9';
+  if (v === undefined || v === null) return '0.9';
+  if (typeof v !== 'string') return '0.9';
+  if (versionIndex(v) !== -1) return v;
+  throw new Error(
+    `Unrecognised schemaVersion "${v}". This baseline was produced by a newer version of the migrator. ` +
+    `Known versions: ${VERSION_ORDER.join(', ')}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -110,9 +122,11 @@ export function migrate(
   const fromIdx = versionIndex(from);
   const toIdx = versionIndex(targetVersion);
 
-  if (fromIdx === -1) {
-    // Unknown source version — best-effort: treat as 0.9
-    current['schemaVersion'] = '0.9';
+  if (toIdx < fromIdx) {
+    throw new Error(
+      `Cannot downgrade baseline from schema version "${from}" to "${targetVersion}". ` +
+      `Downgrades are not supported.`,
+    );
   }
 
   // Apply each step between current and target

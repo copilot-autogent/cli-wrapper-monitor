@@ -23,7 +23,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { diffSnapshots } from "../src/harness/diff.js";
-import { validateBaselineFile } from "../src/harness/validator.js";
+import { validateSnapshot } from "../src/harness/validator.js";
 import { migrate, CURRENT_SCHEMA_VERSION } from "../src/harness/baseline-migrator.js";
 import {
   BREAKING_THRESHOLD_PCT,
@@ -77,9 +77,20 @@ function loadSnapshot(path: string): MetricSnapshot {
   } catch (err) {
     throw new Error(`Invalid JSON in ${abs}: ${String(err)}`);
   }
-  // Auto-migrate to current schema before comparing so schema mismatches
-  // don't cause undefined-field errors or silent data skips.
-  return migrate(parsed, CURRENT_SCHEMA_VERSION);
+  // Migrate to current schema first, then validate — so the validator sees
+  // the fully-populated fields rather than the raw legacy object.
+  let migrated: MetricSnapshot;
+  try {
+    migrated = migrate(parsed, CURRENT_SCHEMA_VERSION);
+  } catch (err) {
+    throw new Error(`Schema migration failed for ${abs}: ${String(err)}`);
+  }
+  const result = validateSnapshot(migrated);
+  if (!result.valid) {
+    const msgs = result.errors.map((e) => `  [${e.field}] ${e.message}`).join('\n');
+    throw new Error(`Baseline validation failed after migration for ${abs}:\n${msgs}`);
+  }
+  return migrated;
 }
 
 function shortDate(capturedAt: unknown): string {
@@ -323,27 +334,8 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
 async function main(): Promise<void> {
   const { a, b, json: jsonMode, output } = parseArgs();
 
-  // Pre-validate both input files before attempting the diff.
-  // Validation runs on the raw file; migration happens inside loadSnapshot().
-  for (const [label, filePath] of [["file-a", a], ["file-b", b]] as [string, string][]) {
-    const result = validateBaselineFile(resolve(filePath));
-    if (!result.valid) {
-      // Check if the only errors are about the (optional) schemaVersion field;
-      // those are handled by auto-migration in loadSnapshot(), not fatal here.
-      const nonMigrationErrors = result.errors.filter(
-        (e) => e.field !== 'schemaVersion',
-      );
-      if (nonMigrationErrors.length > 0) {
-        console.error(`Error: baseline integrity check failed for ${label} (${filePath}):`);
-        for (const err of nonMigrationErrors) {
-          console.error(`  [${err.field}] ${err.message}`);
-        }
-        process.exit(1);
-      }
-    }
-  }
-
-  // loadSnapshot auto-migrates each baseline to the current schema version.
+  // loadSnapshot() auto-migrates each baseline to the current schema version
+  // and validates the result after migration.  No pre-validation needed here.
   const snapA = loadSnapshot(a), snapB = loadSnapshot(b);
   const report = diffSnapshots(snapA, snapB);
   let content: string;

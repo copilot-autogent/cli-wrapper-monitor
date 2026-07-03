@@ -20,7 +20,8 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { migrate, CURRENT_SCHEMA_VERSION, effectiveSchemaVersion } from '../src/harness/baseline-migrator.js';
 import { validateSnapshot } from '../src/harness/validator.js';
 
@@ -45,7 +46,7 @@ function parseArgs(): CliArgs {
 // File discovery
 // ---------------------------------------------------------------------------
 
-const REPO_ROOT = resolve(import.meta.dirname ?? process.cwd(), '..');
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_DIRS = [
   join(REPO_ROOT, 'baselines'),
   join(REPO_ROOT, 'baselines', 'weekly'),
