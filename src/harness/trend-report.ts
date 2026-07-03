@@ -142,6 +142,230 @@ function delta(base: number | null, current: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Trend matrix
+// ---------------------------------------------------------------------------
+
+/** A single lookback window for the trend matrix. */
+export interface TrendWindow {
+  /** Human-readable label, e.g. "Week", "Month". */
+  label: string;
+  /** Lookback period in days. */
+  days: number;
+}
+
+/** Default window set (7d / 30d / 90d / 180d). */
+export const DEFAULT_TREND_WINDOWS: TrendWindow[] = [
+  { label: "Week",    days: 7   },
+  { label: "Month",   days: 30  },
+  { label: "3-month", days: 90  },
+  { label: "6-month", days: 180 },
+];
+
+/** Formatted cell value for a single metric × window intersection. */
+export interface TrendMatrixCell {
+  /** The formatted string to display, e.g. "+800", "87.5%", "—". */
+  formatted: string;
+  /** ISO date of the reference snapshot used for this window; null when no data. */
+  referenceDate: string | null;
+}
+
+/** A single metric row in the trend matrix. */
+export interface TrendMatrixRow {
+  metric: string;
+  cells: TrendMatrixCell[];
+}
+
+/** Full trend matrix result. */
+export interface TrendMatrix {
+  windows: TrendWindow[];
+  rows: TrendMatrixRow[];
+  /** ISO date string of the current (most-recent) snapshot. */
+  currentDate: string;
+}
+
+/**
+ * Given an ordered list of snapshots and a reference time, find the latest
+ * snapshot whose capturedAt is on or before (referenceMs).
+ * Returns null when no qualifying snapshot exists.
+ */
+function findReferenceSnapshot(
+  sorted: MetricSnapshot[],
+  referenceMs: number
+): MetricSnapshot | null {
+  let best: MetricSnapshot | null = null;
+  for (const snap of sorted) {
+    const t = new Date(snap.capturedAt).getTime();
+    if (t <= referenceMs) best = snap;
+    else break; // sorted ascending — no need to continue
+  }
+  return best;
+}
+
+function fmtDeltaAbsolute(delta: number): string {
+  const sign = delta >= 0 ? "+" : "−";
+  return `${sign}${Math.abs(delta).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+function fmtDeltaPct(current: number, reference: number): string {
+  if (reference === 0) return "—";
+  const pct = ((current - reference) / reference) * 100;
+  const sign = pct >= 0 ? "+" : "−";
+  return `${sign}${Math.abs(pct).toFixed(0)}%`;
+}
+
+/**
+ * Build a pairwise delta matrix across the supplied lookback windows.
+ *
+ * - The most-recent snapshot is treated as "current".
+ * - For each window, the reference snapshot is the latest capture whose
+ *   capturedAt ≤ (currentTime − window.days * 86_400_000 ms).
+ * - systemPromptChars and toolCount show absolute deltas (current − reference).
+ *   systemPromptChars also appends a percentage when |Δ%| ≥ 10.
+ * - injectionRefusedRate shows the reference value as a percentage.
+ * - securityPostureScore shows the reference snapshot's score (using diffSnapshots).
+ * - Any metric absent from the reference snapshot renders as "—".
+ *
+ * Gracefully returns an empty matrix when fewer than 2 snapshots are provided.
+ */
+export function buildTrendMatrix(
+  snapshots: MetricSnapshot[],
+  windows: TrendWindow[] = DEFAULT_TREND_WINDOWS
+): TrendMatrix {
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
+  );
+
+  const currentSnap = sorted[sorted.length - 1];
+  const currentDate = currentSnap
+    ? new Date(currentSnap.capturedAt).toISOString().slice(0, 10)
+    : "";
+
+  if (sorted.length < 2) {
+    return {
+      windows,
+      rows: [],
+      currentDate,
+    };
+  }
+
+  const currentRow = extractTrendRow(currentSnap);
+  const currentMs = new Date(currentSnap.capturedAt).getTime();
+
+  // Resolve reference snapshots for each window (excluding currentSnap itself)
+  const snapshotsWithoutCurrent = sorted.slice(0, sorted.length - 1);
+
+  const refs = windows.map((w) => {
+    const refMs = currentMs - w.days * 86_400_000;
+    return findReferenceSnapshot(snapshotsWithoutCurrent, refMs);
+  });
+
+  function makeCell(
+    build: (ref: MetricSnapshot, refRow: TrendRow) => string,
+    ref: MetricSnapshot | null
+  ): TrendMatrixCell {
+    if (ref === null) {
+      return { formatted: "—", referenceDate: null };
+    }
+    const refRow = extractTrendRow(ref);
+    return {
+      formatted: build(ref, refRow),
+      referenceDate: new Date(ref.capturedAt).toISOString().slice(0, 10),
+    };
+  }
+
+  // --- systemPromptChars row ---
+  const charsRow: TrendMatrixRow = {
+    metric: "System prompt chars",
+    cells: refs.map((ref) =>
+      makeCell((_ref, refRow) => {
+        if (currentRow.systemPromptChars === null || refRow.systemPromptChars === null) return "—";
+        const delta = currentRow.systemPromptChars - refRow.systemPromptChars;
+        const absDelta = fmtDeltaAbsolute(delta);
+        if (refRow.systemPromptChars !== 0) {
+          const pct = Math.abs(((delta) / refRow.systemPromptChars) * 100);
+          if (pct >= 10) return fmtDeltaPct(currentRow.systemPromptChars, refRow.systemPromptChars);
+        }
+        return absDelta;
+      }, ref)
+    ),
+  };
+
+  // --- toolCount row ---
+  const toolRow: TrendMatrixRow = {
+    metric: "Tool count",
+    cells: refs.map((ref) =>
+      makeCell((_ref, refRow) => {
+        if (currentRow.toolCount === null || refRow.toolCount === null) return "—";
+        return fmtDeltaAbsolute(currentRow.toolCount - refRow.toolCount);
+      }, ref)
+    ),
+  };
+
+  // --- injectionRefusedRate row ---
+  // Shows the rate AT the reference snapshot (so you can see historical drift).
+  const injectionRow: TrendMatrixRow = {
+    metric: "Injection refusal rate",
+    cells: refs.map((ref) =>
+      makeCell((_ref, refRow) => {
+        if (refRow.injectionRefusedRate === null) return "—";
+        return `${(refRow.injectionRefusedRate * 100).toFixed(1)}%`;
+      }, ref)
+    ),
+  };
+
+  // --- securityPostureScore row ---
+  // Shows the score at the reference snapshot (computed from its previous snapshot).
+  // For simplicity we use the snapshot immediately before each reference.
+  const securityRow: TrendMatrixRow = {
+    metric: "Security posture score",
+    cells: refs.map((ref) => {
+      if (ref === null) return { formatted: "—", referenceDate: null };
+      const refIdx = snapshotsWithoutCurrent.indexOf(ref);
+      const prev = refIdx > 0 ? snapshotsWithoutCurrent[refIdx - 1] : undefined;
+      const refRow = extractTrendRow(ref, prev);
+      const score = refRow.securityPostureScore;
+      return {
+        formatted: score !== null ? String(score) : "—",
+        referenceDate: new Date(ref.capturedAt).toISOString().slice(0, 10),
+      };
+    }),
+  };
+
+  return {
+    windows,
+    rows: [charsRow, toolRow, injectionRow, securityRow],
+    currentDate,
+  };
+}
+
+/**
+ * Render a TrendMatrix as a Markdown table string.
+ *
+ * Example output:
+ *   | Metric                 | Week | Month | 3-month | 6-month |
+ *   |------------------------|------|-------|---------|---------|
+ *   | System prompt chars    | +0   | +800  | +1,200  | +54%    |
+ *   ...
+ */
+export function buildTrendMatrixMarkdown(matrix: TrendMatrix): string {
+  if (matrix.rows.length === 0) {
+    return "> **Not enough snapshots to build a trend matrix.** Capture at least 2 baselines.";
+  }
+
+  const windowLabels = matrix.windows.map((w) => w.label);
+  const header = `| Metric | ${windowLabels.join(" | ")} |`;
+  const sep = `|--------|${windowLabels.map(() => "------").join("|")}|`;
+  const lines: string[] = [header, sep];
+
+  for (const row of matrix.rows) {
+    const cells = row.cells.map((c) => c.formatted);
+    lines.push(`| ${row.metric} | ${cells.join(" | ")} |`);
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Report generator
 // ---------------------------------------------------------------------------
 
