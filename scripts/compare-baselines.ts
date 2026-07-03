@@ -34,14 +34,19 @@ import {
   sendToolRemovedWebhook,
   sendModelRemovedWebhook,
   sendHookChangedWebhook,
+  buildSeveritySummaryAlert,
+  buildToolRemovedAlert,
+  buildModelRemovedAlert,
+  buildHookChangedAlert,
   type SeverityLevel,
 } from "../src/severity.js";
+import { bundleWebhooks, type WebhookAlert } from "../src/harness/webhook-utils.js";
 
-interface CliArgs { a: string; b: string; json: boolean; output: string | null; }
+interface CliArgs { a: string; b: string; json: boolean; output: string | null; noBundle: boolean; }
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
-  let a = "", b = "", jsonMode = false;
+  let a = "", b = "", jsonMode = false, noBundle = false;
   let output: string | null = null;
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -49,6 +54,7 @@ function parseArgs(): CliArgs {
     else if (args[i] === "--b" && args[i + 1] && !args[i + 1].startsWith("--")) { b = args[++i]; }
     else if (args[i] === "--json") { jsonMode = true; }
     else if (args[i] === "--output" && args[i + 1] && !args[i + 1].startsWith("--")) { output = args[++i]; }
+    else if (args[i] === "--no-bundle") { noBundle = true; }
     else if (args[i].startsWith("--")) {
       const hasValue = args[i + 1] !== undefined && !args[i + 1].startsWith("--");
       console.warn(`Warning: unrecognized flag "${args[i]}" — ignored.`);
@@ -58,14 +64,15 @@ function parseArgs(): CliArgs {
   if (!a && positional[0]) a = positional[0];
   if (!b && positional[1]) b = positional[1];
   if (!a || !b) {
-    console.error("Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>]\n" +
+    console.error("Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>] [--no-bundle]\n" +
       "  file-a           Path to the older (reference) baseline JSON\n" +
       "  file-b           Path to the newer baseline JSON\n" +
       "  --json           Output raw DiffReport JSON instead of Markdown\n" +
-      "  --output <path>  Write report to file");
+      "  --output <path>  Write report to file\n" +
+      "  --no-bundle      Send individual Discord webhooks instead of bundling (useful for debugging)");
     process.exit(1);
   }
-  return { a, b, json: jsonMode, output };
+  return { a, b, json: jsonMode, output, noBundle };
 }
 
 function loadSnapshot(path: string): MetricSnapshot {
@@ -332,7 +339,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
 }
 
 async function main(): Promise<void> {
-  const { a, b, json: jsonMode, output } = parseArgs();
+  const { a, b, json: jsonMode, output, noBundle } = parseArgs();
 
   // loadSnapshot() auto-migrates each baseline to the current schema version
   // and validates the result after migration.  No pre-validation needed here.
@@ -351,10 +358,6 @@ async function main(): Promise<void> {
     ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
     : undefined;
   const dateA = shortDate(snapA.capturedAt), dateB = shortDate(snapB.capturedAt);
-  await sendSeveritySummaryWebhook(
-    { ...report.severitySummary, securityPostureScore: report.securityPostureScore },
-    dateA, dateB, ciRunUrl,
-  );
 
   // Fire a dedicated alert for removed tools — high-signal event warranting its own message.
   // Covers two cases:
@@ -367,18 +370,11 @@ async function main(): Promise<void> {
   const toolsToAlert = schemaDisappeared
     ? ['(all tools — schema capture missing in current snapshot)']
     : removedTools;
-  await sendToolRemovedWebhook(toolsToAlert, dateA, dateB, ciRunUrl);
 
-  // Fire a dedicated alert for removed models — high-signal event warranting its own message.
   const removedModels = report.modelPoolChanges
     .filter((c) => c.type === 'removed')
     .map((c) => c.modelId);
-  await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
 
-  // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
-  // Only fire when baseline had hook tracking (baselineHookCount defined), matching
-  // diff.ts's gate — avoids false-positive BREAKING on first comparison after
-  // hook tracking was introduced to older baselines.
   const hookCountDropped =
     snapA.hookCount !== undefined &&
     (snapB.hookCount === undefined || snapB.hookCount < snapA.hookCount);
@@ -386,25 +382,91 @@ async function main(): Promise<void> {
     snapA.hookCount !== undefined &&
     snapB.hookCount !== undefined &&
     snapB.hookCount > snapA.hookCount;
-  // Use report.warnings as the source of truth (populated by diff.ts, avoids duplicating logic).
   const hookBodyWarnings = report.warnings.filter((w) => w.startsWith('Hook body'));
 
-  if (hookCountDropped || hookCountIncreased) {
-    const changeType = hookCountDropped ? 'removed' : 'added';
-    await sendHookChangedWebhook(
-      changeType,
-      { before: snapA.hookCount, after: snapB.hookCount },
-      { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+  if (noBundle) {
+    // --no-bundle: send each alert individually (useful for debugging)
+    await sendSeveritySummaryWebhook(
+      { ...report.severitySummary, securityPostureScore: report.securityPostureScore },
       dateA, dateB, ciRunUrl,
     );
-  }
-  if (hookBodyWarnings.length > 0) {
-    await sendHookChangedWebhook(
-      'body_changed',
-      { before: snapA.hookCount, after: snapB.hookCount },
-      { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+    await sendToolRemovedWebhook(toolsToAlert, dateA, dateB, ciRunUrl);
+    // Fire a dedicated alert for removed models — high-signal event warranting its own message.
+    await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
+    // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
+    // Only fire when baseline had hook tracking (baselineHookCount defined), matching
+    // diff.ts's gate — avoids false-positive BREAKING on first comparison after
+    // hook tracking was introduced to older baselines.
+    if (hookCountDropped || hookCountIncreased) {
+      const changeType = hookCountDropped ? 'removed' : 'added';
+      await sendHookChangedWebhook(
+        changeType,
+        { before: snapA.hookCount, after: snapB.hookCount },
+        { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+        dateA, dateB, ciRunUrl,
+      );
+    }
+    // Use report.warnings as the source of truth (populated by diff.ts, avoids duplicating logic).
+    if (hookBodyWarnings.length > 0) {
+      await sendHookChangedWebhook(
+        'body_changed',
+        { before: snapA.hookCount, after: snapB.hookCount },
+        { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+        dateA, dateB, ciRunUrl,
+      );
+    }
+  } else {
+    // Default: collect all alerts and send as one bundled Discord message (≤1 ping per run).
+    //
+    // The severity summary is included as a section but NOT counted in the "N issues detected"
+    // header — it is a meta overview, not itself a distinct regression event. Specific event
+    // alerts (tool removed, model removed, hook changed) drive the count.
+    const summaryAlert = buildSeveritySummaryAlert(
+      { ...report.severitySummary, securityPostureScore: report.securityPostureScore },
       dateA, dateB, ciRunUrl,
     );
+
+    // Specific event alerts — each represents a distinct regression event.
+    const specificAlerts: WebhookAlert[] = [
+      buildToolRemovedAlert(toolsToAlert, dateA, dateB, ciRunUrl),
+      buildModelRemovedAlert(removedModels, dateA, dateB, ciRunUrl),
+    ].filter((a): a is WebhookAlert => a !== null);
+
+    // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
+    // Only fire when baseline had hook tracking (baselineHookCount defined), matching
+    // diff.ts's gate — avoids false-positive BREAKING on first comparison after
+    // hook tracking was introduced to older baselines.
+    if (hookCountDropped || hookCountIncreased) {
+      const changeType = hookCountDropped ? 'removed' : 'added';
+      specificAlerts.push(buildHookChangedAlert(
+        changeType,
+        { before: snapA.hookCount, after: snapB.hookCount },
+        { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+        dateA, dateB, ciRunUrl,
+      ));
+    }
+    // Use report.warnings as the source of truth (populated by diff.ts, avoids duplicating logic).
+    if (hookBodyWarnings.length > 0) {
+      specificAlerts.push(buildHookChangedAlert(
+        'body_changed',
+        { before: snapA.hookCount, after: snapB.hookCount },
+        { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
+        dateA, dateB, ciRunUrl,
+      ));
+    }
+
+    // Specific event alerts are listed first so they are prioritised by the greedy bundler when
+    // space is tight. The severity summary (a meta overview) is appended last so it's the section
+    // most likely to be dropped if the combined content nears the 2000-char limit.
+    // Pass specificAlerts.length as issueCount so the bundle header counts only distinct regression
+    // events — not the summary entry itself.
+    // When there are no specific events, allAlerts has at most 1 entry (the summary) and
+    // bundleWebhooks uses the single-alert pass-through path — issueCount is not consulted.
+    const allAlerts: WebhookAlert[] = [
+      ...specificAlerts,
+      ...(summaryAlert ? [summaryAlert] : []),
+    ];
+    await bundleWebhooks(allAlerts, undefined, specificAlerts.length);
   }
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.

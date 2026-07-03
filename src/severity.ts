@@ -5,7 +5,9 @@
  * data from July 2026 establishes reference points (see issue #16).
  */
 
-import { sendWebhookWithRetry } from './harness/webhook-utils.js';
+import { sendWebhookWithRetry, type AlertSeverity, type WebhookAlert } from './harness/webhook-utils.js';
+
+export type { AlertSeverity, WebhookAlert } from './harness/webhook-utils.js';
 
 /** Metric change > this threshold (%) is classified as BREAKING. */
 export const BREAKING_THRESHOLD_PCT = 15;
@@ -53,6 +55,51 @@ export interface SeveritySummary {
 }
 
 /**
+ * Build a Discord alert payload when one or more named tools are removed between baselines.
+ *
+ * Returns `null` when `removedTools` is empty (nothing to alert on).
+ */
+export function buildToolRemovedAlert(
+  removedTools: string[],
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): WebhookAlert | null {
+  if (removedTools.length === 0) return null;
+
+  const header =
+    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}` +
+    (ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '');
+
+  const DISCORD_MAX_CONTENT = 2000;
+  const sanitize = (name: string) => name.replace(/[`\n\r]/g, '_');
+  const toolEntries = removedTools.map((t) => `\`${sanitize(t)}\``);
+  let toolList = toolEntries.join(', ');
+  const REMOVED_PREFIX = '\nRemoved: ';
+  const headerAndPrefix = header.length + REMOVED_PREFIX.length;
+  if (headerAndPrefix + toolList.length > DISCORD_MAX_CONTENT) {
+    let kept = 0;
+    let running = 0;
+    for (let i = 0; i < toolEntries.length; i++) {
+      const remaining = toolEntries.length - (i + 1);
+      const suffix = remaining > 0 ? `, …and ${remaining} more` : '';
+      const add = (i > 0 ? 2 : 0) + toolEntries[i].length;
+      const projectedTotal = headerAndPrefix + running + add + suffix.length;
+      if (projectedTotal > DISCORD_MAX_CONTENT) break;
+      running += add;
+      kept++;
+    }
+    const remaining = toolEntries.length - kept;
+    const sep = kept > 0 ? ', ' : '';
+    toolList = toolEntries.slice(0, kept).join(', ') + (remaining > 0 ? `${sep}…and ${remaining} more` : '');
+    const full = header + REMOVED_PREFIX + toolList;
+    if (full.length > DISCORD_MAX_CONTENT) toolList = '';
+  }
+  const content = header + REMOVED_PREFIX + toolList;
+  return { content, alertType: 'tool-removed', severity: 'BREAKING' };
+}
+
+/**
  * Send a dedicated Discord webhook alert when one or more named tools are
  * removed between baselines.
  *
@@ -68,66 +115,22 @@ export async function sendToolRemovedWebhook(
 ): Promise<void> {
   const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
   if (!webhookUrl || !webhookUrl.trim()) return;
-  if (removedTools.length === 0) return;
-
-  const header =
-    `🚨 **BREAKING: Tool removed** — ${dateA} vs ${dateB}` +
-    (ciRunUrl ? `\n🔗 CI run: ${ciRunUrl}` : '');
-
-  const DISCORD_MAX_CONTENT = 2000;
-  // Build tool list with graceful truncation: if the full list overflows, keep
-  // as many tool names as fit and append "…and N more" so the alert is never
-  // silently incomplete. Tool names are sanitised to strip backticks/newlines
-  // that could break out of Discord code spans.
-  const sanitize = (name: string) => name.replace(/[`\n\r]/g, '_');
-  const toolEntries = removedTools.map((t) => `\`${sanitize(t)}\``);
-  let toolList = toolEntries.join(', ');
-  const REMOVED_PREFIX = '\nRemoved: ';
-  const headerAndPrefix = header.length + REMOVED_PREFIX.length;
-  if (headerAndPrefix + toolList.length > DISCORD_MAX_CONTENT) {
-    // Iteratively find how many entries fit, accounting for a computed suffix.
-    let kept = 0;
-    let running = 0;
-    for (let i = 0; i < toolEntries.length; i++) {
-      const remaining = toolEntries.length - (i + 1);
-      const suffix = remaining > 0 ? `, …and ${remaining} more` : '';
-      const add = (i > 0 ? 2 : 0) + toolEntries[i].length; // 2 for ", "
-      const projectedTotal = headerAndPrefix + running + add + suffix.length;
-      if (projectedTotal > DISCORD_MAX_CONTENT) break;
-      running += add;
-      kept++;
-    }
-    const remaining = toolEntries.length - kept;
-    const sep = kept > 0 ? ', ' : '';
-    toolList = toolEntries.slice(0, kept).join(', ') + (remaining > 0 ? `${sep}…and ${remaining} more` : '');
-    // Final safety clamp in case header itself is pathologically long.
-    const full = header + REMOVED_PREFIX + toolList;
-    if (full.length > DISCORD_MAX_CONTENT) {
-      toolList = '';
-    }
-  }
-  const content = header + REMOVED_PREFIX + toolList;
-
-  await sendWebhookWithRetry(webhookUrl, { content }, 'tool-removed');
+  const alert = buildToolRemovedAlert(removedTools, dateA, dateB, ciRunUrl);
+  if (!alert) return;
+  await sendWebhookWithRetry(webhookUrl, { content: alert.content }, alert.alertType);
 }
 
 /**
- * Send a dedicated Discord webhook alert when one or more models are removed
- * from the pool between baselines.
- *
- * Reads DISCORD_WEBHOOK_URL from the environment. Silently no-ops when the
- * env var is absent or when removedModels is empty. Network errors and non-2xx
- * responses are caught and logged as warnings.
+ * Build a Discord alert payload when one or more models are removed from the pool
+ * between baselines. Returns `null` when `removedModels` is empty.
  */
-export async function sendModelRemovedWebhook(
+export function buildModelRemovedAlert(
   removedModels: string[],
   dateA: string,
   dateB: string,
   ciRunUrl?: string,
-): Promise<void> {
-  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
-  if (!webhookUrl || !webhookUrl.trim()) return;
-  if (removedModels.length === 0) return;
+): WebhookAlert | null {
+  if (removedModels.length === 0) return null;
 
   const header =
     `🚨 **BREAKING: Model removed from pool** — ${dateA} vs ${dateB}` +
@@ -155,36 +158,47 @@ export async function sendModelRemovedWebhook(
     const sep = kept > 0 ? ', ' : '';
     modelList = modelEntries.slice(0, kept).join(', ') + (remaining > 0 ? `${sep}…and ${remaining} more` : '');
     const full = header + REMOVED_PREFIX + modelList;
-    if (full.length > DISCORD_MAX_CONTENT) {
-      modelList = '';
-    }
+    if (full.length > DISCORD_MAX_CONTENT) modelList = '';
   }
   const content = header + REMOVED_PREFIX + modelList;
-
-  await sendWebhookWithRetry(webhookUrl, { content }, 'model-removed');
+  return { content, alertType: 'model-removed', severity: 'BREAKING' };
 }
 
 /**
- * Send a dedicated Discord webhook alert when hook fingerprints change
- * between baselines.
- *
- * - `changeType` 'added' or 'removed' → BREAKING (hook count changed)
- * - `changeType` 'body_changed' → WARNING (same count, different source hash)
+ * Send a dedicated Discord webhook alert when one or more models are removed
+ * from the pool between baselines.
  *
  * Reads DISCORD_WEBHOOK_URL from the environment. Silently no-ops when the
- * env var is absent or empty. Network errors are caught and logged as warnings.
+ * env var is absent or when removedModels is empty. Network errors and non-2xx
+ * responses are caught and logged as warnings.
  */
-export async function sendHookChangedWebhook(
-  changeType: 'added' | 'removed' | 'body_changed',
-  counts: { before: number | undefined; after: number | undefined },
-  hashes: { before: string | undefined; after: string | undefined },
+export async function sendModelRemovedWebhook(
+  removedModels: string[],
   dateA: string,
   dateB: string,
   ciRunUrl?: string,
 ): Promise<void> {
   const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
   if (!webhookUrl || !webhookUrl.trim()) return;
+  const alert = buildModelRemovedAlert(removedModels, dateA, dateB, ciRunUrl);
+  if (!alert) return;
+  await sendWebhookWithRetry(webhookUrl, { content: alert.content }, alert.alertType);
+}
 
+/**
+ * Build a Discord alert payload when hook fingerprints change between baselines.
+ *
+ * - `changeType` 'added' or 'removed' → BREAKING (hook count changed)
+ * - `changeType` 'body_changed' → WARNING (same count, different source hash)
+ */
+export function buildHookChangedAlert(
+  changeType: 'added' | 'removed' | 'body_changed',
+  counts: { before: number | undefined; after: number | undefined },
+  hashes: { before: string | undefined; after: string | undefined },
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): WebhookAlert {
   const DISCORD_MAX_CONTENT = 2000;
   const shortHash = (h: string | undefined) =>
     h && h !== 'unknown' ? h.replace(/^sha256:/, '').slice(0, 12) + '…' : 'unknown';
@@ -192,6 +206,7 @@ export async function sendHookChangedWebhook(
   const isBreaking = changeType === 'added' || changeType === 'removed';
   const icon = isBreaking ? '🚨' : '🔒';
   const severityLabel = isBreaking ? 'BREAKING' : 'WARNING';
+  const severity: AlertSeverity = isBreaking ? 'BREAKING' : 'WARNING';
 
   const changeLabel =
     changeType === 'added'
@@ -223,40 +238,55 @@ export async function sendHookChangedWebhook(
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }
 
-  await sendWebhookWithRetry(webhookUrl, { content }, 'hook-changed');
+  return { content, alertType: 'hook-changed', severity };
 }
 
 /**
- * Send a Discord webhook with a severity summary line, e.g.
- * "1 BREAKING, 2 WARNING, 3 INFO".
+ * Send a dedicated Discord webhook alert when hook fingerprints change
+ * between baselines.
  *
- * Reads DISCORD_WEBHOOK_URL from the environment. When the env var is absent
- * or empty the function returns immediately. Network errors and non-2xx
- * responses are caught and logged as warnings so a flaky Discord endpoint
- * never causes a CI failure.
+ * - `changeType` 'added' or 'removed' → BREAKING (hook count changed)
+ * - `changeType` 'body_changed' → WARNING (same count, different source hash)
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. Silently no-ops when the
+ * env var is absent or empty. Network errors are caught and logged as warnings.
  */
-export async function sendSeveritySummaryWebhook(
-  summary: SeveritySummary,
+export async function sendHookChangedWebhook(
+  changeType: 'added' | 'removed' | 'body_changed',
+  counts: { before: number | undefined; after: number | undefined },
+  hashes: { before: string | undefined; after: string | undefined },
   dateA: string,
   dateB: string,
   ciRunUrl?: string,
 ): Promise<void> {
   const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
   if (!webhookUrl || !webhookUrl.trim()) return;
+  const alert = buildHookChangedAlert(changeType, counts, hashes, dateA, dateB, ciRunUrl);
+  await sendWebhookWithRetry(webhookUrl, { content: alert.content }, alert.alertType);
+}
 
+/**
+ * Build a Discord alert payload for a severity summary (metric regression overview).
+ *
+ * Returns `null` when the run is pure INFO (no actionable regressions) — same
+ * no-op gate as `sendSeveritySummaryWebhook`.
+ */
+export function buildSeveritySummaryAlert(
+  summary: SeveritySummary,
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): WebhookAlert | null {
   const { breaking, warning, info, structuralBreakCount, securityPostureScore } = summary;
   const scoreWarning = (securityPostureScore ?? 0) >= 1;
   const scoreBreaking = (securityPostureScore ?? 0) >= 30;
-  // Only post to Discord when there is something actionable — pure INFO-only
-  // runs (all changes within 5%) would create noisy green pings on every CI run.
-  if (breaking === 0 && warning === 0 && structuralBreakCount === 0 && !scoreWarning) return;
+  if (breaking === 0 && warning === 0 && structuralBreakCount === 0 && !scoreWarning) return null;
 
-  const icon =
-    breaking > 0 || structuralBreakCount > 0 || scoreBreaking
-      ? '🔴'
-      : warning > 0 || scoreWarning
-        ? '🟡'
-        : '🟢';
+  const isBreaking = breaking > 0 || structuralBreakCount > 0 || scoreBreaking;
+  const isWarning = warning > 0 || scoreWarning;
+  const icon = isBreaking ? '🔴' : isWarning ? '🟡' : '🟢';
+  const severity: AlertSeverity = isBreaking ? 'BREAKING' : isWarning ? 'WARNING' : 'INFO';
+
   const severityParts = [
     breaking > 0 ? `${breaking} BREAKING` : null,
     structuralBreakCount > 0 ? `${structuralBreakCount} structural BREAKING` : null,
@@ -283,5 +313,27 @@ export async function sendSeveritySummaryWebhook(
     content = content.slice(0, DISCORD_MAX_CONTENT - 1) + '…';
   }
 
-  await sendWebhookWithRetry(webhookUrl, { content }, 'severity-summary');
+  return { content, alertType: 'severity-summary', severity };
+}
+
+/**
+ * Send a Discord webhook with a severity summary line, e.g.
+ * "1 BREAKING, 2 WARNING, 3 INFO".
+ *
+ * Reads DISCORD_WEBHOOK_URL from the environment. When the env var is absent
+ * or empty the function returns immediately. Network errors and non-2xx
+ * responses are caught and logged as warnings so a flaky Discord endpoint
+ * never causes a CI failure.
+ */
+export async function sendSeveritySummaryWebhook(
+  summary: SeveritySummary,
+  dateA: string,
+  dateB: string,
+  ciRunUrl?: string,
+): Promise<void> {
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl || !webhookUrl.trim()) return;
+  const alert = buildSeveritySummaryAlert(summary, dateA, dateB, ciRunUrl);
+  if (!alert) return;
+  await sendWebhookWithRetry(webhookUrl, { content: alert.content }, alert.alertType);
 }
