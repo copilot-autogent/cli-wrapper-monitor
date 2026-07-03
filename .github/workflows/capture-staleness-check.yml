@@ -1,0 +1,63 @@
+# Capture-staleness check — alert when scheduled capture cron jobs fail to run.
+#
+# Runs daily at 06:00 UTC.  On each run it:
+#   1. Checks out the repository (read-only; no AUTOGENT_PAT needed).
+#   2. Runs `npm run check-staleness` which:
+#        - Reads baselines/ and baselines/weekly/ for the most recent captured date.
+#        - Checks capture-health.jsonl for consecutive failure streaks.
+#        - Exits 0 (fresh) or 1 (stale) with a human-readable summary.
+#        - On stale: fires sendWebhookWithRetry() to DISCORD_WEBHOOK_URL with a ⚠️ message.
+#
+# This complements the existing health log (#60) which records errors during a
+# capture run but cannot detect a missing run entirely (issue #87).
+#
+# Secrets required:
+#   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → no Discord notification.
+#                         (AUTOGENT_PAT is NOT required — read-only filesystem check.)
+name: Capture Staleness Check
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 06:00 UTC
+  workflow_dispatch: {}   # Allow manual triggers for testing
+
+jobs:
+  staleness-check:
+    name: Check capture staleness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout cli-wrapper-monitor
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run staleness check
+        id: staleness
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set +e
+          npx tsx scripts/check-capture-staleness.ts
+          EXIT_CODE=$?
+          echo "exit_code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+          exit "${EXIT_CODE}"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.staleness.outputs.exit_code }}" = "0" ]; then
+            echo "✅ All capture checks fresh." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ Capture staleness detected — Discord alert fired (if DISCORD_WEBHOOK_URL is set)." >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -17,7 +17,8 @@
     "dashboard": "npx tsx scripts/generate-dashboard.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "preflight": "npx tsx scripts/preflight.ts"
+    "preflight": "npx tsx scripts/preflight.ts",
+    "check-staleness": "npx tsx scripts/check-capture-staleness.ts"
   },
   "dependencies": {
     "@github/copilot-sdk": "^0.2.2"
