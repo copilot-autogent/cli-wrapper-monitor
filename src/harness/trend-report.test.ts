@@ -3,6 +3,10 @@ import {
   extractTrendRow,
   buildSparkline,
   generateTrendReport,
+  buildTrendMatrix,
+  buildTrendMatrixMarkdown,
+  DEFAULT_TREND_WINDOWS,
+  type TrendWindow,
 } from "./trend-report.js";
 import type { MetricSnapshot } from "./types.js";
 
@@ -355,5 +359,180 @@ describe("generateTrendReport — securityPostureScore column", () => {
     const rows = report.split("\n").filter((line) => line.startsWith("| 2026-"));
     // SNAP_A and SNAP_B have no security-relevant diff → 0/100
     expect(rows[1]).toContain("0/100");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTrendMatrix
+// ---------------------------------------------------------------------------
+
+// Helpers: snapshots at known absolute timestamps relative to a common "current"
+// 2026-07-01 = current, 2026-06-24 = 7 days ago, 2026-06-01 = 30 days ago,
+// 2026-04-02 = 90 days ago, 2026-01-02 = 180 days ago
+
+function snapAt(isoDate: string, chars: number, tools: number): MetricSnapshot {
+  return makeSnapshot(`${isoDate}T12:00:00.000Z`, chars, tools);
+}
+
+const CURRENT = snapAt("2026-07-01", 60_000, 22);
+const WEEK_REF = snapAt("2026-06-24", 60_000, 24); // same chars, 2 more tools → tool Δ = −2
+const MONTH_REF = snapAt("2026-06-01", 50_000, 24); // 10k fewer chars → +10k Δ chars
+const THREE_MONTH_REF = snapAt("2026-04-02", 30_000, 19); // 30k fewer chars → +100% Δ chars
+// no 6-month snapshot → window should show "—"
+
+const MATRIX_SNAPS = [THREE_MONTH_REF, MONTH_REF, WEEK_REF, CURRENT];
+
+const SHORT_WINDOWS: TrendWindow[] = [
+  { label: "7d",  days: 7   },
+  { label: "30d", days: 30  },
+  { label: "90d", days: 90  },
+  { label: "180d", days: 180 },
+];
+
+describe("buildTrendMatrix", () => {
+  it("returns empty rows for fewer than 2 snapshots", () => {
+    const m = buildTrendMatrix([CURRENT], SHORT_WINDOWS);
+    expect(m.rows).toHaveLength(0);
+  });
+
+  it("currentDate reflects the most-recent snapshot", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    expect(m.currentDate).toBe("2026-07-01");
+  });
+
+  it("returns 4 metric rows when snapshots are sufficient", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    expect(m.rows).toHaveLength(4);
+  });
+
+  it("window resolution: exact-match snapshot is used as reference", () => {
+    // WEEK_REF is exactly 7 days before CURRENT
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "7d", days: 7 }]);
+    const refDate = m.rows[0].cells[0].referenceDate;
+    expect(refDate).toBe("2026-06-24");
+  });
+
+  it("window resolution: closest-before snapshot is used when no exact match", () => {
+    // 6d window: threshold = 2026-06-25. WEEK_REF (2026-06-24) is the latest
+    // snapshot on or before that threshold → used as reference.
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "6d", days: 6 }]);
+    const refDate = m.rows[0].cells[0].referenceDate;
+    expect(refDate).toBe("2026-06-24");
+  });
+
+  it("window resolution: shows '—' when no snapshot exists before the window threshold", () => {
+    // 180d window: oldest snapshot is THREE_MONTH_REF (90 days), not ≥180 days before CURRENT
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "180d", days: 180 }]);
+    expect(m.rows[0].cells[0].formatted).toBe("—");
+    expect(m.rows[0].cells[0].referenceDate).toBeNull();
+  });
+
+  it("systemPromptChars: shows absolute delta when < 10% change", () => {
+    // WEEK_REF has same chars as CURRENT → Δ = 0 → "+0"
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "7d", days: 7 }]);
+    const cell = m.rows[0].cells[0];
+    expect(cell.formatted).toBe("+0");
+  });
+
+  it("systemPromptChars: shows percentage delta when ≥ 10% change", () => {
+    // THREE_MONTH_REF: 30k, CURRENT: 60k → +100%
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "90d", days: 90 }]);
+    const cell = m.rows[0].cells[0];
+    expect(cell.formatted).toBe("+100%");
+  });
+
+  it("toolCount: shows negative delta when tools decreased", () => {
+    // WEEK_REF had 24 tools, CURRENT has 22 → delta = −2
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "7d", days: 7 }]);
+    const cell = m.rows[1].cells[0];
+    expect(cell.formatted).toBe("−2");
+  });
+
+  it("toolCount: shows positive delta when tools increased", () => {
+    // THREE_MONTH_REF had 19 tools, CURRENT has 22 → delta = +3
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "90d", days: 90 }]);
+    const cell = m.rows[1].cells[0];
+    expect(cell.formatted).toBe("+3");
+  });
+
+  it("injectionRefusedRate: shows reference snapshot value as percentage", () => {
+    const snapWithRate = makeSnapshot("2026-06-01T12:00:00.000Z", 50_000, 22, {
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 50_000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 12_500, unit: "tokens", description: "" },
+            toolCount: { value: 22, unit: "tools", description: "" },
+            injectionRefusedRate: { value: 0.875, unit: "fraction", description: "injection probe refusal rate" },
+          },
+        },
+      },
+    });
+    const m = buildTrendMatrix([snapWithRate, CURRENT], [{ label: "30d", days: 30 }]);
+    const cell = m.rows[2].cells[0];
+    expect(cell.formatted).toBe("87.5%");
+  });
+
+  it("injectionRefusedRate: shows '—' when reference snapshot lacks the metric", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, [{ label: "7d", days: 7 }]);
+    // WEEK_REF has no injectionRefusedRate metric
+    const cell = m.rows[2].cells[0];
+    expect(cell.formatted).toBe("—");
+  });
+
+  it("windows are propagated unchanged to the output", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    expect(m.windows).toBe(SHORT_WINDOWS);
+  });
+
+  it("uses DEFAULT_TREND_WINDOWS when no windows argument provided", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS);
+    expect(m.windows).toEqual(DEFAULT_TREND_WINDOWS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTrendMatrixMarkdown
+// ---------------------------------------------------------------------------
+
+describe("buildTrendMatrixMarkdown", () => {
+  it("returns a fallback message for empty matrix", () => {
+    const m = buildTrendMatrix([CURRENT], SHORT_WINDOWS);
+    const md = buildTrendMatrixMarkdown(m);
+    expect(md).toContain("Not enough snapshots");
+  });
+
+  it("includes window labels as column headers", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    const md = buildTrendMatrixMarkdown(m);
+    expect(md).toContain("7d");
+    expect(md).toContain("30d");
+    expect(md).toContain("90d");
+    expect(md).toContain("180d");
+  });
+
+  it("includes metric names as row labels", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    const md = buildTrendMatrixMarkdown(m);
+    expect(md).toContain("System prompt chars");
+    expect(md).toContain("Tool count");
+    expect(md).toContain("Injection refusal rate");
+    expect(md).toContain("Security posture score");
+  });
+
+  it("includes separator row", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    const md = buildTrendMatrixMarkdown(m);
+    expect(md).toContain("|--------|");
+  });
+
+  it("table rows start with pipe character", () => {
+    const m = buildTrendMatrix(MATRIX_SNAPS, SHORT_WINDOWS);
+    const md = buildTrendMatrixMarkdown(m);
+    const tableRows = md.split("\n").filter((l) => l.startsWith("|"));
+    // header + separator + 4 metric rows = 6
+    expect(tableRows.length).toBeGreaterThanOrEqual(6);
   });
 });

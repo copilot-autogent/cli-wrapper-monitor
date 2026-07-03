@@ -28,6 +28,10 @@ import {
   type ModelPoolEntry,
   type SparklinePoint,
 } from "../src/harness/dashboard.js";
+import {
+  buildTrendMatrix,
+  DEFAULT_TREND_WINDOWS,
+} from "../src/harness/trend-report.js";
 
 // ---------------------------------------------------------------------------
 // Baseline loader (mirrors trend-report.ts)
@@ -321,6 +325,61 @@ function renderModelPool(models: ModelPoolEntry[], snapshotCount: number): strin
 </section>`;
 }
 
+function renderChangeVelocity(snapshots: MetricSnapshot[]): string {
+  const matrix = buildTrendMatrix(snapshots, DEFAULT_TREND_WINDOWS);
+
+  if (matrix.rows.length === 0) {
+    return `
+<section class="section velocity-section">
+  <h2>⚡ Change Velocity</h2>
+  <p class="no-data">Not enough snapshots to build a change velocity matrix. Capture at least 2 baselines.</p>
+</section>`;
+  }
+
+  const headerCells = matrix.windows
+    .map((w) => `<th title="${w.days}d lookback">${esc(w.label)}</th>`)
+    .join("");
+
+  const rows = matrix.rows.map((row) => {
+    const dataCells = row.cells.map((cell) => {
+      const title = cell.referenceDate ? `Reference: ${cell.referenceDate}` : "No data for this window";
+      const isNoData = cell.formatted === "—";
+      const isPositive = !isNoData && cell.formatted.startsWith("+") && cell.formatted !== "+0";
+      const isNegative = !isNoData && (cell.formatted.startsWith("−") || (cell.formatted.startsWith("-") && cell.formatted !== "-0"));
+      let cls = "velocity-cell";
+      if (isPositive) cls += " velocity-positive";
+      if (isNegative) cls += " velocity-negative";
+      if (isNoData) cls += " velocity-nodata";
+      return `<td class="${cls}" title="${esc(title)}">${esc(cell.formatted)}</td>`;
+    }).join("");
+    return `<tr><td class="velocity-metric">${esc(row.metric)}</td>${dataCells}</tr>`;
+  }).join("");
+
+  const refDates = matrix.windows.map((w, i) => {
+    const ref = matrix.rows[0]?.cells[i]?.referenceDate;
+    return `<span class="ref-date"><strong>${esc(w.label)}</strong>: ${ref ? esc(ref) : "—"}</span>`;
+  }).join(" &nbsp;·&nbsp; ");
+
+  return `
+<section class="section velocity-section">
+  <h2>⚡ Change Velocity</h2>
+  <p class="subtitle">Pairwise deltas vs current (${esc(matrix.currentDate)}). Injection refusal rate and security posture score show the reference snapshot's value. Reference dates: ${refDates}</p>
+  <div class="table-wrapper">
+    <table class="velocity-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          ${headerCells}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  </div>
+</section>`;
+}
+
 // ---------------------------------------------------------------------------
 // Full HTML generation
 // ---------------------------------------------------------------------------
@@ -341,6 +400,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
 
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
   const sparklinesSection = renderSparklines(toolSeries, tokensSeries, injectionSeries);
+  const velocitySection = renderChangeVelocity(snapshots);
   const regressionsSection = renderRegressionTimeline(regressions, snapshotCount);
   const modelPoolSection = renderModelPool(modelHistory, snapshotCount);
 
@@ -546,6 +606,25 @@ function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
     }
 
     footer a { color: #2980b9; text-decoration: none; }
+
+    /* Change Velocity table */
+    .velocity-table .velocity-metric {
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .velocity-cell {
+      text-align: right;
+      font-family: monospace;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+
+    .velocity-positive { color: #2980b9; }
+    .velocity-negative { color: #e74c3c; }
+    .velocity-nodata   { color: #aaa; }
+
+    .ref-date { font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -559,6 +638,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
   <main>
     ${summarySection}
     ${sparklinesSection}
+    ${velocitySection}
     ${regressionsSection}
     ${modelPoolSection}
   </main>
