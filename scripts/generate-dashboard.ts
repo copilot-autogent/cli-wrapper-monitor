@@ -30,7 +30,6 @@ import {
 } from "../src/harness/dashboard.js";
 import {
   buildTrendMatrix,
-  buildTrendMatrixMarkdown,
   DEFAULT_TREND_WINDOWS,
 } from "../src/harness/trend-report.js";
 
@@ -345,8 +344,8 @@ function renderChangeVelocity(snapshots: MetricSnapshot[]): string {
     const dataCells = row.cells.map((cell) => {
       const title = cell.referenceDate ? `Reference: ${cell.referenceDate}` : "No data for this window";
       const isNoData = cell.formatted === "—";
-      const isPositive = !isNoData && (cell.formatted.startsWith("+"));
-      const isNegative = !isNoData && (cell.formatted.startsWith("−") || cell.formatted.startsWith("-"));
+      const isPositive = !isNoData && cell.formatted.startsWith("+") && cell.formatted !== "+0";
+      const isNegative = !isNoData && (cell.formatted.startsWith("−") || (cell.formatted.startsWith("-") && cell.formatted !== "-0"));
       let cls = "velocity-cell";
       if (isPositive) cls += " velocity-positive";
       if (isNegative) cls += " velocity-negative";
@@ -364,7 +363,7 @@ function renderChangeVelocity(snapshots: MetricSnapshot[]): string {
   return `
 <section class="section velocity-section">
   <h2>⚡ Change Velocity</h2>
-  <p class="subtitle">Deltas vs current snapshot (${esc(matrix.currentDate)}). Reference dates: ${refDates}</p>
+  <p class="subtitle">Pairwise deltas vs current (${esc(matrix.currentDate)}). Injection refusal rate and security posture score show the reference snapshot's value. Reference dates: ${refDates}</p>
   <div class="table-wrapper">
     <table class="velocity-table">
       <thead>

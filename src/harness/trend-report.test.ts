@@ -369,7 +369,6 @@ describe("generateTrendReport — securityPostureScore column", () => {
 // Helpers: snapshots at known absolute timestamps relative to a common "current"
 // 2026-07-01 = current, 2026-06-24 = 7 days ago, 2026-06-01 = 30 days ago,
 // 2026-04-02 = 90 days ago, 2026-01-02 = 180 days ago
-const NOW_TS = new Date("2026-07-01T12:00:00.000Z").getTime();
 
 function snapAt(isoDate: string, chars: number, tools: number): MetricSnapshot {
   return makeSnapshot(`${isoDate}T12:00:00.000Z`, chars, tools);
@@ -457,12 +456,20 @@ describe("buildTrendMatrix", () => {
   });
 
   it("injectionRefusedRate: shows reference snapshot value as percentage", () => {
-    const snapWithRate = snapAt("2026-06-01", 50_000, 22);
-    (snapWithRate.experiments["context-tax"] as any).metrics["injectionRefusedRate"] = {
-      value: 0.875,
-      unit: "fraction",
-      description: "injection probe refusal rate",
-    };
+    const snapWithRate = makeSnapshot("2026-06-01T12:00:00.000Z", 50_000, 22, {
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 50_000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 12_500, unit: "tokens", description: "" },
+            toolCount: { value: 22, unit: "tools", description: "" },
+            injectionRefusedRate: { value: 0.875, unit: "fraction", description: "injection probe refusal rate" },
+          },
+        },
+      },
+    });
     const m = buildTrendMatrix([snapWithRate, CURRENT], [{ label: "30d", days: 30 }]);
     const cell = m.rows[2].cells[0];
     expect(cell.formatted).toBe("87.5%");

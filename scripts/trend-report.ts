@@ -13,7 +13,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, lstatSync } from "fs";
 import { resolve, join } from "path";
 import type { MetricSnapshot } from "../src/harness/types.js";
-import { generateTrendReport, buildTrendMatrix, buildTrendMatrixMarkdown, DEFAULT_TREND_WINDOWS, type TrendWindow } from "../src/harness/trend-report.js";
+import { generateTrendReport, buildTrendMatrix, buildTrendMatrixMarkdown, DEFAULT_TREND_WINDOWS } from "../src/harness/trend-report.js";
 import { validateBaselineFile } from "../src/harness/validator.js";
 
 /** Recursively collect *.json file paths under a directory tree. Symlinks are skipped. */
@@ -119,7 +119,7 @@ function main(): void {
   let output: string | null = null;
   let matrixMode = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--output" && args[i + 1]) output = args[++i];
+    if (args[i] === "--output" && args[i + 1] && !args[i + 1].startsWith("--")) output = args[++i];
     if (args[i] === "--matrix") matrixMode = true;
   }
 
@@ -127,8 +127,7 @@ function main(): void {
 
   let report: string;
   if (matrixMode) {
-    const windows: TrendWindow[] = DEFAULT_TREND_WINDOWS;
-    const matrix = buildTrendMatrix(snapshots, windows);
+    const matrix = buildTrendMatrix(snapshots, DEFAULT_TREND_WINDOWS);
     const currentDate = matrix.currentDate || "—";
     const lines = [
       "# CLI Wrapper Monitor — Change Velocity Matrix",

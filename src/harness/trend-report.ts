@@ -153,13 +153,13 @@ export interface TrendWindow {
   days: number;
 }
 
-/** Default window set (7d / 30d / 90d / 180d). */
-export const DEFAULT_TREND_WINDOWS: TrendWindow[] = [
-  { label: "Week",    days: 7   },
-  { label: "Month",   days: 30  },
-  { label: "3-month", days: 90  },
-  { label: "6-month", days: 180 },
-];
+/** Default window set (7d / 30d / 90d / 180d). Frozen to prevent accidental mutation. */
+export const DEFAULT_TREND_WINDOWS: readonly TrendWindow[] = Object.freeze([
+  Object.freeze({ label: "Week",    days: 7   }),
+  Object.freeze({ label: "Month",   days: 30  }),
+  Object.freeze({ label: "3-month", days: 90  }),
+  Object.freeze({ label: "6-month", days: 180 }),
+]);
 
 /** Formatted cell value for a single metric × window intersection. */
 export interface TrendMatrixCell {
@@ -177,7 +177,7 @@ export interface TrendMatrixRow {
 
 /** Full trend matrix result. */
 export interface TrendMatrix {
-  windows: TrendWindow[];
+  windows: readonly TrendWindow[];
   rows: TrendMatrixRow[];
   /** ISO date string of the current (most-recent) snapshot. */
   currentDate: string;
@@ -220,7 +220,8 @@ function fmtDeltaPct(current: number, reference: number): string {
  * - For each window, the reference snapshot is the latest capture whose
  *   capturedAt ≤ (currentTime − window.days * 86_400_000 ms).
  * - systemPromptChars and toolCount show absolute deltas (current − reference).
- *   systemPromptChars also appends a percentage when |Δ%| ≥ 10.
+ *   systemPromptChars switches to a percentage-only display when |Δ%| ≥ 10,
+ *   because the absolute number becomes less informative at large scales.
  * - injectionRefusedRate shows the reference value as a percentage.
  * - securityPostureScore shows the reference snapshot's score (using diffSnapshots).
  * - Any metric absent from the reference snapshot renders as "—".
@@ -229,7 +230,7 @@ function fmtDeltaPct(current: number, reference: number): string {
  */
 export function buildTrendMatrix(
   snapshots: MetricSnapshot[],
-  windows: TrendWindow[] = DEFAULT_TREND_WINDOWS
+  windows: readonly TrendWindow[] = DEFAULT_TREND_WINDOWS
 ): TrendMatrix {
   const sorted = [...snapshots].sort(
     (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
