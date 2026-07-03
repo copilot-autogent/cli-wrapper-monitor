@@ -120,5 +120,13 @@
     }
   },
   "binaryHash": "sha256:2ce57cb28adc008d83fd61910c5005b32640efc974bbe3db2db4bc72bde57486",
-  "systemPromptHash": "sha256:34d0c6a33fd04c47657a5a20706ed9ab43f04f7e3ee54c561b54f2e222a3cd7c"
+  "systemPromptHash": "sha256:34d0c6a33fd04c47657a5a20706ed9ab43f04f7e3ee54c561b54f2e222a3cd7c",
+  "schemaVersion": "1.0",
+  "hookCount": null,
+  "hookSourceHash": null,
+  "modelPool": null,
+  "contextWindowHeadroom": null,
+  "possibleCauses": null,
+  "toolSchemas": null,
+  "toolSchemaHash": null
 }

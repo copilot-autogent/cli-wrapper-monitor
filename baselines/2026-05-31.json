@@ -61,44 +61,161 @@
         "liveAvailable": false,
         "note": "Reconstructed post-fix baseline. autogent#383 merged 2026-05-31T01:18:57Z raising maxCharsPerFile from 20k to 60k. File sizes derived from 2026-05-27 snapshot (4 days prior — closest available measurement). PLAYBOOK.md (53,583 chars) and CONTEXT.md (47,057 chars) now within 60k limit — no truncation. The +105% increase in systemPromptChars (57,733 → 118,373) is intentional fix delivery, not a regression. Model field set to claude-sonnet-4.6 matching 2026-05-27 baseline (prior latest.json used claude-opus-4.6 from a separate live-mode capture). systemPromptHash set to 'unknown' because exact file content at May 31 is unavailable; diff engine skips hash comparison when either side is 'unknown' (src/harness/diff.ts).",
         "bootstrapFileSizes": [
-          { "name": "SOUL.md", "chars": 4517, "truncated": false, "contentHash": "501a1582b45185f5f67403726af81344" },
-          { "name": "PLAYBOOK.md", "chars": 53583, "truncated": false, "contentHash": "e15890df546beaed32ca8c0ac7c849ba" },
-          { "name": "CONTEXT.md", "chars": 47057, "truncated": false, "contentHash": "46e2b80d973fa10e6b9f7f86270b55f6" },
-          { "name": "USER.md", "chars": 13216, "truncated": false }
+          {
+            "name": "SOUL.md",
+            "chars": 4517,
+            "truncated": false,
+            "contentHash": "501a1582b45185f5f67403726af81344"
+          },
+          {
+            "name": "PLAYBOOK.md",
+            "chars": 53583,
+            "truncated": false,
+            "contentHash": "e15890df546beaed32ca8c0ac7c849ba"
+          },
+          {
+            "name": "CONTEXT.md",
+            "chars": 47057,
+            "truncated": false,
+            "contentHash": "46e2b80d973fa10e6b9f7f86270b55f6"
+          },
+          {
+            "name": "USER.md",
+            "chars": 13216,
+            "truncated": false
+          }
         ],
         "perToolChars": [
-          { "name": "read_instruction", "chars": 250 },
-          { "name": "write_instruction", "chars": 280 },
-          { "name": "patch_instruction", "chars": 260 },
-          { "name": "introspect", "chars": 220 },
-          { "name": "rollback_change", "chars": 200 },
-          { "name": "read_channel_history", "chars": 280 },
-          { "name": "send_file", "chars": 240 },
-          { "name": "manage_mcp", "chars": 350 },
-          { "name": "recall_memory", "chars": 240 },
-          { "name": "save_memory", "chars": 350 },
-          { "name": "delete_memory", "chars": 200 },
-          { "name": "patch_memory", "chars": 240 },
-          { "name": "list_memory", "chars": 180 },
-          { "name": "web_search", "chars": 260 },
-          { "name": "browser_navigate", "chars": 200 },
-          { "name": "browser_snapshot", "chars": 200 },
-          { "name": "browser_click", "chars": 200 },
-          { "name": "browser_type", "chars": 210 },
-          { "name": "browser_take_screenshot", "chars": 180 },
-          { "name": "browser_navigate_back", "chars": 150 },
-          { "name": "browser_evaluate", "chars": 210 },
-          { "name": "browser_press_key", "chars": 170 },
-          { "name": "browser_tabs", "chars": 210 },
-          { "name": "load_csv", "chars": 280 },
-          { "name": "sql_query", "chars": 220 },
-          { "name": "list_tables", "chars": 160 },
-          { "name": "manage_tasks", "chars": 800 },
-          { "name": "spawn_task", "chars": 450 },
-          { "name": "manage_agents", "chars": 350 },
-          { "name": "pipeline_add", "chars": 700 }
+          {
+            "name": "read_instruction",
+            "chars": 250
+          },
+          {
+            "name": "write_instruction",
+            "chars": 280
+          },
+          {
+            "name": "patch_instruction",
+            "chars": 260
+          },
+          {
+            "name": "introspect",
+            "chars": 220
+          },
+          {
+            "name": "rollback_change",
+            "chars": 200
+          },
+          {
+            "name": "read_channel_history",
+            "chars": 280
+          },
+          {
+            "name": "send_file",
+            "chars": 240
+          },
+          {
+            "name": "manage_mcp",
+            "chars": 350
+          },
+          {
+            "name": "recall_memory",
+            "chars": 240
+          },
+          {
+            "name": "save_memory",
+            "chars": 350
+          },
+          {
+            "name": "delete_memory",
+            "chars": 200
+          },
+          {
+            "name": "patch_memory",
+            "chars": 240
+          },
+          {
+            "name": "list_memory",
+            "chars": 180
+          },
+          {
+            "name": "web_search",
+            "chars": 260
+          },
+          {
+            "name": "browser_navigate",
+            "chars": 200
+          },
+          {
+            "name": "browser_snapshot",
+            "chars": 200
+          },
+          {
+            "name": "browser_click",
+            "chars": 200
+          },
+          {
+            "name": "browser_type",
+            "chars": 210
+          },
+          {
+            "name": "browser_take_screenshot",
+            "chars": 180
+          },
+          {
+            "name": "browser_navigate_back",
+            "chars": 150
+          },
+          {
+            "name": "browser_evaluate",
+            "chars": 210
+          },
+          {
+            "name": "browser_press_key",
+            "chars": 170
+          },
+          {
+            "name": "browser_tabs",
+            "chars": 210
+          },
+          {
+            "name": "load_csv",
+            "chars": 280
+          },
+          {
+            "name": "sql_query",
+            "chars": 220
+          },
+          {
+            "name": "list_tables",
+            "chars": 160
+          },
+          {
+            "name": "manage_tasks",
+            "chars": 800
+          },
+          {
+            "name": "spawn_task",
+            "chars": 450
+          },
+          {
+            "name": "manage_agents",
+            "chars": 350
+          },
+          {
+            "name": "pipeline_add",
+            "chars": 700
+          }
         ]
       }
     }
-  }
+  },
+  "schemaVersion": "1.0",
+  "hookCount": null,
+  "hookSourceHash": null,
+  "modelPool": null,
+  "contextWindowHeadroom": null,
+  "possibleCauses": null,
+  "toolSchemas": null,
+  "toolSchemaHash": null
 }
