@@ -164,12 +164,6 @@ export interface MetricSnapshot {
    */
   toolSchemaHash?: string;
   /**
-   * Raw system prompt text captured at baseline time.
-   * Used for section-level parsing. Absent in older baselines.
-   * Not present in all capture configurations (e.g. when autogent source is unavailable).
-   */
-  rawSystemPrompt?: string;
-  /**
    * Per-section character and token breakdown of the system prompt.
    * Sections: "Tools", "Safety", "Introduction", "Other".
    * Absent in older baselines that pre-date section attribution.

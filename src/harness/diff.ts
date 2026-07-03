@@ -551,6 +551,7 @@ export function formatDiffReport(report: DiffReport): string {
       );
     }
   }
+  lines.push('');
 
   return lines.join('\n');
 }
