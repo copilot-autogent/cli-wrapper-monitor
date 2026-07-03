@@ -78,6 +78,11 @@ describe('extractDateFromFilename', () => {
     expect(extractDateFromFilename('2026-01-99.json')).toBeNull();
     expect(extractDateFromFilename('9999-99-99.json')).toBeNull();
   });
+
+  it('returns null for overflow calendar dates (e.g. Feb 31)', () => {
+    expect(extractDateFromFilename('2026-02-31.json')).toBeNull();
+    expect(extractDateFromFilename('2026-04-31.json')).toBeNull(); // April has 30 days
+  });
 });
 
 // ---------------------------------------------------------------------------

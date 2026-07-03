@@ -94,10 +94,17 @@ export function extractDateFromFilename(filename: string): string | null {
   const m = DATE_FILE_RE.exec(filename);
   if (!m) return null;
   const dateStr = m[1]!;
-  // Validate that it parses as a real calendar date.
+  // Validate it is a real calendar date. Date.parse normalizes overflow dates
+  // (e.g. 2026-02-31 → March), so we round-trip through UTC to detect that.
   const ts = Date.parse(dateStr + 'T00:00:00Z');
   if (Number.isNaN(ts)) return null;
-  return dateStr;
+  // Confirm the round-trip date matches the original string (rejects overflow).
+  const d = new Date(ts);
+  const roundTrip =
+    `${d.getUTCFullYear()}-` +
+    `${String(d.getUTCMonth() + 1).padStart(2, '0')}-` +
+    `${String(d.getUTCDate()).padStart(2, '0')}`;
+  return roundTrip === dateStr ? dateStr : null;
 }
 
 /**
@@ -117,7 +124,8 @@ export function findMostRecentBaseline(
   let files: string[];
   try {
     files = readdirFn(dir);
-  } catch {
+  } catch (err) {
+    console.warn(`⚠️  Could not read baselines directory ${dir}: ${String(err)}`);
     return null;
   }
 
