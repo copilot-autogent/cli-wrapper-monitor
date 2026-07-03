@@ -391,7 +391,12 @@ async function main(): Promise<void> {
       dateA, dateB, ciRunUrl,
     );
     await sendToolRemovedWebhook(toolsToAlert, dateA, dateB, ciRunUrl);
+    // Fire a dedicated alert for removed models — high-signal event warranting its own message.
     await sendModelRemovedWebhook(removedModels, dateA, dateB, ciRunUrl);
+    // Fire a dedicated alert for hook fingerprint changes — security-posture signal.
+    // Only fire when baseline had hook tracking (baselineHookCount defined), matching
+    // diff.ts's gate — avoids false-positive BREAKING on first comparison after
+    // hook tracking was introduced to older baselines.
     if (hookCountDropped || hookCountIncreased) {
       const changeType = hookCountDropped ? 'removed' : 'added';
       await sendHookChangedWebhook(
@@ -401,6 +406,7 @@ async function main(): Promise<void> {
         dateA, dateB, ciRunUrl,
       );
     }
+    // Use report.warnings as the source of truth (populated by diff.ts, avoids duplicating logic).
     if (hookBodyWarnings.length > 0) {
       await sendHookChangedWebhook(
         'body_changed',
@@ -410,27 +416,34 @@ async function main(): Promise<void> {
       );
     }
   } else {
-    // Default: collect all alerts and send as one bundled Discord message
-    const alerts: WebhookAlert[] = [
-      buildSeveritySummaryAlert(
-        { ...report.severitySummary, securityPostureScore: report.securityPostureScore },
-        dateA, dateB, ciRunUrl,
-      ),
+    // Default: collect all alerts and send as one bundled Discord message (≤1 ping per run).
+    //
+    // The severity summary is included as a section but NOT counted in the "N issues detected"
+    // header — it is a meta overview, not itself a distinct regression event. Specific event
+    // alerts (tool removed, model removed, hook changed) drive the count.
+    const summaryAlert = buildSeveritySummaryAlert(
+      { ...report.severitySummary, securityPostureScore: report.securityPostureScore },
+      dateA, dateB, ciRunUrl,
+    );
+
+    // Specific event alerts — each represents a distinct regression event.
+    const specificAlerts: WebhookAlert[] = [
       buildToolRemovedAlert(toolsToAlert, dateA, dateB, ciRunUrl),
       buildModelRemovedAlert(removedModels, dateA, dateB, ciRunUrl),
     ].filter((a): a is WebhookAlert => a !== null);
 
     if (hookCountDropped || hookCountIncreased) {
       const changeType = hookCountDropped ? 'removed' : 'added';
-      alerts.push(buildHookChangedAlert(
+      specificAlerts.push(buildHookChangedAlert(
         changeType,
         { before: snapA.hookCount, after: snapB.hookCount },
         { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
         dateA, dateB, ciRunUrl,
       ));
     }
+    // Use report.warnings as the source of truth (populated by diff.ts, avoids duplicating logic).
     if (hookBodyWarnings.length > 0) {
-      alerts.push(buildHookChangedAlert(
+      specificAlerts.push(buildHookChangedAlert(
         'body_changed',
         { before: snapA.hookCount, after: snapB.hookCount },
         { before: snapA.hookSourceHash, after: snapB.hookSourceHash },
@@ -438,7 +451,14 @@ async function main(): Promise<void> {
       ));
     }
 
-    await bundleWebhooks(alerts);
+    // Build the final alert list: severity summary first (if present), then specific events.
+    // Pass specificAlerts.length as issueCount so the header reflects only distinct regression
+    // events, not the summary entry.
+    const allAlerts: WebhookAlert[] = [
+      ...(summaryAlert ? [summaryAlert] : []),
+      ...specificAlerts,
+    ];
+    await bundleWebhooks(allAlerts, undefined, specificAlerts.length || undefined);
   }
 
   // Exit with code 1 when any BREAKING delta is present so CI fails on regressions.

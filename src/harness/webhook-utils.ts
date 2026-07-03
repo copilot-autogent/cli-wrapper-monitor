@@ -138,25 +138,36 @@ export async function sendWebhookWithRetry(
  * Merge multiple alerts into a single Discord webhook call to reduce notification noise.
  *
  * - Empty list → no-op (no fetch called).
- * - Single alert → passed through directly with its original `alertType`.
+ * - Single alert → passed through directly with its original `alertType`, content clamped to 2000 chars.
  * - Multiple alerts → sections joined by a separator under a single header line
  *   that reflects the highest severity across all alerts (BREAKING > WARNING > INFO).
+ *   `issueCount` (optional) controls the "N issues detected" label in the header; when omitted,
+ *   `alerts.length` is used. Pass a lower count when some alerts are meta/summary entries that
+ *   should not be counted as distinct issues.
  *
  * The combined content is clamped to Discord's 2000-character limit.
  *
  * @param alerts      - Pre-built alert objects to send (or merge).
  * @param webhookUrl  - Optional URL override; falls back to `DISCORD_WEBHOOK_URL` env var.
+ * @param issueCount  - Optional override for the "N issues detected" count in the bundle header.
  */
 export async function bundleWebhooks(
   alerts: WebhookAlert[],
   webhookUrl?: string,
+  issueCount?: number,
 ): Promise<void> {
   const url = webhookUrl ?? process.env['DISCORD_WEBHOOK_URL'];
   if (!url || !url.trim()) return;
   if (alerts.length === 0) return;
 
+  const DISCORD_MAX_CONTENT = 2000;
+
   if (alerts.length === 1) {
-    await sendWebhookWithRetry(url, { content: alerts[0].content }, alerts[0].alertType);
+    const content =
+      alerts[0].content.length > DISCORD_MAX_CONTENT
+        ? alerts[0].content.slice(0, DISCORD_MAX_CONTENT - 1) + '…'
+        : alerts[0].content;
+    await sendWebhookWithRetry(url, { content }, alerts[0].alertType);
     return;
   }
 
@@ -164,12 +175,12 @@ export async function bundleWebhooks(
   const SEVERITY_ORDER: AlertSeverity[] = ['BREAKING', 'WARNING', 'INFO'];
   const highestSeverity = SEVERITY_ORDER.find((s) => alerts.some((a) => a.severity === s)) ?? 'INFO';
   const emoji = highestSeverity === 'BREAKING' ? '🚨' : highestSeverity === 'WARNING' ? '⚠️' : '🟢';
+  const count = issueCount ?? alerts.length;
 
-  const header = `${emoji} **${highestSeverity} (${alerts.length} issues detected)**`;
+  const header = `${emoji} **${highestSeverity} (${count} issues detected)**`;
   const sections = alerts.map((a) => a.content).join('\n\n―――――――――――――――\n\n');
   const full = `${header}\n\n${sections}`;
 
-  const DISCORD_MAX_CONTENT = 2000;
   const content =
     full.length > DISCORD_MAX_CONTENT ? full.slice(0, DISCORD_MAX_CONTENT - 1) + '…' : full;
 

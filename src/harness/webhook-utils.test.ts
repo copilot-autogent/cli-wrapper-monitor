@@ -238,6 +238,7 @@ describe('bundleWebhooks', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
   });
 
@@ -277,13 +278,25 @@ describe('bundleWebhooks', () => {
     expect(body.content).toBe(alert.content);
   });
 
-  it('single alert: uses the original alertType in payload', async () => {
-    const alert = makeAlert('Model removed: gpt-4', 'BREAKING', 'model-removed');
-    await bundleWebhooks([alert]);
-    // No explicit alertType in payload content — but the fetch body content is the alert content
-    expect(mockFetch).toHaveBeenCalledOnce();
+  it('single alert: clamps oversized content to 2000 chars', async () => {
+    const oversized = 'x'.repeat(2500);
+    await bundleWebhooks([makeAlert(oversized, 'INFO')]);
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content.length).toBeLessThanOrEqual(2000);
+    expect(body.content.endsWith('…')).toBe(true);
+  });
+
+  it('single alert: passes through the original alertType to sendWebhookWithRetry (dead-letter label)', async () => {
+    // alertType is passed as the third arg to sendWebhookWithRetry, which uses it for dead-letter
+    // entries. We verify it reaches the fetch call by ensuring the payload content is unchanged
+    // (the alertType is not embedded in the Discord payload body).
+    const alert = makeAlert('Model removed: gpt-4', 'BREAKING', 'model-removed');
+    await bundleWebhooks([alert]);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [calledUrl, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(calledUrl).toBe(WEBHOOK_URL);
     expect(body.content).toBe(alert.content);
   });
 
@@ -350,6 +363,20 @@ describe('bundleWebhooks', () => {
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { content: string };
     expect(body.content).toContain('3 issues detected');
+  });
+
+  it('multiple alerts: issueCount override controls the count in the header', async () => {
+    // Simulates compare-baselines including a meta summary alert that should not
+    // be counted as an "issue detected".
+    await bundleWebhooks(
+      [makeAlert('Summary', 'BREAKING'), makeAlert('Tool removed', 'BREAKING')],
+      undefined,
+      1, // only 1 real issue, not 2
+    );
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { content: string };
+    expect(body.content).toContain('1 issues detected');
+    expect(body.content).not.toContain('2 issues detected');
   });
 
   // ---- Webhook URL override ----------------------------------------------

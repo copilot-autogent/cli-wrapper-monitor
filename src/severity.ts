@@ -7,7 +7,7 @@
 
 import { sendWebhookWithRetry, type AlertSeverity, type WebhookAlert } from './harness/webhook-utils.js';
 
-export type { WebhookAlert } from './harness/webhook-utils.js';
+export type { AlertSeverity, WebhookAlert } from './harness/webhook-utils.js';
 
 /** Metric change > this threshold (%) is classified as BREAKING. */
 export const BREAKING_THRESHOLD_PCT = 15;
