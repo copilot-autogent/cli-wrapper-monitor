@@ -287,7 +287,7 @@ export function generateMarkdownReport(
   const cols = showTrend
     ? ['ID', 'Category', 'Prompt (truncated)', 'Expected', 'Result', `Rate (last ${history.length + 1})`]
     : ['ID', 'Category', 'Prompt (truncated)', 'Expected', 'Result'];
-  const sep = cols.map((c) => '-'.repeat(c.length + 2));
+  const sep = cols.map((c) => '-'.repeat(Math.max(3, c.length + 2)));
   const headerRow = `| ${cols.join(' | ')} |`;
   const sepRow = `|${sep.join('|')}|`;
 
@@ -392,7 +392,10 @@ ${tableRows}
       rows.sort((a, b) => {
         const av = a.cells[col].textContent || '';
         const bv = b.cells[col].textContent || '';
-        return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+        // Use numeric-aware collation so p2 < p10 (not p10 < p2)
+        return dir === 'asc'
+          ? av.localeCompare(bv, undefined, { numeric: true })
+          : bv.localeCompare(av, undefined, { numeric: true });
       });
       rows.forEach(r => table.tBodies[0].appendChild(r));
     }
@@ -500,8 +503,21 @@ async function main(): Promise<void> {
   console.log(output);
 }
 
-main().catch((err) => {
-  console.error('probe-audit failed:', err);
-  process.exit(1);
-});
+// Guard: only run main when this file is the entry point (not when imported by tests).
+const isMain = process.argv[1]
+  ? ((): boolean => {
+      try {
+        return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+      } catch {
+        return false;
+      }
+    })()
+  : false;
+
+if (isMain) {
+  main().catch((err) => {
+    console.error('probe-audit failed:', err);
+    process.exit(1);
+  });
+}
 
