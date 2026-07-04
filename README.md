@@ -247,6 +247,17 @@ npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05
 # Generate a diff report and save to reports/
 npm run diff -- --baseline baselines/2026-05-27.json --current baselines/2026-05-31.json --output reports/diff-2026-05-31.md
 
+# Compare baselines by date — all combinations accepted
+npm run compare                                      # latest vs previous (auto-resolved)
+npm run compare -- --list                            # list all available baseline dates
+npm run compare -- --from=2026-06-03                 # specified from vs latest
+npm run compare -- --from=2026-06-03 --to=2026-07-03 # explicit pair
+npm run compare -- --to=2026-07-03                   # previous baseline vs specified to
+npm run compare -- --from=2026-06-03 --output reports/jun3-to-latest.md  # save to file
+
+# Compare using explicit file paths (legacy positional-arg form still supported)
+npm run compare -- baselines/2026-05-20.json baselines/2026-06-03.json
+
 # Show trend table across all historical baselines (includes archived)
 npm run trend
 

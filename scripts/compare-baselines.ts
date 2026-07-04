@@ -3,16 +3,23 @@
  * Compare two baseline JSON snapshots and output a structured diff report.
  *
  * Usage:
- *   npx tsx scripts/compare-baselines.ts <baseline-a> <baseline-b> [options]
- *   npx tsx scripts/compare-baselines.ts --a <path> --b <path> [options]
+ *   npm run compare                                    # latest vs previous (auto-resolved)
+ *   npm run compare -- --from=2026-06-03               # specified from vs latest
+ *   npm run compare -- --from=2026-06-03 --to=2026-07-03  # explicit pair
+ *   npm run compare -- --list                          # list all available baseline dates
+ *   npm run compare -- <file-a> <file-b>               # explicit file paths (legacy)
+ *   npm run compare -- --a <path> --b <path>           # explicit file paths (legacy)
  *
  * Options:
- *   --json          Output raw DiffReport as JSON instead of Markdown
- *   --output <path> Write report to file instead of stdout
+ *   --from <YYYY-MM-DD>  Resolve older (reference) baseline by date
+ *   --to   <YYYY-MM-DD>  Resolve newer baseline by date
+ *   --list               List all available baseline dates and exit
+ *   --json               Output raw DiffReport as JSON instead of Markdown
+ *   --output <path>      Write report to file instead of stdout
+ *   --no-bundle          Send individual Discord webhooks instead of bundling
  *
- * Examples:
- *   npm run compare -- baselines/2026-05-20.json baselines/2026-06-03.json
- *   npm run compare -- baselines/2026-06-03.json baselines/latest.json --output reports/jun3-to-latest.md
+ * Date resolution: searches baselines/<date>.json (monthly) first, then
+ * baselines/weekly/<date>.json. When a date exists in both, monthly is preferred.
  *
  * Note: possibleCauses in the report reflects the window captured at snapshot B's
  * creation time. For non-consecutive comparisons, the provenance section is
@@ -21,6 +28,12 @@
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
+import {
+  listAllBaselines,
+  resolveBaselineByDate,
+  findLatestBaseline,
+  findPreviousBaseline,
+} from "../src/harness/baseline-resolver.js";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { diffSnapshots } from "../src/harness/diff.js";
 import { validateSnapshot } from "../src/harness/validator.js";
@@ -43,37 +56,75 @@ import {
 import { bundleWebhooks, type WebhookAlert } from "../src/harness/webhook-utils.js";
 import { loadAnnotation } from "../src/harness/annotations.js";
 
-interface CliArgs { a: string; b: string; json: boolean; output: string | null; noBundle: boolean; }
+interface CliArgs {
+  /** Explicit file path for the older (reference) baseline (legacy positional / --a flag) */
+  a: string;
+  /** Explicit file path for the newer baseline (legacy positional / --b flag) */
+  b: string;
+  /** Date string for --from flag (YYYY-MM-DD) */
+  from: string | null;
+  /** Date string for --to flag (YYYY-MM-DD) */
+  to: string | null;
+  /** Print all available baseline dates and exit */
+  list: boolean;
+  json: boolean;
+  output: string | null;
+  noBundle: boolean;
+}
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
-  let a = "", b = "", jsonMode = false, noBundle = false;
+  let a = "", b = "", jsonMode = false, noBundle = false, list = false;
+  let from: string | null = null, to: string | null = null;
   let output: string | null = null;
   const positional: string[] = [];
+
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--a" && args[i + 1] && !args[i + 1].startsWith("--")) { a = args[++i]; }
-    else if (args[i] === "--b" && args[i + 1] && !args[i + 1].startsWith("--")) { b = args[++i]; }
-    else if (args[i] === "--json") { jsonMode = true; }
-    else if (args[i] === "--output" && args[i + 1] && !args[i + 1].startsWith("--")) { output = args[++i]; }
-    else if (args[i] === "--no-bundle") { noBundle = true; }
-    else if (args[i].startsWith("--")) {
-      const hasValue = args[i + 1] !== undefined && !args[i + 1].startsWith("--");
-      console.warn(`Warning: unrecognized flag "${args[i]}" — ignored.`);
-      if (hasValue) i++;
-    } else { positional.push(args[i]); }
+    const arg = args[i];
+    const nextArg = args[i + 1];
+    const nextIsValue = nextArg !== undefined && !nextArg.startsWith("--");
+
+    if (arg === "--a" && nextIsValue) { a = args[++i]; }
+    else if (arg === "--b" && nextIsValue) { b = args[++i]; }
+    else if (arg === "--json") { jsonMode = true; }
+    else if (arg === "--list") { list = true; }
+    else if (arg === "--no-bundle") { noBundle = true; }
+    else if (arg === "--output" && nextIsValue) { output = args[++i]; }
+    else if (arg.startsWith("--from=")) { from = arg.slice("--from=".length); }
+    else if (arg === "--from" && nextIsValue) { from = args[++i]; }
+    else if (arg.startsWith("--to=")) { to = arg.slice("--to=".length); }
+    else if (arg === "--to" && nextIsValue) { to = args[++i]; }
+    else if (arg.startsWith("--")) {
+      console.warn(`Warning: unrecognized flag "${arg}" — ignored.`);
+      if (nextIsValue) i++;
+    } else { positional.push(arg); }
   }
+
   if (!a && positional[0]) a = positional[0];
   if (!b && positional[1]) b = positional[1];
-  if (!a || !b) {
-    console.error("Usage: compare-baselines <file-a> <file-b> [--json] [--output <path>] [--no-bundle]\n" +
-      "  file-a           Path to the older (reference) baseline JSON\n" +
-      "  file-b           Path to the newer baseline JSON\n" +
-      "  --json           Output raw DiffReport JSON instead of Markdown\n" +
-      "  --output <path>  Write report to file\n" +
-      "  --no-bundle      Send individual Discord webhooks instead of bundling (useful for debugging)");
+
+  // When --from/--to/--list are in use, explicit file paths are not required
+  const needsExplicitPaths = !list && from === null && to === null;
+  if (needsExplicitPaths && (!a || !b)) {
+    console.error(
+      "Usage: npm run compare [options]\n\n" +
+      "  Date-based (recommended):\n" +
+      "    npm run compare                              # latest vs previous (auto-resolved)\n" +
+      "    npm run compare -- --from=2026-06-03         # from → latest\n" +
+      "    npm run compare -- --from=2026-06-03 --to=2026-07-03  # explicit pair\n" +
+      "    npm run compare -- --list                    # list available dates\n\n" +
+      "  Explicit file paths (legacy):\n" +
+      "    npm run compare -- <file-a> <file-b>         # compare two JSON files\n" +
+      "    npm run compare -- --a <path> --b <path>     # same via named flags\n\n" +
+      "  Options:\n" +
+      "    --json            Output raw DiffReport JSON instead of Markdown\n" +
+      "    --output <path>   Write report to file\n" +
+      "    --no-bundle       Send individual Discord webhooks instead of bundling"
+    );
     process.exit(1);
   }
-  return { a, b, json: jsonMode, output, noBundle };
+
+  return { a, b, from, to, list, json: jsonMode, output, noBundle };
 }
 
 function loadSnapshot(path: string): MetricSnapshot {
@@ -351,11 +402,86 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
 }
 
 async function main(): Promise<void> {
-  const { a, b, json: jsonMode, output, noBundle } = parseArgs();
+  const { a, b, from, to, list, json: jsonMode, output, noBundle } = parseArgs();
+
+  const BASELINES_DIR = resolve(process.cwd(), "baselines");
+
+  // ── --list: print available baseline dates and exit ──────────────────────
+  if (list) {
+    const entries = listAllBaselines(BASELINES_DIR);
+    if (entries.length === 0) {
+      console.log("No baselines found.");
+      return;
+    }
+    console.log("Available baseline dates (newest first):\n");
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (!seen.has(entry.date)) {
+        seen.add(entry.date);
+        // Note when a date exists in both monthly and weekly
+        const hasWeeklyToo =
+          entry.type === "monthly" &&
+          entries.some((e) => e.date === entry.date && e.type === "weekly");
+        const suffix = hasWeeklyToo ? "  (also in weekly)" : "";
+        console.log(`  ${entry.date}  [${entry.type}]${suffix}`);
+      }
+    }
+    return;
+  }
+
+  // ── Resolve file paths (date-based or explicit) ───────────────────────────
+  let resolvedA: string, resolvedB: string;
+
+  if (from !== null || to !== null) {
+    // At least one date flag provided — resolve both ends
+    const allBaselines = listAllBaselines(BASELINES_DIR);
+
+    if (to !== null) {
+      resolvedB = resolveBaselineByDate(to, BASELINES_DIR);
+    } else {
+      // No --to: use the latest available baseline
+      const latest = findLatestBaseline(allBaselines);
+      if (!latest) throw new Error("No baselines found; capture a baseline first.");
+      resolvedB = latest.path;
+    }
+
+    if (from !== null) {
+      resolvedA = resolveBaselineByDate(from, BASELINES_DIR);
+    } else {
+      // No --from: use the baseline immediately before the resolved 'to' date
+      const bDate = to ?? findLatestBaseline(allBaselines)?.date;
+      if (!bDate) throw new Error("No baselines found; capture a baseline first.");
+      const prev = findPreviousBaseline(bDate, allBaselines);
+      if (!prev) {
+        throw new Error(
+          `No baseline found before ${bDate}; run \`npm run compare -- --list\` to see available dates`
+        );
+      }
+      resolvedA = prev.path;
+    }
+  } else if (a && b) {
+    // Legacy: explicit file paths (positional or --a/--b)
+    resolvedA = a;
+    resolvedB = b;
+  } else {
+    // No args at all: compare the two most recent baselines
+    const allBaselines = listAllBaselines(BASELINES_DIR);
+    const latest = findLatestBaseline(allBaselines);
+    if (!latest) throw new Error("No baselines found; capture a baseline first.");
+    const prev = findPreviousBaseline(latest.date, allBaselines);
+    if (!prev) {
+      throw new Error(
+        `Only one baseline available (${latest.date}); need at least two to compare.\n` +
+        `Run \`npm run compare -- --list\` to see available dates.`
+      );
+    }
+    resolvedA = prev.path;
+    resolvedB = latest.path;
+  }
 
   // loadSnapshot() auto-migrates each baseline to the current schema version
   // and validates the result after migration.  No pre-validation needed here.
-  const snapA = loadSnapshot(a), snapB = loadSnapshot(b);
+  const snapA = loadSnapshot(resolvedA), snapB = loadSnapshot(resolvedB);
   const report = diffSnapshots(snapA, snapB);
   let content: string;
   if (jsonMode) { content = JSON.stringify(report, null, 2); }
