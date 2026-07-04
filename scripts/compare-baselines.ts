@@ -448,9 +448,11 @@ async function main(): Promise<void> {
     if (from !== null) {
       resolvedA = resolveBaselineByDate(from, BASELINES_DIR);
     } else {
-      // No --from: use the baseline immediately before the resolved 'to' date
-      const bDate = to ?? findLatestBaseline(allBaselines)?.date;
-      if (!bDate) throw new Error("No baselines found; capture a baseline first.");
+      // No --from and no --to means we can't reach here (outer condition requires
+      // at least one to be non-null). When to !== null, use it directly; when
+      // to === null we already resolved resolvedB from the latest above — derive
+      // bDate from that latest entry.
+      const bDate = to !== null ? to : findLatestBaseline(allBaselines)!.date;
       const prev = findPreviousBaseline(bDate, allBaselines);
       if (!prev) {
         throw new Error(

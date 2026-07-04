@@ -1,4 +1,4 @@
-import { readdirSync, existsSync } from "fs";
+import { readdirSync, existsSync, statSync } from "fs";
 import { resolve, join } from "path";
 
 export interface BaselineEntry {
@@ -11,6 +11,11 @@ export interface BaselineEntry {
 
 const DATE_FILE_PATTERN = /^(\d{4}-\d{2}-\d{2})\.json$/;
 
+/** Returns true when the path exists and is a directory (not a file/symlink-to-file). */
+function isDirectory(p: string): boolean {
+  try { return statSync(p).isDirectory(); } catch { return false; }
+}
+
 /**
  * Lists all available baseline files from `baselinesDir/` (monthly) and
  * `baselinesDir/weekly/` (weekly), sorted by date descending.
@@ -20,8 +25,8 @@ export function listAllBaselines(baselinesDir: string): BaselineEntry[] {
   const entries: BaselineEntry[] = [];
   const absDir = resolve(baselinesDir);
 
-  if (existsSync(absDir)) {
-    for (const file of readdirSync(absDir)) {
+  if (isDirectory(absDir)) {
+    for (const file of readdirSync(absDir, { encoding: "utf8" })) {
       const match = DATE_FILE_PATTERN.exec(file);
       if (match) {
         entries.push({ date: match[1], path: join(absDir, file), type: "monthly" });
@@ -30,8 +35,8 @@ export function listAllBaselines(baselinesDir: string): BaselineEntry[] {
   }
 
   const weeklyDir = join(absDir, "weekly");
-  if (existsSync(weeklyDir)) {
-    for (const file of readdirSync(weeklyDir)) {
+  if (isDirectory(weeklyDir)) {
+    for (const file of readdirSync(weeklyDir, { encoding: "utf8" })) {
       const match = DATE_FILE_PATTERN.exec(file);
       if (match) {
         entries.push({ date: match[1], path: join(weeklyDir, file), type: "weekly" });
@@ -62,6 +67,13 @@ export function resolveBaselineByDate(date: string, baselinesDir: string): strin
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error(
       `Invalid date format "${date}" — expected YYYY-MM-DD (e.g. 2026-06-03)`
+    );
+  }
+  // Basic calendar-range validation to surface typos early
+  const [year, month, day] = date.split("-").map(Number);
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new Error(
+      `Invalid date "${date}" — month must be 01–12 and day must be 01–31`
     );
   }
 

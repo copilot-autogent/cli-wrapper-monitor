@@ -29,8 +29,15 @@ vi.mock("fs", async (importOriginal) => {
       const s = String(p);
       return mockFiles.has(s) || mockDirs.has(s);
     }),
-    readdirSync: vi.fn().mockImplementation((p: unknown) => {
+    statSync: vi.fn().mockImplementation((p: unknown) => {
       const s = String(p);
+      if (mockDirs.has(s)) return { isDirectory: () => true };
+      if (mockFiles.has(s)) return { isDirectory: () => false };
+      const err = Object.assign(new Error(`ENOENT: ${s}`), { code: "ENOENT" });
+      throw err;
+    }),
+    readdirSync: vi.fn().mockImplementation((p: unknown) => {
+      const s = typeof p === "string" ? p : String(p);
       if (mockDirs.has(s)) return mockDirs.get(s)!;
       const err = Object.assign(new Error(`ENOENT: ${s}`), { code: "ENOENT" });
       throw err;
@@ -48,12 +55,13 @@ function setupBaselines(monthly: string[], weekly: string[]): void {
   mockFiles.clear();
   mockDirs.clear();
 
-  // Register the baselines root dir
+  // Always register the baselines root dir (even when empty)
   mockDirs.set(BASE, monthly.map((d) => `${d}.json`));
   for (const d of monthly) {
     mockFiles.add(`${BASE}/${d}.json`);
   }
 
+  // Always register the weekly dir when there are weekly entries
   if (weekly.length > 0) {
     mockDirs.set(`${BASE}/weekly`, weekly.map((d) => `${d}.json`));
     for (const d of weekly) {
@@ -81,13 +89,7 @@ describe("listAllBaselines", () => {
   });
 
   it("returns weekly entries when no monthly dir", () => {
-    mockFiles.clear();
-    mockDirs.clear();
-    // No monthly dir
-    mockDirs.set(`${BASE}/weekly`, ["2026-06-10.json", "2026-06-03.json"]);
-    mockFiles.add(`${BASE}/weekly/2026-06-10.json`);
-    mockFiles.add(`${BASE}/weekly/2026-06-03.json`);
-
+    setupBaselines([], ["2026-06-10", "2026-06-03"]);
     const entries = listAllBaselines(BASE);
     expect(entries.map((e) => e.date)).toEqual(["2026-06-10", "2026-06-03"]);
     expect(entries.every((e) => e.type === "weekly")).toBe(true);
@@ -165,6 +167,13 @@ describe("resolveBaselineByDate", () => {
     expect(() => resolveBaselineByDate("20260603", BASE)).toThrow(/Invalid date format/);
     expect(() => resolveBaselineByDate("2026/06/03", BASE)).toThrow(/Invalid date format/);
     expect(() => resolveBaselineByDate("", BASE)).toThrow(/Invalid date format/);
+  });
+
+  it("throws for out-of-range month or day", () => {
+    expect(() => resolveBaselineByDate("2026-13-01", BASE)).toThrow(/Invalid date/);
+    expect(() => resolveBaselineByDate("2026-00-01", BASE)).toThrow(/Invalid date/);
+    expect(() => resolveBaselineByDate("2026-06-00", BASE)).toThrow(/Invalid date/);
+    expect(() => resolveBaselineByDate("2026-06-32", BASE)).toThrow(/Invalid date/);
   });
 
   it("throws with --list hint when date not found", () => {
