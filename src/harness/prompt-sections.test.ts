@@ -399,11 +399,38 @@ describe('diffPromptSectionTexts', () => {
     expect(result.size).toBe(0);
   });
 
-  it('returns unavailable=true when text is absent on one side', () => {
+  it('returns unavailable=true when text is absent on both sides', () => {
+    const baseline = [{ name: 'Safety', charCount: 100, tokenEstimate: 25 }]; // no text
+    const current = [{ name: 'Safety', charCount: 120, tokenEstimate: 30 }]; // no text either
+    const result = diffPromptSectionTexts(baseline, current);
+    expect(result.get('Safety')?.unavailable).toBe(true);
+  });
+
+  it('returns unavailable=true when text absent on one side only', () => {
     const baseline = [{ name: 'Safety', charCount: 100, tokenEstimate: 25 }]; // no text
     const current = [{ name: 'Safety', charCount: 120, tokenEstimate: 30, text: 'new text' }];
     const result = diffPromptSectionTexts(baseline, current);
     expect(result.get('Safety')?.unavailable).toBe(true);
+  });
+
+  it('treats new section (text on current side only) as all-added lines', () => {
+    const baseline: PromptSection[] = [];
+    const current = [{ name: 'Safety', charCount: 20, tokenEstimate: 5, text: 'rule one\nrule two' }];
+    const result = diffPromptSectionTexts(baseline, current);
+    const diff = result.get('Safety');
+    expect(diff?.unavailable).toBe(false);
+    expect(diff?.lines.every((l) => l.type === 'added')).toBe(true);
+    expect(diff?.totalChangedLines).toBeGreaterThan(0);
+  });
+
+  it('treats removed section (text on baseline side only) as all-removed lines', () => {
+    const baseline = [{ name: 'Safety', charCount: 20, tokenEstimate: 5, text: 'rule one\nrule two' }];
+    const current: PromptSection[] = [];
+    const result = diffPromptSectionTexts(baseline, current);
+    const diff = result.get('Safety');
+    expect(diff?.unavailable).toBe(false);
+    expect(diff?.lines.every((l) => l.type === 'removed')).toBe(true);
+    expect(diff?.totalChangedLines).toBeGreaterThan(0);
   });
 
   it('computes diff when both sides have text', () => {

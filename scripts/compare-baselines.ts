@@ -389,16 +389,41 @@ function generateMarkdownReport(
   lines.push(`## Prompt Section Changes`, "");
   if (!report.promptSectionsAvailable) {
     lines.push("> _Section data unavailable — baselines pre-date section attribution._", "");
-  } else if (report.promptSectionChanges.length === 0) {
-    lines.push("> No prompt section changes detected.", "");
   } else {
-    // Pre-compute text diffs for all sections once (outside the loop)
+    // Pre-compute text diffs for all sections once (outside the loop).
+    // This also catches sections where char count is equal but text changed
+    // (same-length rewrites that are invisible in the char-count diff alone).
     const maxChangedLines = diffSectionsMode === 'summary' ? 5 : 0;
     const textDiffs = diffSectionsMode !== 'off'
       ? diffPromptSectionTexts(snapA.promptSections, snapB.promptSections, maxChangedLines)
       : null;
 
+    // Sections tracked by char-count delta (added, removed, or resized)
+    const reportedNames = new Set<string>();
+
+    const renderTextDiff = (sectionName: string) => {
+      if (!textDiffs) return;
+      const textDiff = textDiffs.get(sectionName);
+      if (!textDiff || textDiff.unavailable) return;
+      if (textDiff.totalChangedLines === 0) {
+        lines.push(`  > _Text unchanged._`);
+      } else {
+        lines.push('');
+        lines.push('  ```diff');
+        for (const dl of textDiff.lines) {
+          const prefix = dl.type === 'added' ? '+' : '-';
+          lines.push(`  ${prefix} ${dl.text}`);
+        }
+        if (diffSectionsMode === 'summary' && textDiff.totalChangedLines > textDiff.lines.length) {
+          const remaining = textDiff.totalChangedLines - textDiff.lines.length;
+          lines.push(`  … ${remaining} more changed line${remaining === 1 ? '' : 's'} (use --diff-sections=full to see all)`);
+        }
+        lines.push('  ```');
+      }
+    };
+
     for (const change of report.promptSectionChanges) {
+      reportedNames.add(change.name);
       const sign = change.deltaAbsolute >= 0 ? '+' : '';
       const pctStr =
         change.deltaPct !== null ? ` (${sign}${change.deltaPct.toFixed(1)}%)` : ' (new)';
@@ -414,28 +439,22 @@ function generateMarkdownReport(
       lines.push(
         `${icon} **${change.name}**: ${fromStr} → ${toStr} (${sign}${change.deltaAbsolute.toLocaleString()} chars${pctStr})`,
       );
+      renderTextDiff(change.name);
+    }
 
-      // Render line-level text diff for this section when enabled
-      if (textDiffs) {
-        const textDiff = textDiffs.get(change.name);
-        if (textDiff && !textDiff.unavailable) {
-          if (textDiff.totalChangedLines === 0) {
-            lines.push(`  > _Text unchanged._`);
-          } else {
-            lines.push('');
-            lines.push('  ```diff');
-            for (const dl of textDiff.lines) {
-              const prefix = dl.type === 'added' ? '+' : '-';
-              lines.push(`  ${prefix} ${dl.text}`);
-            }
-            if (diffSectionsMode === 'summary' && textDiff.totalChangedLines > textDiff.lines.length) {
-              const remaining = textDiff.totalChangedLines - textDiff.lines.length;
-              lines.push(`  … ${remaining} more changed line${remaining === 1 ? '' : 's'} (use --diff-sections=full to see all)`);
-            }
-            lines.push('  ```');
-          }
-        }
+    // Also surface sections where char count did not change but text was rewritten
+    // (same-length edits are invisible in the char-count diff).
+    if (textDiffs) {
+      for (const [name, textDiff] of textDiffs) {
+        if (reportedNames.has(name)) continue; // already shown above
+        if (textDiff.unavailable || textDiff.totalChangedLines === 0) continue;
+        lines.push(`✏️ **${name}**: same size, text rewritten`);
+        renderTextDiff(name);
       }
+    }
+
+    if (report.promptSectionChanges.length === 0 && (!textDiffs || [...textDiffs.values()].every((d) => d.unavailable || d.totalChangedLines === 0))) {
+      lines.push("> No prompt section changes detected.");
     }
     lines.push("");
   }

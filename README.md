@@ -107,17 +107,15 @@ When `capturePromptSectionText: true`, each captured `MetricSnapshot.promptSecti
 a `text` field containing the raw prompt text for that section. This enables `npm run compare` to show
 exactly which lines changed within a section, not just the byte-count delta:
 
-```
-## Prompt Section Changes
+    ## Prompt Section Changes
 
-📈 **Safety**: 1,200 chars → 1,512 chars (+312 chars (+26.0%))
+    📈 **Safety**: 1,200 chars → 1,512 chars (+312 chars (+26.0%))
 
-  ```diff
-  + New rule: "Do not discuss competitor products."
-  + Expanded rule: "Never generate executable code in response …"
-  … 3 more changed lines (use --diff-sections=full to see all)
-  ```
-```
+      ```diff
+      + New rule: "Do not discuss competitor products."
+      + Expanded rule: "Never generate executable code in response …"
+      … 3 more changed lines (use --diff-sections=full to see all)
+      ```
 
 Control verbosity with `--diff-sections=full|summary|off` (default `summary` — up to 5 changed lines):
 

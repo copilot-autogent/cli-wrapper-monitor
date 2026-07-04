@@ -201,6 +201,28 @@ export function diffTextLines(
   // Fast path: identical texts
   if (prev === curr) return { lines: [], totalChangedLines: 0, unavailable: false };
 
+  // Fast path: prev is empty — every line in curr is new
+  if (prev === '') {
+    const allLines: DiffLine[] = curr.split('\n').map((text) => ({ type: 'added' as const, text }));
+    const totalChangedLines = allLines.length;
+    return {
+      lines: maxChangedLines > 0 ? allLines.slice(0, maxChangedLines) : allLines,
+      totalChangedLines,
+      unavailable: false,
+    };
+  }
+
+  // Fast path: curr is empty — every line in prev was removed
+  if (curr === '') {
+    const allLines: DiffLine[] = prev.split('\n').map((text) => ({ type: 'removed' as const, text }));
+    const totalChangedLines = allLines.length;
+    return {
+      lines: maxChangedLines > 0 ? allLines.slice(0, maxChangedLines) : allLines,
+      totalChangedLines,
+      unavailable: false,
+    };
+  }
+
   const a = prev.split('\n');
   const b = curr.split('\n');
 
@@ -255,7 +277,12 @@ export function diffTextLines(
 }
 
 /**
- * Compute text diffs for each prompt section that has text available on both sides.
+ * Compute text diffs for each prompt section that has text available on at least one side.
+ *
+ * - When text exists on both sides: performs a line-level diff.
+ * - When text exists only on the current side (new section): all lines are shown as 'added'.
+ * - When text exists only on the baseline side (removed section): all lines are shown as 'removed'.
+ * - When text is absent on both sides for a section: marked as unavailable.
  *
  * @param baseline         Baseline sections (may lack .text).
  * @param current          Current sections (may lack .text).
@@ -267,23 +294,35 @@ export function diffPromptSectionTexts(
   maxChangedLines = 0,
 ): Map<string, TextDiffResult> {
   const results = new Map<string, TextDiffResult>();
-  if (!baseline || !current) return results;
+  if (!baseline && !current) return results;
 
+  // Use has() to distinguish "section missing" from "section exists but no text"
   const baselineMap = new Map<string, string | undefined>(
-    baseline.map((s) => [s.name, s.text]),
+    (baseline ?? []).map((s) => [s.name, s.text]),
   );
   const currentMap = new Map<string, string | undefined>(
-    current.map((s) => [s.name, s.text]),
+    (current ?? []).map((s) => [s.name, s.text]),
   );
 
   const allNames = new Set([...baselineMap.keys(), ...currentMap.keys()]);
   for (const name of allNames) {
+    const inBaseline = baselineMap.has(name);
+    const inCurrent = currentMap.has(name);
     const prevText = baselineMap.get(name);
     const currText = currentMap.get(name);
-    if (prevText === undefined || currText === undefined) {
-      results.set(name, { lines: [], totalChangedLines: 0, unavailable: true });
-    } else {
+
+    if (!inBaseline && inCurrent && currText !== undefined) {
+      // New section: show all current lines as added
+      results.set(name, diffTextLines('', currText, maxChangedLines));
+    } else if (inBaseline && !inCurrent && prevText !== undefined) {
+      // Removed section: show all baseline lines as removed
+      results.set(name, diffTextLines(prevText, '', maxChangedLines));
+    } else if (prevText !== undefined && currText !== undefined) {
+      // Both sides have text — compute a normal line diff
       results.set(name, diffTextLines(prevText, currText, maxChangedLines));
+    } else {
+      // Text absent on one or both sides (section exists but text not captured)
+      results.set(name, { lines: [], totalChangedLines: 0, unavailable: true });
     }
   }
   return results;
