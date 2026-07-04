@@ -1,0 +1,64 @@
+/**
+ * Baseline annotation loader.
+ *
+ * Annotations are optional per-date markdown files stored in a `notes/` directory.
+ * File naming convention: `notes/YYYY-MM-DD.md`
+ * Missing files → undefined (no annotation, no error).
+ */
+
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+
+/** Maximum annotation length for the "short" display in trend report tables. */
+export const ANNOTATION_TRUNCATE_LEN = 50;
+
+/**
+ * Truncate annotation text to `maxLen` characters, appending "…" when truncated.
+ * Pure function — no I/O.
+ */
+export function truncateAnnotation(text: string, maxLen = ANNOTATION_TRUNCATE_LEN): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  return trimmed.slice(0, maxLen - 1) + "…";
+}
+
+/**
+ * Load a single annotation for the given ISO date (YYYY-MM-DD).
+ * Returns the file content (trimmed) if the file exists, or undefined if it doesn't.
+ * Never throws for missing files — only throws on unexpected I/O errors.
+ */
+export function loadAnnotation(notesDir: string, date: string): string | undefined {
+  const filePath = join(notesDir, `${date}.md`);
+  if (!existsSync(filePath)) return undefined;
+  return readFileSync(filePath, "utf-8").trim() || undefined;
+}
+
+/**
+ * Load all annotations from a `notes/` directory.
+ * Returns a `Record<YYYY-MM-DD, content>` for every file matching the naming convention.
+ * Returns an empty object when the directory doesn't exist (not an error).
+ */
+export function loadAnnotations(notesDir: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!existsSync(notesDir)) return result;
+
+  const DATE_RE = /^(\d{4}-\d{2}-\d{2})\.md$/;
+  let entries: string[];
+  try {
+    entries = readdirSync(notesDir);
+  } catch {
+    return result;
+  }
+
+  for (const entry of entries) {
+    const m = DATE_RE.exec(entry);
+    if (!m) continue;
+    const date = m[1];
+    const content = loadAnnotation(notesDir, date);
+    if (content !== undefined) {
+      result[date] = content;
+    }
+  }
+
+  return result;
+}

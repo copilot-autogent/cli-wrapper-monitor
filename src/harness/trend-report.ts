@@ -6,6 +6,7 @@
 
 import type { MetricSnapshot } from "./types.js";
 import { diffSnapshots } from "./diff.js";
+import { truncateAnnotation } from "./annotations.js";
 
 // ---------------------------------------------------------------------------
 // Row model
@@ -25,6 +26,11 @@ export interface TrendRow {
    * Null for the first snapshot (no previous to compare against).
    */
   securityPostureScore: number | null;
+  /**
+   * Optional free-text annotation for this baseline date, loaded from `notes/YYYY-MM-DD.md`.
+   * Undefined when no annotation file exists.
+   */
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,8 +384,16 @@ export function buildTrendMatrixMarkdown(matrix: TrendMatrix): string {
  * Generate the full trend report markdown string from an ordered list of snapshots.
  * Gracefully handles 0 or 1 snapshots.
  * Input is sorted chronologically before processing so callers need not pre-sort.
+ *
+ * @param snapshots - List of captured baseline snapshots.
+ * @param annotations - Optional map of ISO date → annotation text (from notes/ dir).
+ * @param verbose - When true, show full annotation text; otherwise truncate to 50 chars.
  */
-export function generateTrendReport(snapshots: MetricSnapshot[]): string {
+export function generateTrendReport(
+  snapshots: MetricSnapshot[],
+  annotations: Record<string, string> = {},
+  verbose = false,
+): string {
   const lines: string[] = [];
 
   lines.push("# CLI Wrapper Monitor — Trend Report");
@@ -415,11 +429,16 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
   // may lack the metric; using the first non-null avoids all-`—` delta columns).
   const firstNonNullChars = rows.find((r) => r.systemPromptChars !== null) ?? null;
 
+  // Determine whether any row has annotations to decide whether to render Note column
+  const hasAnnotations = Object.keys(annotations).length > 0;
+
   // Table
-  const header =
-    "| Date | systemPromptChars | systemPromptTokens | toolCount | headroomPct | injectionRefusedRate | securityPostureScore | Δ chars |";
-  const sep =
-    "|------|-------------------|--------------------|-----------|-------------|----------------------|----------------------|---------|";
+  const header = hasAnnotations
+    ? "| Date | systemPromptChars | systemPromptTokens | toolCount | headroomPct | injectionRefusedRate | securityPostureScore | Δ chars | Note |"
+    : "| Date | systemPromptChars | systemPromptTokens | toolCount | headroomPct | injectionRefusedRate | securityPostureScore | Δ chars |";
+  const sep = hasAnnotations
+    ? "|------|-------------------|--------------------|-----------|-------------|----------------------|----------------------|---------|------|"
+    : "|------|-------------------|--------------------|-----------|-------------|----------------------|----------------------|---------|";
   lines.push(header);
   lines.push(sep);
 
@@ -442,9 +461,22 @@ export function generateTrendReport(snapshots: MetricSnapshot[]): string {
       r.securityPostureScore !== null
         ? `${r.securityPostureScore}/100`
         : "—";
-    lines.push(
-      `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${injDisplay} | ${scoreDisplay} | ${d} |`
-    );
+
+    const rawNote = annotations[r.date];
+    if (hasAnnotations) {
+      const noteDisplay = rawNote !== undefined
+        ? (verbose ? rawNote : truncateAnnotation(rawNote))
+        : "";
+      // Escape pipe chars in note text so they don't break the Markdown table
+      const noteEscaped = noteDisplay.replace(/\|/g, "\\|");
+      lines.push(
+        `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${injDisplay} | ${scoreDisplay} | ${d} | ${rawNote !== undefined ? "✎ " : ""}${noteEscaped} |`
+      );
+    } else {
+      lines.push(
+        `| ${r.date} | ${fmt(r.systemPromptChars)} | ${fmt(r.systemPromptTokens)} | ${fmt(r.toolCount)} | ${fmtPct(r.headroomPct)} | ${injDisplay} | ${scoreDisplay} | ${d} |`
+      );
+    }
   }
 
   lines.push("");
