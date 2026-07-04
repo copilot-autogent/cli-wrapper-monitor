@@ -223,3 +223,39 @@ describe('capturePromptSectionText config field', () => {
     expect(() => loadCaptureConfig(configPath)).toThrow('capturePromptSectionText must be a boolean');
   });
 });
+
+// captureProbeResults field
+describe('captureProbeResults config field', () => {
+  const configPath = '/tmp/test-capture-config-probe-results.json';
+
+  afterEach(() => {
+    try { rmSync(configPath); } catch { /* ignore */ }
+  });
+
+  it('defaults captureProbeResults to false when field absent', () => {
+    writeFileSync(configPath, JSON.stringify({}), 'utf-8');
+    const cfg = loadCaptureConfig(configPath);
+    expect(cfg.captureProbeResults).toBe(false);
+  });
+
+  it('DEFAULT_CONFIG has captureProbeResults=false', () => {
+    expect(DEFAULT_CONFIG.captureProbeResults).toBe(false);
+  });
+
+  it('parses captureProbeResults=true', () => {
+    writeFileSync(configPath, JSON.stringify({ captureProbeResults: true }), 'utf-8');
+    const cfg = loadCaptureConfig(configPath);
+    expect(cfg.captureProbeResults).toBe(true);
+  });
+
+  it('parses captureProbeResults=false', () => {
+    writeFileSync(configPath, JSON.stringify({ captureProbeResults: false }), 'utf-8');
+    const cfg = loadCaptureConfig(configPath);
+    expect(cfg.captureProbeResults).toBe(false);
+  });
+
+  it('throws when captureProbeResults is not a boolean', () => {
+    writeFileSync(configPath, JSON.stringify({ captureProbeResults: 'yes' }), 'utf-8');
+    expect(() => loadCaptureConfig(configPath)).toThrow('captureProbeResults must be a boolean');
+  });
+});

@@ -23,6 +23,12 @@ export interface CaptureConfig {
    * Enabling this is required for prompt section text diff in compare reports.
    */
   capturePromptSectionText: boolean;
+  /**
+   * When true, store per-probe pass/fail results in MetricSnapshot.probeResults[].
+   * Default false — keeps baseline file sizes small. Required for `npm run probe-audit`.
+   * Only has effect when the refusal-rate experiment runs (requires GITHUB_TOKEN).
+   */
+  captureProbeResults: boolean;
 }
 
 export const DEFAULT_CONFIG: CaptureConfig = {
@@ -30,6 +36,7 @@ export const DEFAULT_CONFIG: CaptureConfig = {
   weeklyBaselinesDir: 'baselines/weekly',
   retentionMonths: 6,
   capturePromptSectionText: false,
+  captureProbeResults: false,
 };
 
 /**
@@ -89,6 +96,13 @@ export function loadCaptureConfig(configPath = 'capture.config.json'): CaptureCo
       throw new Error(`${configPath}: capturePromptSectionText must be a boolean`);
     }
     config.capturePromptSectionText = obj.capturePromptSectionText;
+  }
+
+  if ('captureProbeResults' in obj) {
+    if (typeof obj.captureProbeResults !== 'boolean') {
+      throw new Error(`${configPath}: captureProbeResults must be a boolean`);
+    }
+    config.captureProbeResults = obj.captureProbeResults;
   }
 
   return config;

@@ -728,6 +728,35 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     }
   }
 
+  // Attach per-probe results when captureProbeResults=true and refusal-rate experiment ran.
+  if (captureConfig.captureProbeResults) {
+    const refusalResult = snapshot.experiments['refusal-rate'];
+    if (refusalResult && !refusalResult.error && refusalResult.rawData) {
+      const rawData = refusalResult.rawData as {
+        probes?: Array<{
+          category: string;
+          prompt: string;
+          classification: string;
+          refused: boolean;
+          injectionScore?: number;
+        }>;
+      };
+      if (Array.isArray(rawData.probes)) {
+        snapshot.probeResults = rawData.probes.map((p, i) => ({
+          id: `p${i + 1}`,
+          category: p.category as import('../src/harness/types.js').ProbeCategory,
+          prompt: p.prompt,
+          classification: p.classification as import('../src/harness/types.js').ClassificationResult,
+          refused: p.refused,
+          ...(p.injectionScore !== undefined && { injectionScore: p.injectionScore }),
+        }));
+        console.log(`Probe results captured: ${snapshot.probeResults.length} probes (captureProbeResults=true).`);
+      }
+    } else {
+      console.log('Probe results: skipped (refusal-rate experiment did not run or had no probe data).');
+    }
+  }
+
   // Capture model pool
   if (!SKIP_MODEL_POOL) {
     console.log('Capturing model pool...');
