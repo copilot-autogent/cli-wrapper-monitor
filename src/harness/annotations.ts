@@ -53,7 +53,7 @@ export function loadAnnotations(notesDir: string): Record<string, string> {
   const DATE_RE = /^(\d{4}-\d{2}-\d{2})\.md$/;
   let entries: string[];
   try {
-    entries = readdirSync(notesDir);
+    entries = readdirSync(notesDir).sort(); // sort for deterministic output
   } catch {
     // Directory doesn't exist or isn't readable — treat as empty annotations
     return result;
