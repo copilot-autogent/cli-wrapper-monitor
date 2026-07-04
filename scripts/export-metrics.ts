@@ -110,7 +110,7 @@ export function extractRow(
     const values = hwEntries
       .map((e) => e.headroomTokens)
       .filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
-    headroomMin = values.length > 0 ? Math.min(...values) : null;
+    headroomMin = values.length > 0 ? values.reduce((a, b) => Math.min(a, b), Infinity) : null;
   }
 
   // Security posture score: computed via diff against the previous snapshot.
@@ -154,11 +154,11 @@ const CSV_COLUMNS: (keyof ExportRow)[] = [
   "schemaVersion",
 ];
 
-/** Escape a value for CSV: wrap in double-quotes if it contains commas, newlines, or quotes. */
+/** Escape a value for CSV: wrap in double-quotes if it contains commas, newlines (LF/CR), or quotes. */
 function csvField(value: string | number | null): string {
   if (value === null || value === undefined) return "";
   const str = String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
@@ -278,6 +278,9 @@ function parseArgs(argv: string[]): CliArgs {
 export function buildExportRows(baselinesDir: string): ExportRow[] {
   const paths = collectBaselinePaths(baselinesDir);
   const snapshots: MetricSnapshot[] = paths.map(loadSnapshot);
+  // Sort by capturedAt (ascending) so securityPostureScore diffs adjacent snapshots correctly,
+  // even if filenames diverge from capture timestamps (e.g. backfilled or renamed files).
+  snapshots.sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
 
   return snapshots.map((snap, i) => extractRow(snap, i > 0 ? snapshots[i - 1] : undefined));
 }

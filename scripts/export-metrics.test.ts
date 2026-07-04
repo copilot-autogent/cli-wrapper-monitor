@@ -5,6 +5,8 @@
  * snapshots — no disk reads.
  */
 import { describe, it, expect } from "vitest";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { extractRow, serializeCSV, serializeJSON, buildExportRows } from "./export-metrics.js";
 import type { ExportRow } from "./export-metrics.js";
 import type { MetricSnapshot } from "../src/harness/types.js";
@@ -12,6 +14,9 @@ import type { MetricSnapshot } from "../src/harness/types.js";
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/** Resolve a path relative to the repo root, regardless of cwd. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function makeSnapshot(overrides: Partial<MetricSnapshot> = {}): MetricSnapshot {
   return {
@@ -329,13 +334,13 @@ describe("serializeJSON", () => {
 
 describe("buildExportRows", () => {
   it("returns empty array for a non-existent directory", () => {
-    const rows = buildExportRows("/tmp/nonexistent-baselines-fixtures-xyz");
+    const rows = buildExportRows(resolve(REPO_ROOT, "nonexistent-baselines-fixtures-xyz"));
     expect(rows).toEqual([]);
   });
 
   it("reads all baseline JSON files and skips schema.json / latest.json", async () => {
-    // Use the real baselines/ directory as a live fixture.
-    const rows = buildExportRows("baselines");
+    const baselinesDir = resolve(REPO_ROOT, "baselines");
+    const rows = buildExportRows(baselinesDir);
     // Should have at least the known baseline files, excluding schema.json & latest.json
     expect(rows.length).toBeGreaterThanOrEqual(6);
     for (const row of rows) {
@@ -346,7 +351,8 @@ describe("buildExportRows", () => {
   });
 
   it("first row has null securityPostureScore; subsequent rows have a number", () => {
-    const rows = buildExportRows("baselines");
+    const baselinesDir = resolve(REPO_ROOT, "baselines");
+    const rows = buildExportRows(baselinesDir);
     expect(rows.length).toBeGreaterThan(1);
     expect(rows[0].securityPostureScore).toBeNull();
     for (const row of rows.slice(1)) {
@@ -354,8 +360,9 @@ describe("buildExportRows", () => {
     }
   });
 
-  it("produces rows in ascending date order (sorted by filename)", () => {
-    const rows = buildExportRows("baselines");
+  it("produces rows in ascending date order (sorted by capturedAt)", () => {
+    const baselinesDir = resolve(REPO_ROOT, "baselines");
+    const rows = buildExportRows(baselinesDir);
     for (let i = 1; i < rows.length; i++) {
       expect(new Date(rows[i].date).getTime()).toBeGreaterThanOrEqual(
         new Date(rows[i - 1].date).getTime(),
