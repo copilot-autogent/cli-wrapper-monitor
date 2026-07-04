@@ -184,8 +184,9 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
   const noteB = loadAnnotation("notes", dateB);
   if (noteA !== undefined || noteB !== undefined) {
     lines.push("### 📝 Annotations", "");
-    if (noteA !== undefined) lines.push(`- **${dateA}**: ${noteA}`);
-    if (noteB !== undefined) lines.push(`- **${dateB}**: ${noteB}`);
+    // Strip newlines to keep each annotation on a single bullet line
+    if (noteA !== undefined) lines.push(`- **${dateA}**: ${noteA.replace(/[\r\n]+/g, " ")}`);
+    if (noteB !== undefined) lines.push(`- **${dateB}**: ${noteB.replace(/[\r\n]+/g, " ")}`);
     lines.push("");
   }
 

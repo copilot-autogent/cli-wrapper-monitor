@@ -12,7 +12,7 @@ baselines/snapshot-*.json
 reports/dashboard*.html
 
 # Local-only baseline annotations (opt-in to commit by removing this line)
-notes/
+/notes/
 
 # Environment
 .env
