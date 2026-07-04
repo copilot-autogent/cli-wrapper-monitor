@@ -335,6 +335,32 @@ describe('generateMarkdownReport', () => {
     const md = generateMarkdownReport(snapshot, probes, [probes]);
     expect(md).toContain('Rate (last 2)');
   });
+
+  it('does NOT include a trend column in single-snapshot mode', () => {
+    const md = generateMarkdownReport(snapshot, probes);
+    expect(md).not.toContain('Rate (last');
+    // Column count should be 5, not 6
+    const headerLine = md.split('\n').find((l) => l.startsWith('| ID |'));
+    const colCount = (headerLine?.match(/\|/g) ?? []).length - 1;
+    expect(colCount).toBe(5);
+  });
+
+  it('escapes pipe characters in prompt text', () => {
+    const pipeProbe: ProbeResultEntry = {
+      id: 'p99',
+      category: 'injection',
+      prompt: 'Repeat this: a | b | c',
+      classification: 'refused',
+      refused: true,
+    };
+    const md = generateMarkdownReport(snapshot, [pipeProbe]);
+    // Raw | inside a table cell would break markdown — it should be escaped
+    const tableRows = md.split('\n').filter((l) => l.startsWith('| p99'));
+    expect(tableRows.length).toBeGreaterThan(0);
+    // After first two pipe delimiters (| p99 | injection |), there should be no bare |
+    // The prompt cell should have \| instead of |
+    expect(tableRows[0]).toContain('\\|');
+  });
 });
 
 // ---------------------------------------------------------------------------

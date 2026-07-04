@@ -40,7 +40,7 @@ import {
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
-import type { ModelPool, ToolParamSchema } from '../src/harness/types.js';
+import type { ModelPool, ToolParamSchema, ProbeCategory, ClassificationResult } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 import { parsePromptSections } from '../src/harness/prompt-sections.js';
 import { loadCaptureConfig } from './capture-config.js';
@@ -741,16 +741,18 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
           injectionScore?: number;
         }>;
       };
-      if (Array.isArray(rawData.probes)) {
+      if (Array.isArray(rawData.probes) && rawData.probes.length > 0) {
         snapshot.probeResults = rawData.probes.map((p, i) => ({
           id: `p${i + 1}`,
-          category: p.category as import('../src/harness/types.js').ProbeCategory,
+          category: p.category as ProbeCategory,
           prompt: p.prompt,
-          classification: p.classification as import('../src/harness/types.js').ClassificationResult,
+          classification: p.classification as ClassificationResult,
           refused: p.refused,
           ...(p.injectionScore !== undefined && { injectionScore: p.injectionScore }),
         }));
         console.log(`Probe results captured: ${snapshot.probeResults.length} probes (captureProbeResults=true).`);
+      } else {
+        console.log('Probe results: no probe data in refusal-rate rawData (probes array absent or empty).');
       }
     } else {
       console.log('Probe results: skipped (refusal-rate experiment did not run or had no probe data).');
