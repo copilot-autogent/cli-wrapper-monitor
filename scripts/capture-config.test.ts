@@ -174,3 +174,52 @@ describe('resolveBaselinesDir', () => {
     expect(resolveBaselinesDir('manual')).toBe(DEFAULT_CONFIG.monthlyBaselinesDir);
   });
 });
+
+// ---------------------------------------------------------------------------
+// capturePromptSectionText field
+// ---------------------------------------------------------------------------
+
+describe('capturePromptSectionText config field', () => {
+  let tmpDir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    tmpDir = join(
+      tmpdir(),
+      `capture-config-test-pst-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(tmpDir, { recursive: true });
+    configPath = join(tmpDir, 'capture.config.json');
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('defaults capturePromptSectionText to false when field absent', () => {
+    writeFileSync(configPath, JSON.stringify({ retentionMonths: 3 }), 'utf-8');
+    const cfg = loadCaptureConfig(configPath);
+    expect(cfg.capturePromptSectionText).toBe(false);
+  });
+
+  it('DEFAULT_CONFIG has capturePromptSectionText=false', () => {
+    expect(DEFAULT_CONFIG.capturePromptSectionText).toBe(false);
+  });
+
+  it('parses capturePromptSectionText=true', () => {
+    writeFileSync(configPath, JSON.stringify({ capturePromptSectionText: true }), 'utf-8');
+    const cfg = loadCaptureConfig(configPath);
+    expect(cfg.capturePromptSectionText).toBe(true);
+  });
+
+  it('parses capturePromptSectionText=false', () => {
+    writeFileSync(configPath, JSON.stringify({ capturePromptSectionText: false }), 'utf-8');
+    const cfg = loadCaptureConfig(configPath);
+    expect(cfg.capturePromptSectionText).toBe(false);
+  });
+
+  it('throws when capturePromptSectionText is not a boolean', () => {
+    writeFileSync(configPath, JSON.stringify({ capturePromptSectionText: 'yes' }), 'utf-8');
+    expect(() => loadCaptureConfig(configPath)).toThrow('capturePromptSectionText must be a boolean');
+  });
+});

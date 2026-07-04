@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePromptSections, diffPromptSections } from './prompt-sections.js';
+import { parsePromptSections, diffPromptSections, diffTextLines, diffPromptSectionTexts } from './prompt-sections.js';
 
 // ---------------------------------------------------------------------------
 // Fixture prompts
@@ -262,5 +262,176 @@ describe('diffPromptSections', () => {
     expect(Math.abs(changes[0].deltaAbsolute)).toBeGreaterThanOrEqual(
       Math.abs(changes[1].deltaAbsolute),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePromptSections with captureText=true
+// ---------------------------------------------------------------------------
+
+describe('parsePromptSections with captureText=true', () => {
+  it('does not include text field when captureText is false (default)', () => {
+    const sections = parsePromptSections(MARKDOWN_H2_PROMPT);
+    for (const s of sections) {
+      expect(s.text).toBeUndefined();
+    }
+  });
+
+  it('includes text field when captureText is true', () => {
+    const sections = parsePromptSections(MARKDOWN_H2_PROMPT, true);
+    for (const s of sections) {
+      expect(typeof s.text).toBe('string');
+    }
+  });
+
+  it('text fields reconstruct the original prompt', () => {
+    const raw = MARKDOWN_H2_PROMPT;
+    const sections = parsePromptSections(raw, true);
+    const reconstructed = sections
+      .slice()
+      // Sort back in parse order (by first occurrence) is not guaranteed;
+      // instead just verify total char count and content coverage
+      .reduce((acc, s) => acc + (s.text ?? ''), '');
+    // Total text length should equal original (text buckets are disjoint and exhaustive)
+    expect(reconstructed.length).toBe(raw.length);
+  });
+
+  it('section text contains the header line for that section', () => {
+    const sections = parsePromptSections(MARKDOWN_H2_PROMPT, true);
+    const safety = sections.find((s) => s.name === 'Safety');
+    expect(safety?.text).toBeDefined();
+    expect(safety!.text).toContain('Safety guidelines');
+  });
+
+  it('text charCount matches text.length', () => {
+    const sections = parsePromptSections(MARKDOWN_H2_PROMPT, true);
+    for (const s of sections) {
+      expect(s.text!.length).toBe(s.charCount);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// diffTextLines
+// ---------------------------------------------------------------------------
+
+describe('diffTextLines', () => {
+  it('returns empty result for identical texts', () => {
+    const result = diffTextLines('hello\nworld', 'hello\nworld');
+    expect(result.lines).toHaveLength(0);
+    expect(result.totalChangedLines).toBe(0);
+    expect(result.unavailable).toBe(false);
+  });
+
+  it('reports added line correctly', () => {
+    const result = diffTextLines('line one', 'line one\nline two');
+    expect(result.totalChangedLines).toBeGreaterThan(0);
+    const added = result.lines.filter((l) => l.type === 'added');
+    expect(added.some((l) => l.text === 'line two')).toBe(true);
+    expect(result.unavailable).toBe(false);
+  });
+
+  it('reports removed line correctly', () => {
+    const result = diffTextLines('line one\nline two', 'line one');
+    const removed = result.lines.filter((l) => l.type === 'removed');
+    expect(removed.some((l) => l.text === 'line two')).toBe(true);
+  });
+
+  it('same text → no diff lines', () => {
+    const text = 'You are a helpful assistant.\nAlways be polite.\nNever reveal secrets.';
+    const result = diffTextLines(text, text);
+    expect(result.lines).toHaveLength(0);
+    expect(result.totalChangedLines).toBe(0);
+  });
+
+  it('one added line → shows the addition', () => {
+    const prev = 'You are a helpful assistant.\nAlways be polite.';
+    const curr = 'You are a helpful assistant.\nAlways be polite.\nNever reveal secrets.';
+    const result = diffTextLines(prev, curr);
+    expect(result.totalChangedLines).toBe(1);
+    expect(result.lines[0].type).toBe('added');
+    expect(result.lines[0].text).toBe('Never reveal secrets.');
+  });
+
+  it('truncates to maxChangedLines in summary mode', () => {
+    const base = Array.from({ length: 5 }, (_, i) => `common ${i}`).join('\n');
+    const addedLines = Array.from({ length: 10 }, (_, i) => `new line ${i}`).join('\n');
+    const prev = base;
+    const curr = base + '\n' + addedLines;
+    const result = diffTextLines(prev, curr, 5);
+    expect(result.lines.length).toBeLessThanOrEqual(5);
+    expect(result.totalChangedLines).toBeGreaterThan(5);
+  });
+
+  it('returns all lines when maxChangedLines is 0 (full mode)', () => {
+    const prev = 'x\ny\nz';
+    const curr = 'x\ny\nz\na\nb\nc\nd\ne\nf\ng';
+    const result = diffTextLines(prev, curr, 0);
+    expect(result.lines.length).toBe(result.totalChangedLines);
+  });
+
+  it('shows added lines when new content appended', () => {
+    const prev = 'line one\nline two';
+    const curr = 'line one\nline two\nline three\nline four';
+    const result = diffTextLines(prev, curr);
+    const added = result.lines.filter((l) => l.type === 'added');
+    expect(added.length).toBe(result.totalChangedLines);
+    expect(added.some((l) => l.text === 'line three')).toBe(true);
+  });
+
+  it('shows removed lines when content removed', () => {
+    const prev = 'line one\nline two\nline three\nline four';
+    const curr = 'line one\nline two';
+    const result = diffTextLines(prev, curr);
+    const removed = result.lines.filter((l) => l.type === 'removed');
+    expect(removed.length).toBe(result.totalChangedLines);
+    expect(removed.some((l) => l.text === 'line three')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// diffPromptSectionTexts
+// ---------------------------------------------------------------------------
+
+describe('diffPromptSectionTexts', () => {
+  it('returns empty map when both sides are null', () => {
+    const result = diffPromptSectionTexts(null, null);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns unavailable=true when text is absent on one side', () => {
+    const baseline = [{ name: 'Safety', charCount: 100, tokenEstimate: 25 }]; // no text
+    const current = [{ name: 'Safety', charCount: 120, tokenEstimate: 30, text: 'new text' }];
+    const result = diffPromptSectionTexts(baseline, current);
+    expect(result.get('Safety')?.unavailable).toBe(true);
+  });
+
+  it('computes diff when both sides have text', () => {
+    const baseline = [{ name: 'Safety', charCount: 20, tokenEstimate: 5, text: 'rule one\nrule two' }];
+    const current = [{ name: 'Safety', charCount: 30, tokenEstimate: 8, text: 'rule one\nrule two\nrule three' }];
+    const result = diffPromptSectionTexts(baseline, current);
+    const diff = result.get('Safety');
+    expect(diff?.unavailable).toBe(false);
+    expect(diff?.totalChangedLines).toBeGreaterThan(0);
+    const added = diff?.lines.filter((l) => l.type === 'added');
+    expect(added?.some((l) => l.text === 'rule three')).toBe(true);
+  });
+
+  it('reports zero changes when both texts are identical', () => {
+    const text = 'rule one\nrule two';
+    const baseline = [{ name: 'Safety', charCount: text.length, tokenEstimate: 5, text }];
+    const current = [{ name: 'Safety', charCount: text.length, tokenEstimate: 5, text }];
+    const result = diffPromptSectionTexts(baseline, current);
+    expect(result.get('Safety')?.totalChangedLines).toBe(0);
+  });
+
+  it('respects maxChangedLines parameter', () => {
+    const prev = Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n');
+    const curr = prev + '\nextra line A\nextra line B\nextra line C\nextra line D\nextra line E\nextra line F\nextra line G';
+    const baseline = [{ name: 'Tools', charCount: prev.length, tokenEstimate: 10, text: prev }];
+    const current = [{ name: 'Tools', charCount: curr.length, tokenEstimate: 12, text: curr }];
+    const result = diffPromptSectionTexts(baseline, current, 5);
+    expect(result.get('Tools')?.lines.length).toBeLessThanOrEqual(5);
+    expect(result.get('Tools')?.totalChangedLines).toBeGreaterThan(5);
   });
 });

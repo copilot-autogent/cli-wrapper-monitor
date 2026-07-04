@@ -43,6 +43,7 @@ import { hasGitHubToken } from '../src/harness/models-api-client.js';
 import type { ModelPool, ToolParamSchema } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 import { parsePromptSections } from '../src/harness/prompt-sections.js';
+import { loadCaptureConfig } from './capture-config.js';
 import {
   appendHealthLog,
   readHealthLog,
@@ -67,6 +68,9 @@ const SKIP_MODEL_POOL = process.env['SKIP_MODEL_POOL'] === 'true';
 const SKIP_PROVENANCE = process.env['SKIP_PROVENANCE'] === 'true';
 const DRY_RUN = process.argv.includes('--dry-run');
 const PREFLIGHT = process.argv.includes('--preflight');
+
+// Load capture config once at startup; used for capturePromptSectionText and dir routing.
+const CAPTURE_CONFIG = loadCaptureConfig();
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -713,11 +717,14 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   }
 
   // Attach section breakdown when prompt content is available.
-  // rawSystemPrompt is intentionally NOT persisted in the snapshot to avoid
-  // bloating baseline files with potentially sensitive/large content.
+  // Section text is stored only when capturePromptSectionText=true in capture.config.json
+  // to avoid bloating baseline files with potentially sensitive/large content.
   if (systemPrompt.length > 0) {
-    snapshot.promptSections = parsePromptSections(systemPrompt);
+    snapshot.promptSections = parsePromptSections(systemPrompt, CAPTURE_CONFIG.capturePromptSectionText);
     console.log(`Prompt sections: ${snapshot.promptSections.map((s) => `${s.name}(${s.charCount})`).join(', ')}`);
+    if (CAPTURE_CONFIG.capturePromptSectionText) {
+      console.log('Prompt section text captured (capturePromptSectionText=true).');
+    }
   }
 
   // Capture model pool

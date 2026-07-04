@@ -76,10 +76,11 @@ function detectHeader(line: string): string | null {
  * @param raw - The complete raw system prompt text.
  * @returns    An array of sections sorted by charCount descending.
  */
-export function parsePromptSections(raw: string): PromptSection[] {
+export function parsePromptSections(raw: string, captureText = false): PromptSection[] {
   if (!raw || raw.trim().length === 0) return [];
 
   const buckets = new Map<string, number>();
+  const textBuckets = new Map<string, string[]>(); // only populated when captureText=true
   const addChars = (name: string, n: number) =>
     buckets.set(name, (buckets.get(name) ?? 0) + n);
 
@@ -95,13 +96,22 @@ export function parsePromptSections(raw: string): PromptSection[] {
     // Add the line length; add 1 for the '\n' that split consumed, except
     // on the final segment which had no trailing newline in the original string.
     addChars(currentSection, line.length + (i < lines.length - 1 ? 1 : 0));
+    if (captureText) {
+      if (!textBuckets.has(currentSection)) textBuckets.set(currentSection, []);
+      // Reassemble original text: add newline for all but the very last segment
+      textBuckets.get(currentSection)!.push(line + (i < lines.length - 1 ? '\n' : ''));
+    }
   }
 
   // Build output, filtering out zero-size buckets
   const sections: PromptSection[] = [];
   for (const [name, charCount] of buckets.entries()) {
     if (charCount > 0) {
-      sections.push({ name, charCount, tokenEstimate: estimateTokens(charCount) });
+      const section: PromptSection = { name, charCount, tokenEstimate: estimateTokens(charCount) };
+      if (captureText) {
+        section.text = textBuckets.get(name)?.join('') ?? '';
+      }
+      sections.push(section);
     }
   }
 
@@ -151,4 +161,130 @@ export function diffPromptSections(
   // Sort by absolute delta magnitude descending
   changes.sort((a, b) => Math.abs(b.deltaAbsolute) - Math.abs(a.deltaAbsolute));
   return changes;
+}
+
+// ---------------------------------------------------------------------------
+// Line-level text diff (zero external deps)
+// ---------------------------------------------------------------------------
+
+/** A single line in a computed text diff. */
+export interface DiffLine {
+  /** 'added' = exists in current only; 'removed' = exists in prev only */
+  type: 'added' | 'removed';
+  text: string;
+}
+
+/** Result of a line-level diff between two text strings. */
+export interface TextDiffResult {
+  /** Changed lines only (added/removed). May be truncated by maxChangedLines. */
+  lines: DiffLine[];
+  /** Total changed lines before any truncation. */
+  totalChangedLines: number;
+  /** True when text diff was not computed (text unavailable on one or both sides). */
+  unavailable: boolean;
+}
+
+/**
+ * Compute a line-level diff between two text strings using LCS (Longest Common Subsequence).
+ * Returns only the changed lines (added/removed) — context lines are omitted.
+ * Falls back to a size-limit notice for very large inputs.
+ *
+ * @param prev         Previous text.
+ * @param curr         Current text.
+ * @param maxChangedLines  Maximum changed lines to return; 0 = return all.
+ */
+export function diffTextLines(
+  prev: string,
+  curr: string,
+  maxChangedLines = 0,
+): TextDiffResult {
+  // Fast path: identical texts
+  if (prev === curr) return { lines: [], totalChangedLines: 0, unavailable: false };
+
+  const a = prev.split('\n');
+  const b = curr.split('\n');
+
+  // Guard against O(m*n) blowout on very large sections
+  const SIZE_LIMIT = 1500; // lines
+  if (a.length > SIZE_LIMIT || b.length > SIZE_LIMIT) {
+    const notice: DiffLine[] = [
+      { type: 'removed', text: `[prev: ${a.length} lines]` },
+      { type: 'added', text: `[curr: ${b.length} lines — too large for inline diff]` },
+    ];
+    return { lines: notice, totalChangedLines: 2, unavailable: false };
+  }
+
+  // Build LCS DP table
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // Backtrack through the DP table to reconstruct the diff
+  const rawDiff: DiffLine[] = [];
+  let i = m;
+  let j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      // Common line — skip (context omitted from output)
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      rawDiff.push({ type: 'added', text: b[j - 1] });
+      j--;
+    } else {
+      rawDiff.push({ type: 'removed', text: a[i - 1] });
+      i--;
+    }
+  }
+  rawDiff.reverse();
+
+  const totalChangedLines = rawDiff.length;
+  const lines =
+    maxChangedLines > 0 ? rawDiff.slice(0, maxChangedLines) : rawDiff;
+
+  return { lines, totalChangedLines, unavailable: false };
+}
+
+/**
+ * Compute text diffs for each prompt section that has text available on both sides.
+ *
+ * @param baseline         Baseline sections (may lack .text).
+ * @param current          Current sections (may lack .text).
+ * @param maxChangedLines  Passed through to diffTextLines; 0 = return all changed lines.
+ */
+export function diffPromptSectionTexts(
+  baseline: PromptSection[] | undefined | null,
+  current: PromptSection[] | undefined | null,
+  maxChangedLines = 0,
+): Map<string, TextDiffResult> {
+  const results = new Map<string, TextDiffResult>();
+  if (!baseline || !current) return results;
+
+  const baselineMap = new Map<string, string | undefined>(
+    baseline.map((s) => [s.name, s.text]),
+  );
+  const currentMap = new Map<string, string | undefined>(
+    current.map((s) => [s.name, s.text]),
+  );
+
+  const allNames = new Set([...baselineMap.keys(), ...currentMap.keys()]);
+  for (const name of allNames) {
+    const prevText = baselineMap.get(name);
+    const currText = currentMap.get(name);
+    if (prevText === undefined || currText === undefined) {
+      results.set(name, { lines: [], totalChangedLines: 0, unavailable: true });
+    } else {
+      results.set(name, diffTextLines(prevText, currText, maxChangedLines));
+    }
+  }
+  return results;
 }

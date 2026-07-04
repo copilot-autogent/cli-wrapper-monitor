@@ -11,12 +11,17 @@
  *   npm run compare -- --a <path> --b <path>           # explicit file paths (legacy)
  *
  * Options:
- *   --from <YYYY-MM-DD>  Resolve older (reference) baseline by date
- *   --to   <YYYY-MM-DD>  Resolve newer baseline by date
- *   --list               List all available baseline dates and exit
- *   --json               Output raw DiffReport as JSON instead of Markdown
- *   --output <path>      Write report to file instead of stdout
- *   --no-bundle          Send individual Discord webhooks instead of bundling
+ *   --from <YYYY-MM-DD>     Resolve older (reference) baseline by date
+ *   --to   <YYYY-MM-DD>     Resolve newer baseline by date
+ *   --list                  List all available baseline dates and exit
+ *   --json                  Output raw DiffReport as JSON instead of Markdown
+ *   --output <path>         Write report to file instead of stdout
+ *   --no-bundle             Send individual Discord webhooks instead of bundling
+ *   --diff-sections=full|summary|off
+ *                           Verbosity of prompt section text diff (default: summary)
+ *                           full    = show all changed lines
+ *                           summary = show up to 5 changed lines (default)
+ *                           off     = suppress text diff entirely
  *
  * Date resolution: searches baselines/<date>.json (monthly) first, then
  * baselines/weekly/<date>.json. When a date exists in both, monthly is preferred.
@@ -38,6 +43,7 @@ import type { MetricSnapshot } from "../src/harness/types.js";
 import { diffSnapshots } from "../src/harness/diff.js";
 import { validateSnapshot } from "../src/harness/validator.js";
 import { migrate, CURRENT_SCHEMA_VERSION } from "../src/harness/baseline-migrator.js";
+import { diffPromptSectionTexts } from "../src/harness/prompt-sections.js";
 import {
   BREAKING_THRESHOLD_PCT,
   WARNING_THRESHOLD_PCT,
@@ -56,6 +62,9 @@ import {
 import { bundleWebhooks, type WebhookAlert } from "../src/harness/webhook-utils.js";
 import { loadAnnotation } from "../src/harness/annotations.js";
 
+/** Controls verbosity of the prompt section text diff in the compare report. */
+export type DiffSectionsMode = 'full' | 'summary' | 'off';
+
 interface CliArgs {
   /** Explicit file path for the older (reference) baseline (legacy positional / --a flag) */
   a: string;
@@ -70,6 +79,8 @@ interface CliArgs {
   json: boolean;
   output: string | null;
   noBundle: boolean;
+  /** Prompt section text diff verbosity (default: 'summary') */
+  diffSections: DiffSectionsMode;
 }
 
 function parseArgs(): CliArgs {
@@ -77,6 +88,7 @@ function parseArgs(): CliArgs {
   let a = "", b = "", jsonMode = false, noBundle = false, list = false;
   let from: string | null = null, to: string | null = null;
   let output: string | null = null;
+  let diffSections: DiffSectionsMode = 'summary';
   const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -94,6 +106,22 @@ function parseArgs(): CliArgs {
     else if (arg === "--from" && nextIsValue) { from = args[++i]; }
     else if (arg.startsWith("--to=")) { to = arg.slice("--to=".length); }
     else if (arg === "--to" && nextIsValue) { to = args[++i]; }
+    else if (arg.startsWith("--diff-sections=")) {
+      const val = arg.slice("--diff-sections=".length);
+      if (val === 'full' || val === 'summary' || val === 'off') {
+        diffSections = val;
+      } else {
+        console.warn(`Warning: --diff-sections must be full|summary|off, got "${val}" — using default "summary".`);
+      }
+    }
+    else if (arg === "--diff-sections" && nextIsValue) {
+      const val = args[++i];
+      if (val === 'full' || val === 'summary' || val === 'off') {
+        diffSections = val;
+      } else {
+        console.warn(`Warning: --diff-sections must be full|summary|off, got "${val}" — using default "summary".`);
+      }
+    }
     else if (arg.startsWith("--")) {
       console.warn(`Warning: unrecognized flag "${arg}" — ignored.`);
       if (nextIsValue) i++;
@@ -119,14 +147,16 @@ function parseArgs(): CliArgs {
       "    npm run compare -- <file-a> <file-b>         # compare two JSON files\n" +
       "    npm run compare -- --a <path> --b <path>     # same via named flags\n\n" +
       "  Options:\n" +
-      "    --json            Output raw DiffReport JSON instead of Markdown\n" +
-      "    --output <path>   Write report to file\n" +
-      "    --no-bundle       Send individual Discord webhooks instead of bundling"
+      "    --json                     Output raw DiffReport JSON instead of Markdown\n" +
+      "    --output <path>            Write report to file\n" +
+      "    --no-bundle                Send individual Discord webhooks instead of bundling\n" +
+      "    --diff-sections=full|summary|off\n" +
+      "                               Prompt section text diff verbosity (default: summary)"
     );
     process.exit(1);
   }
 
-  return { a, b, from, to, list, json: jsonMode, output, noBundle };
+  return { a, b, from, to, list, json: jsonMode, output, noBundle, diffSections };
 }
 
 function loadSnapshot(path: string): MetricSnapshot {
@@ -219,7 +249,11 @@ function extractPerTool(snap: MetricSnapshot): PerToolEntry[] {
   );
 }
 
-function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): string {
+function generateMarkdownReport(
+  snapA: MetricSnapshot,
+  snapB: MetricSnapshot,
+  diffSectionsMode: DiffSectionsMode = 'summary',
+): string {
   const report = diffSnapshots(snapA, snapB);
   const dateA = shortDate(snapA.capturedAt);
   const dateB = shortDate(snapB.capturedAt);
@@ -351,6 +385,61 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
     lines.push("");
   }
 
+  // ── Prompt Section Changes ────────────────────────────────────────────────
+  lines.push(`## Prompt Section Changes`, "");
+  if (!report.promptSectionsAvailable) {
+    lines.push("> _Section data unavailable — baselines pre-date section attribution._", "");
+  } else if (report.promptSectionChanges.length === 0) {
+    lines.push("> No prompt section changes detected.", "");
+  } else {
+    // Pre-compute text diffs for all sections once (outside the loop)
+    const maxChangedLines = diffSectionsMode === 'summary' ? 5 : 0;
+    const textDiffs = diffSectionsMode !== 'off'
+      ? diffPromptSectionTexts(snapA.promptSections, snapB.promptSections, maxChangedLines)
+      : null;
+
+    for (const change of report.promptSectionChanges) {
+      const sign = change.deltaAbsolute >= 0 ? '+' : '';
+      const pctStr =
+        change.deltaPct !== null ? ` (${sign}${change.deltaPct.toFixed(1)}%)` : ' (new)';
+      const icon = change.deltaAbsolute > 0 ? '📈' : change.deltaAbsolute < 0 ? '📉' : '🟢';
+      const fromStr =
+        change.baselineCharCount !== null
+          ? `${change.baselineCharCount.toLocaleString()} chars`
+          : '_(new)_';
+      const toStr =
+        change.currentCharCount !== null
+          ? `${change.currentCharCount.toLocaleString()} chars`
+          : '_(removed)_';
+      lines.push(
+        `${icon} **${change.name}**: ${fromStr} → ${toStr} (${sign}${change.deltaAbsolute.toLocaleString()} chars${pctStr})`,
+      );
+
+      // Render line-level text diff for this section when enabled
+      if (textDiffs) {
+        const textDiff = textDiffs.get(change.name);
+        if (textDiff && !textDiff.unavailable) {
+          if (textDiff.totalChangedLines === 0) {
+            lines.push(`  > _Text unchanged._`);
+          } else {
+            lines.push('');
+            lines.push('  ```diff');
+            for (const dl of textDiff.lines) {
+              const prefix = dl.type === 'added' ? '+' : '-';
+              lines.push(`  ${prefix} ${dl.text}`);
+            }
+            if (diffSectionsMode === 'summary' && textDiff.totalChangedLines > textDiff.lines.length) {
+              const remaining = textDiff.totalChangedLines - textDiff.lines.length;
+              lines.push(`  … ${remaining} more changed line${remaining === 1 ? '' : 's'} (use --diff-sections=full to see all)`);
+            }
+            lines.push('  ```');
+          }
+        }
+      }
+    }
+    lines.push("");
+  }
+
   // ── Possible causes (provenance linking) ────────────────────────────────
   if (snapB.possibleCauses && snapB.possibleCauses.length > 0) {
     lines.push("## Possible Causes", "",
@@ -404,7 +493,7 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
 }
 
 async function main(): Promise<void> {
-  const { a, b, from, to, list, json: jsonMode, output, noBundle } = parseArgs();
+  const { a, b, from, to, list, json: jsonMode, output, noBundle, diffSections } = parseArgs();
 
   const BASELINES_DIR = resolve(process.cwd(), "baselines");
 
@@ -485,7 +574,7 @@ async function main(): Promise<void> {
   const report = diffSnapshots(snapA, snapB);
   let content: string;
   if (jsonMode) { content = JSON.stringify(report, null, 2); }
-  else { content = generateMarkdownReport(snapA, snapB); }
+  else { content = generateMarkdownReport(snapA, snapB, diffSections); }
   if (output) { writeFileSync(resolve(output), content, "utf-8"); console.log(`Report written to: ${output}`); }
   else { console.log(content); }
 

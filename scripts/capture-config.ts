@@ -17,12 +17,19 @@ export interface CaptureConfig {
   weeklyBaselinesDir: string;
   /** Retention window in calendar months; files older than this are archived (default: 6) */
   retentionMonths: number;
+  /**
+   * When true, store the raw text of each prompt section in MetricSnapshot.promptSections[*].text.
+   * Default false — keeps baseline file sizes small.
+   * Enabling this is required for prompt section text diff in compare reports.
+   */
+  capturePromptSectionText: boolean;
 }
 
 export const DEFAULT_CONFIG: CaptureConfig = {
   monthlyBaselinesDir: 'baselines',
   weeklyBaselinesDir: 'baselines/weekly',
   retentionMonths: 6,
+  capturePromptSectionText: false,
 };
 
 /**
@@ -75,6 +82,13 @@ export function loadCaptureConfig(configPath = 'capture.config.json'): CaptureCo
       throw new Error(`${configPath}: retentionMonths must be a positive integer`);
     }
     config.retentionMonths = n;
+  }
+
+  if ('capturePromptSectionText' in obj) {
+    if (typeof obj.capturePromptSectionText !== 'boolean') {
+      throw new Error(`${configPath}: capturePromptSectionText must be a boolean`);
+    }
+    config.capturePromptSectionText = obj.capturePromptSectionText;
   }
 
   return config;
