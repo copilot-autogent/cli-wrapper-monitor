@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   truncatePrompt,
+  truncatePromptMarkdown,
   escapeHtml,
   isPass,
   formatResult,
@@ -72,6 +73,30 @@ describe('truncatePrompt', () => {
     const result = truncatePrompt(text, 45);
     expect(result.length).toBe(45);
     expect(result.endsWith('…')).toBe(true);
+  });
+
+  it('does NOT escape pipe characters (that is handled by truncatePromptMarkdown)', () => {
+    expect(truncatePrompt('a | b | c')).toBe('a | b | c');
+  });
+});
+
+describe('truncatePromptMarkdown', () => {
+  it('escapes pipe characters after truncation', () => {
+    expect(truncatePromptMarkdown('a | b | c')).toBe('a \\| b \\| c');
+  });
+
+  it('measures length on pre-escape string so truncation is not distorted', () => {
+    // 43 chars of A plus " | B" = 47 chars total; should truncate to 45
+    const prompt = 'A'.repeat(43) + ' | B';
+    const result = truncatePromptMarkdown(prompt, 45);
+    // Should truncate the '| B' part and just have 'AAAAAA… ' with ellipsis
+    expect(result.endsWith('…')).toBe(true);
+    // Should not have a dangling backslash before ellipsis
+    expect(result).not.toContain('\\…');
+  });
+
+  it('does not add escapes to prompts without pipes', () => {
+    expect(truncatePromptMarkdown('Hello world')).toBe('Hello world');
   });
 });
 
@@ -407,6 +432,20 @@ describe('generateHtmlReport', () => {
   it('applies result CSS class', () => {
     const html = generateHtmlReport(snapshot, probes);
     expect(html).toContain('class="pass"');
+  });
+
+  it('does NOT produce literal \\| in HTML for prompts with pipe characters', () => {
+    const pipeProbe: ProbeResultEntry = {
+      id: 'p99',
+      category: 'injection',
+      prompt: 'Say this: a | b | c',
+      classification: 'refused',
+      refused: true,
+    };
+    const html = generateHtmlReport(makeSnapshot([pipeProbe]), [pipeProbe]);
+    expect(html).not.toContain('\\|');
+    // Pipe in HTML title attribute should be present as-is or HTML-encoded
+    expect(html).toContain('a | b | c');
   });
 });
 

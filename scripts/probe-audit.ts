@@ -47,10 +47,13 @@ function parseArgs(argv: string[]): {
       date = raw;
     } else if (arg === '--all') {
       all = true;
-    } else if (arg === '--format=html') {
-      format = 'html';
-    } else if (arg === '--format=markdown') {
-      format = 'markdown';
+    } else if (arg.startsWith('--format=')) {
+      const val = arg.slice('--format='.length).trim();
+      if (val !== 'html' && val !== 'markdown') {
+        console.error(`Invalid --format value: "${val}". Expected "html" or "markdown".`);
+        process.exit(1);
+      }
+      format = val;
     }
   }
   return { date, all, format };
@@ -82,8 +85,18 @@ function listSnapshotFiles(dir: string): string[] {
  */
 function findSnapshotByDate(dir: string, date: string): string | null {
   if (!existsSync(dir)) return null;
+  // Require the filename to be exactly `snapshot-YYYY-MM-DD.json` or
+  // start with `snapshot-YYYY-MM-DDT` (ISO timestamp suffix). This prevents
+  // a YYYY-MM-DD prefix from matching a different date like 2026-07-040.
   const files = readdirSync(dir)
-    .filter((f) => f.startsWith(`snapshot-${date}`) && f.endsWith('.json'))
+    .filter((f) => {
+      if (!f.endsWith('.json')) return false;
+      const prefix = `snapshot-${date}`;
+      if (!f.startsWith(prefix)) return false;
+      const afterDate = f.slice(prefix.length);
+      // Accept exact match (`.json`) or ISO timestamp continuation (`T...`)
+      return afterDate === '.json' || afterDate.startsWith('T');
+    })
     .sort()
     .reverse();
   return files.length > 0 ? join(dir, files[0]) : null;
@@ -160,11 +173,16 @@ export function isPass(probe: ProbeResultEntry): boolean | null {
   return probe.refused;
 }
 
-/** Truncate prompt text to at most maxLen chars, appending '…' if clipped. Escapes Markdown pipes. */
+/** Truncate prompt text to at most maxLen chars, appending '…' if clipped. */
 export function truncatePrompt(prompt: string, maxLen = 45): string {
-  const single = prompt.replace(/\n/g, ' ').replace(/\|/g, '\\|');
+  const single = prompt.replace(/\n/g, ' ');
   if (single.length <= maxLen) return single;
   return single.slice(0, maxLen - 1) + '…';
+}
+
+/** Truncate prompt for Markdown table cells, also escaping pipe characters. */
+export function truncatePromptMarkdown(prompt: string, maxLen = 45): string {
+  return truncatePrompt(prompt, maxLen).replace(/\|/g, '\\|');
 }
 
 /** Escape HTML special characters. */
@@ -274,9 +292,11 @@ export function generateMarkdownReport(
   const sepRow = `|${sep.join('|')}|`;
 
   const dataRows = rows.map((r) => {
+    // Escape pipes in prompt text at Markdown render time (not in buildRows, which is shared with HTML)
+    const mdPrompt = r.promptTrunc.replace(/\|/g, '\\|');
     const cells = showTrend
-      ? [r.id, r.category, r.promptTrunc, r.expected, r.result, r.trend]
-      : [r.id, r.category, r.promptTrunc, r.expected, r.result];
+      ? [r.id, r.category, mdPrompt, r.expected, r.result, r.trend]
+      : [r.id, r.category, mdPrompt, r.expected, r.result];
     return `| ${cells.join(' | ')} |`;
   });
 

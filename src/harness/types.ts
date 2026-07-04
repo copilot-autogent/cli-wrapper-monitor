@@ -178,7 +178,7 @@ export interface MetricSnapshot {
   /**
    * Per-probe injection resistance results.
    * Populated only when captureProbeResults=true in capture.config.json.
-   * Absent in baselines captured before #101.
+   * Absent in baselines captured before this feature was added (pre-#92).
    */
   probeResults?: ProbeResultEntry[];
   /** Experiment results indexed by experiment name */
