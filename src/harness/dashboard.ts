@@ -430,6 +430,10 @@ export function generatePromptSectionStackedBarSVG(
 /**
  * Generate a compact SVG sparkline for a series of data points.
  * Returns an SVG string suitable for inline embedding.
+ *
+ * @param points - Data points to render.
+ * @param opts.milestones - Optional map of ISO date (YYYY-MM-DD) → annotation text.
+ *   Annotated dates are rendered as vertical dashed milestone markers with tooltips.
  */
 export function generateSparklineSVG(
   points: SparklinePoint[],
@@ -440,6 +444,8 @@ export function generateSparklineSVG(
     label?: string;
     yUnit?: string;
     formatValue?: (v: number) => string;
+    /** Annotated dates: date → note text. Rendered as milestone markers on the sparkline. */
+    milestones?: Record<string, string>;
   } = {}
 ): string {
   const {
@@ -449,6 +455,7 @@ export function generateSparklineSVG(
     label = "",
     yUnit = "",
     formatValue = (v: number) => fmtNum(v),
+    milestones = {},
   } = opts;
 
   const PAD = { top: 20, right: 20, bottom: 30, left: 60 };
@@ -520,6 +527,20 @@ export function generateSparklineSVG(
   for (const p of valid) {
     lines.push(
       `<circle cx="${xOf(p.date).toFixed(1)}" cy="${yOf(p.value).toFixed(1)}" r="3.5" fill="${strokeColor}" stroke="#fff" stroke-width="1.5"><title>${p.date}: ${formatValue(p.value)}${yUnit}</title></circle>`
+    );
+  }
+
+  // Milestone markers — vertical dashed lines for annotated dates within the chart range
+  const milestoneDates = Object.keys(milestones).filter((date) => {
+    const t = new Date(date).getTime();
+    return t >= minDate && t <= maxDate;
+  });
+  for (const date of milestoneDates) {
+    const x = xOf(date).toFixed(1);
+    const noteText = xmlEscape(milestones[date]);
+    lines.push(
+      `<line x1="${x}" y1="${PAD.top}" x2="${x}" y2="${PAD.top + ph}" stroke="#e67e22" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"><title>✎ ${noteText}</title></line>`,
+      `<text x="${x}" y="${PAD.top - 4}" text-anchor="middle" font-size="9" fill="#e67e22" font-weight="600">✎<title>✎ ${noteText}</title></text>`
     );
   }
 

@@ -41,6 +41,7 @@ import {
   type SeverityLevel,
 } from "../src/severity.js";
 import { bundleWebhooks, type WebhookAlert } from "../src/harness/webhook-utils.js";
+import { loadAnnotation } from "../src/harness/annotations.js";
 
 interface CliArgs { a: string; b: string; json: boolean; output: string | null; noBundle: boolean; }
 
@@ -177,6 +178,17 @@ function generateMarkdownReport(snapA: MetricSnapshot, snapB: MetricSnapshot): s
     `| Monitor version | \`${snapA.monitorVersion}\` | \`${snapB.monitorVersion}\` |`,
     `| SDK version | ${snapA.sdkVersion} | ${snapB.sdkVersion} |`,
     `| Model | ${snapA.model} | ${snapB.model} |`, "");
+
+  // Annotations: show any notes for from/to dates in the header
+  const noteA = loadAnnotation("notes", dateA);
+  const noteB = loadAnnotation("notes", dateB);
+  if (noteA !== undefined || noteB !== undefined) {
+    lines.push("### 📝 Annotations", "");
+    // Strip newlines to keep each annotation on a single bullet line
+    if (noteA !== undefined) lines.push(`- **${dateA}**: ${noteA.replace(/[\r\n]+/g, " ")}`);
+    if (noteB !== undefined) lines.push(`- **${dateB}**: ${noteB.replace(/[\r\n]+/g, " ")}`);
+    lines.push("");
+  }
 
   lines.push(`## Metric Summary`, "",
     `| Metric | ${dateA} | ${dateB} | Delta |`,

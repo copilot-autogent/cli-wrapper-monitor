@@ -36,6 +36,7 @@ import {
   buildTrendMatrix,
   DEFAULT_TREND_WINDOWS,
 } from "../src/harness/trend-report.js";
+import { loadAnnotations } from "../src/harness/annotations.js";
 
 // ---------------------------------------------------------------------------
 // Baseline loader (mirrors trend-report.ts)
@@ -205,17 +206,20 @@ function renderSummaryCard(card: SummaryCardData): string {
 function renderSparklines(
   toolSeries: SparklinePoint[],
   tokensSeries: SparklinePoint[],
-  injectionSeries: SparklinePoint[]
+  injectionSeries: SparklinePoint[],
+  milestones: Record<string, string> = {}
 ): string {
   const toolSvg = generateSparklineSVG(toolSeries, {
     strokeColor: "#e67e22",
     label: "Tool Count over time",
     formatValue: (v) => Math.round(v).toString(),
+    milestones,
   });
   const tokensSvg = generateSparklineSVG(tokensSeries, {
     strokeColor: "#2980b9",
     label: "System Prompt Tokens (est.) over time",
     formatValue: (v) => `${Math.round(v / 1000)}k`,
+    milestones,
   });
 
   const hasInjectionData = injectionSeries.some((p) => p.value !== null);
@@ -224,6 +228,7 @@ function renderSparklines(
         strokeColor: "#27ae60",
         label: "Injection Refusal Rate over time",
         formatValue: (v) => `${(v * 100).toFixed(1)}%`,
+        milestones,
       })
     : `<div class="no-data">No injection refusal data available in current baselines.</div>`;
 
@@ -415,7 +420,7 @@ function renderPromptSectionBreakdown(bars: PromptSectionBar[]): string {
 // Full HTML generation
 // ---------------------------------------------------------------------------
 
-function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
+function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<string, string> = {}): string {
   const generatedAt = new Date().toISOString();
   const snapshotCount = snapshots.length;
   const dateRange = snapshotCount > 0
@@ -431,7 +436,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[]): string {
   const sectionBars = extractPromptSectionBars(snapshots);
 
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
-  const sparklinesSection = renderSparklines(toolSeries, tokensSeries, injectionSeries);
+  const sparklinesSection = renderSparklines(toolSeries, tokensSeries, injectionSeries, milestones);
   const velocitySection = renderChangeVelocity(snapshots);
   const regressionsSection = renderRegressionTimeline(regressions, snapshotCount);
   const modelPoolSection = renderModelPool(modelHistory, snapshotCount);
@@ -711,7 +716,9 @@ function main(): void {
     console.log(`  ${date}  tools=${toolCount}  model=${s.model}`);
   }
 
-  const html = generateDashboardHTML(snapshots);
+  const milestones = loadAnnotations("notes");
+
+  const html = generateDashboardHTML(snapshots, milestones);
 
   const outPath = resolve(output);
   const outDir = dirname(outPath);

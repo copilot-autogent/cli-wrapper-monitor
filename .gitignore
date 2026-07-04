@@ -11,6 +11,9 @@ baselines/snapshot-*.json
 # Generated dashboard (opt-in to commit by removing this line)
 reports/dashboard*.html
 
+# Local-only baseline annotations (opt-in to commit by removing this line)
+/notes/
+
 # Environment
 .env
 .env.local

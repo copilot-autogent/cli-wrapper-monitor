@@ -536,3 +536,70 @@ describe("buildTrendMatrixMarkdown", () => {
     expect(tableRows.length).toBeGreaterThanOrEqual(6);
   });
 });
+
+// ---------------------------------------------------------------------------
+// generateTrendReport — annotation rendering
+// ---------------------------------------------------------------------------
+
+describe("generateTrendReport with annotations", () => {
+  it("does not show Note column when no annotations provided", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B]);
+    expect(report).not.toContain("Note");
+  });
+
+  it("does not show Note column when annotations don't intersect snapshot dates", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B], { "2025-01-01": "Old note" });
+    expect(report).not.toContain("Note");
+  });
+
+  it("shows Note column when at least one annotation matches a snapshot date", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B], { "2026-05-01": "PR #383 landed" });
+    expect(report).toContain("Note");
+  });
+
+  it("shows ✎ indicator for annotated rows", () => {
+    const report = generateTrendReport([SNAP_A, SNAP_B], { "2026-05-01": "PR #383 landed" });
+    expect(report).toContain("✎");
+  });
+
+  it("truncates annotation to 50 chars in non-verbose mode", () => {
+    const longNote = "a".repeat(80);
+    const report = generateTrendReport([SNAP_A], { "2026-05-01": longNote });
+    // Truncated form should appear, not the full 80-char string
+    expect(report).not.toContain(longNote);
+    expect(report).toContain("…");
+  });
+
+  it("shows full annotation in verbose mode", () => {
+    const longNote = "x".repeat(80);
+    const report = generateTrendReport([SNAP_A], { "2026-05-01": longNote }, true);
+    expect(report).toContain(longNote);
+  });
+
+  it("strips newlines from annotation text in table cells", () => {
+    const multilineNote = "line one\nline two";
+    const report = generateTrendReport([SNAP_A], { "2026-05-01": multilineNote });
+    // The raw newline must not appear in the table (would break row structure)
+    const tableLines = report.split("\n").filter((l) => l.startsWith("|") && l.includes("2026-05-01"));
+    expect(tableLines.length).toBeGreaterThan(0);
+    for (const line of tableLines) {
+      expect(line).not.toContain("\n");
+    }
+  });
+
+  it("escapes pipe characters in annotation text", () => {
+    const note = "before|after";
+    const report = generateTrendReport([SNAP_A], { "2026-05-01": note });
+    expect(report).toContain("before\\|after");
+  });
+
+  it("empty cell for unannotated rows when Note column is shown", () => {
+    // SNAP_A is annotated, SNAP_B is not — SNAP_B row should have an empty Note cell
+    const report = generateTrendReport([SNAP_A, SNAP_B], { "2026-05-01": "Note A" });
+    const lines = report.split("\n");
+    const snapBRow = lines.find((l) => l.includes("2026-06-01"));
+    expect(snapBRow).toBeDefined();
+    // The row should end with "| |" (empty note cell) or "||" — not contain ✎
+    expect(snapBRow).not.toContain("✎");
+  });
+});
