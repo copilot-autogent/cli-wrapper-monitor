@@ -69,9 +69,6 @@ const SKIP_PROVENANCE = process.env['SKIP_PROVENANCE'] === 'true';
 const DRY_RUN = process.argv.includes('--dry-run');
 const PREFLIGHT = process.argv.includes('--preflight');
 
-// Load capture config once at startup; used for capturePromptSectionText and dir routing.
-const CAPTURE_CONFIG = loadCaptureConfig();
-
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
 const WORKSPACE_PATH =
@@ -608,6 +605,10 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   const dryRun = opts.dryRun ?? DRY_RUN;
   const startMs = Date.now();
 
+  // Load capture config inside the function (not at import time) to respect
+  // the process cwd at call time and to avoid import-time throws on missing/invalid config.
+  const captureConfig = loadCaptureConfig();
+
   // Warn when the last FAILURE_STREAK_THRESHOLD captures all failed.
   const priorEntries = readHealthLog(HEALTH_LOG_PATH);
   if (hasFailureStreak(priorEntries)) {
@@ -720,9 +721,9 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   // Section text is stored only when capturePromptSectionText=true in capture.config.json
   // to avoid bloating baseline files with potentially sensitive/large content.
   if (systemPrompt.length > 0) {
-    snapshot.promptSections = parsePromptSections(systemPrompt, CAPTURE_CONFIG.capturePromptSectionText);
+    snapshot.promptSections = parsePromptSections(systemPrompt, captureConfig.capturePromptSectionText);
     console.log(`Prompt sections: ${snapshot.promptSections.map((s) => `${s.name}(${s.charCount})`).join(', ')}`);
-    if (CAPTURE_CONFIG.capturePromptSectionText) {
+    if (captureConfig.capturePromptSectionText) {
       console.log('Prompt section text captured (capturePromptSectionText=true).');
     }
   }

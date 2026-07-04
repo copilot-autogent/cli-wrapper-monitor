@@ -201,9 +201,17 @@ export function diffTextLines(
   // Fast path: identical texts
   if (prev === curr) return { lines: [], totalChangedLines: 0, unavailable: false };
 
+  // Helper: split into lines, discarding a single trailing empty element that
+  // results from a trailing '\n' (e.g. 'a\nb\n'.split('\n') → ['a','b',''])
+  const splitLines = (text: string): string[] => {
+    const parts = text.split('\n');
+    if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+    return parts;
+  };
+
   // Fast path: prev is empty — every line in curr is new
   if (prev === '') {
-    const allLines: DiffLine[] = curr.split('\n').map((text) => ({ type: 'added' as const, text }));
+    const allLines: DiffLine[] = splitLines(curr).map((text) => ({ type: 'added' as const, text }));
     const totalChangedLines = allLines.length;
     return {
       lines: maxChangedLines > 0 ? allLines.slice(0, maxChangedLines) : allLines,
@@ -214,7 +222,7 @@ export function diffTextLines(
 
   // Fast path: curr is empty — every line in prev was removed
   if (curr === '') {
-    const allLines: DiffLine[] = prev.split('\n').map((text) => ({ type: 'removed' as const, text }));
+    const allLines: DiffLine[] = splitLines(prev).map((text) => ({ type: 'removed' as const, text }));
     const totalChangedLines = allLines.length;
     return {
       lines: maxChangedLines > 0 ? allLines.slice(0, maxChangedLines) : allLines,
@@ -223,8 +231,8 @@ export function diffTextLines(
     };
   }
 
-  const a = prev.split('\n');
-  const b = curr.split('\n');
+  const a = splitLines(prev);
+  const b = splitLines(curr);
 
   // Guard against O(m*n) blowout on very large sections
   const SIZE_LIMIT = 1500; // lines

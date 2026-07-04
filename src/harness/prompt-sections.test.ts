@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePromptSections, diffPromptSections, diffTextLines, diffPromptSectionTexts } from './prompt-sections.js';
+import { parsePromptSections, diffPromptSections, diffTextLines, diffPromptSectionTexts, type PromptSection } from './prompt-sections.js';
 
 // ---------------------------------------------------------------------------
 // Fixture prompts

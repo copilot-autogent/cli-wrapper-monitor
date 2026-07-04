@@ -412,7 +412,9 @@ function generateMarkdownReport(
         lines.push('  ```diff');
         for (const dl of textDiff.lines) {
           const prefix = dl.type === 'added' ? '+' : '-';
-          lines.push(`  ${prefix} ${dl.text}`);
+          // Escape any triple-backtick sequences to prevent premature fence closure
+          const safeText = dl.text.replace(/```/g, '`\u200B`\u200B`');
+          lines.push(`  ${prefix} ${safeText}`);
         }
         if (diffSectionsMode === 'summary' && textDiff.totalChangedLines > textDiff.lines.length) {
           const remaining = textDiff.totalChangedLines - textDiff.lines.length;
@@ -454,7 +456,13 @@ function generateMarkdownReport(
     }
 
     if (report.promptSectionChanges.length === 0 && (!textDiffs || [...textDiffs.values()].every((d) => d.unavailable || d.totalChangedLines === 0))) {
-      lines.push("> No prompt section changes detected.");
+      if (diffSectionsMode === 'off') {
+        lines.push("> No prompt section size changes detected. (Text diff suppressed by `--diff-sections=off`.)");
+      } else if (!textDiffs || [...textDiffs.values()].every((d) => d.unavailable)) {
+        lines.push("> No prompt section size changes detected. (Enable `capturePromptSectionText` in capture.config.json for line-level text diff.)");
+      } else {
+        lines.push("> No prompt section changes detected.");
+      }
     }
     lines.push("");
   }
