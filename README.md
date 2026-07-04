@@ -88,7 +88,8 @@ Directory layout and retention are configured via [`capture.config.json`](./capt
   "monthlyBaselinesDir": "baselines",
   "weeklyBaselinesDir":  "baselines/weekly",
   "retentionMonths":    6,
-  "capturePromptSectionText": false
+  "capturePromptSectionText": false,
+  "captureProbeResults": false
 }
 ```
 
@@ -100,6 +101,7 @@ All fields are optional — the defaults above apply when the file is absent.
 | `weeklyBaselinesDir` | string | `"baselines/weekly"` | Directory for weekly reference snapshot files |
 | `retentionMonths` | integer | `6` | Retention window in calendar months |
 | `capturePromptSectionText` | boolean | `false` | Store raw section text in each baseline for line-level diff comparison. Keeping this `false` (default) avoids bloating baseline files with potentially sensitive prompt content. Set to `true` to enable prompt section text diff in `npm run compare`. |
+| `captureProbeResults` | boolean | `false` | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). |
 
 #### Prompt section text diff
 
@@ -319,6 +321,13 @@ npm run dashboard
 
 # Save dashboard to a custom path
 npm run dashboard -- --output reports/dashboard-2026-07.html
+
+# Injection probe audit — per-probe pass/fail breakdown
+npm run probe-audit                          # latest baseline
+npm run probe-audit -- --date=2026-07-04    # specific date
+npm run probe-audit -- --all                # all baselines with probe data (trend view)
+npm run probe-audit -- --format=html        # standalone sortable HTML report
+npm run probe-audit -- --all --format=html  # trend HTML report
 ```
 
 > **Note**: The refusal-rate experiment requires a live SDK connection (`GITHUB_TOKEN`). This is a sprint 2 feature.
@@ -360,6 +369,52 @@ npm run archive -- --older-than-months 12
 | ⚪ Info | < 5% change |
 | 🟡 Warning | 5–10% change |
 | 🔴 Regression | > 10% change |
+
+## Probe Audit
+
+`npm run probe-audit` produces a per-probe pass/fail breakdown from one or more baselines. It reads the injection probe results stored in `MetricSnapshot.probeResults[]` (or falls back to `experiments['refusal-rate'].rawData.probes` for baselines captured without the config flag).
+
+### Enabling per-probe storage
+
+Set `captureProbeResults: true` in `capture.config.json` before running `npm run capture`. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run).
+
+### Report columns
+
+| Column | Description |
+|--------|-------------|
+| **ID** | Probe index (`p1`, `p2`, …) — stable within a run |
+| **Category** | `injection`, `dangerous`, `safe`, `borderline` |
+| **Prompt (truncated)** | First 45 chars of the probe prompt |
+| **Expected** | `REFUSAL`, `ALLOW`, or `VARIES` (borderline) |
+| **Result** | `✅ PASS`, `⚠️ SOFT` (soft-refused), `❌ FAIL`, or `—` (borderline) |
+| **Rate (last N)** | Pass/fail icons across all captured baselines (`--all` mode) |
+
+### Backward compatibility
+
+Baselines captured before `captureProbeResults` was added show:
+
+> _probe detail unavailable (pre-#92)_
+
+No changes to existing baseline files are required.
+
+### Examples
+
+```bash
+# Latest baseline — Markdown table
+npm run probe-audit
+
+# Specific date
+npm run probe-audit -- --date=2026-07-04
+
+# Trend across all baselines with probe data
+npm run probe-audit -- --all
+
+# Standalone HTML with sortable table
+npm run probe-audit -- --format=html
+
+# Full trend in HTML
+npm run probe-audit -- --all --format=html > reports/probe-audit.html
+```
 
 ## Dashboard
 

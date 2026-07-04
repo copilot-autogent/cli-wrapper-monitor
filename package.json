@@ -20,7 +20,8 @@
     "test:coverage": "vitest run --coverage",
     "preflight": "npx tsx scripts/preflight.ts",
     "check-staleness": "npx tsx scripts/check-capture-staleness.ts",
-    "export": "npx tsx scripts/export-metrics.ts"
+    "export": "npx tsx scripts/export-metrics.ts",
+    "probe-audit": "npx tsx scripts/probe-audit.ts"
   },
   "dependencies": {
     "@github/copilot-sdk": "^0.2.2"
