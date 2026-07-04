@@ -31,8 +31,8 @@ vi.mock("fs", async (importOriginal) => {
     }),
     statSync: vi.fn().mockImplementation((p: unknown) => {
       const s = String(p);
-      if (mockDirs.has(s)) return { isDirectory: () => true };
-      if (mockFiles.has(s)) return { isDirectory: () => false };
+      if (mockDirs.has(s)) return { isDirectory: () => true, isFile: () => false };
+      if (mockFiles.has(s)) return { isDirectory: () => false, isFile: () => true };
       const err = Object.assign(new Error(`ENOENT: ${s}`), { code: "ENOENT" });
       throw err;
     }),

@@ -13,7 +13,23 @@ const DATE_FILE_PATTERN = /^(\d{4}-\d{2}-\d{2})\.json$/;
 
 /** Returns true when the path exists and is a directory (not a file/symlink-to-file). */
 function isDirectory(p: string): boolean {
-  try { return statSync(p).isDirectory(); } catch { return false; }
+  try {
+    return statSync(p).isDirectory();
+  } catch (err) {
+    // Only treat "not found" as false; surface permission / I/O errors to the caller
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
+}
+
+/** Returns true when the path exists and is a regular file. */
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
 }
 
 /**
@@ -28,9 +44,11 @@ export function listAllBaselines(baselinesDir: string): BaselineEntry[] {
   if (isDirectory(absDir)) {
     for (const file of readdirSync(absDir, { encoding: "utf8" })) {
       const match = DATE_FILE_PATTERN.exec(file);
-      if (match) {
-        entries.push({ date: match[1], path: join(absDir, file), type: "monthly" });
-      }
+      if (!match) continue;
+      const filePath = join(absDir, file);
+      // Skip non-file entries (e.g. a sub-directory named 2026-06-03.json)
+      if (!isFile(filePath)) continue;
+      entries.push({ date: match[1], path: filePath, type: "monthly" });
     }
   }
 
@@ -38,9 +56,10 @@ export function listAllBaselines(baselinesDir: string): BaselineEntry[] {
   if (isDirectory(weeklyDir)) {
     for (const file of readdirSync(weeklyDir, { encoding: "utf8" })) {
       const match = DATE_FILE_PATTERN.exec(file);
-      if (match) {
-        entries.push({ date: match[1], path: join(weeklyDir, file), type: "weekly" });
-      }
+      if (!match) continue;
+      const filePath = join(weeklyDir, file);
+      if (!isFile(filePath)) continue;
+      entries.push({ date: match[1], path: filePath, type: "weekly" });
     }
   }
 
@@ -89,6 +108,9 @@ export function resolveBaselineByDate(date: string, baselinesDir: string): strin
   const weeklyPath = join(absDir, "weekly", `${date}.json`);
 
   if (existsSync(monthlyPath)) {
+    if (!isFile(monthlyPath)) {
+      throw new Error(`Baseline path for ${date} is not a regular file: ${monthlyPath}`);
+    }
     if (existsSync(weeklyPath)) {
       // Ambiguous: exists in both — prefer monthly, document the tie-break
       process.stderr.write(
@@ -98,7 +120,12 @@ export function resolveBaselineByDate(date: string, baselinesDir: string): strin
     return monthlyPath;
   }
 
-  if (existsSync(weeklyPath)) return weeklyPath;
+  if (existsSync(weeklyPath)) {
+    if (!isFile(weeklyPath)) {
+      throw new Error(`Baseline path for ${date} is not a regular file: ${weeklyPath}`);
+    }
+    return weeklyPath;
+  }
 
   throw new Error(
     `No baseline found for ${date}; run \`npm run compare -- --list\` to see available dates`
