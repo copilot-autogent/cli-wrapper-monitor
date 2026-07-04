@@ -81,13 +81,14 @@ export function extractRow(
 ): ExportRow {
   const ctxMetrics = snapshot.experiments?.["context-tax"]?.metrics ?? {};
 
-  const systemPromptChars =
-    (ctxMetrics["systemPromptChars"]?.value as number | undefined) ?? null;
-  const systemPromptTokens =
-    (ctxMetrics["systemPromptTokensEstimated"]?.value as number | undefined) ??
-    null;
-  const toolCount =
-    (ctxMetrics["toolCount"]?.value as number | undefined) ?? null;
+  const spCharsRaw = ctxMetrics["systemPromptChars"]?.value;
+  const systemPromptChars = typeof spCharsRaw === "number" ? spCharsRaw : null;
+
+  const spTokensRaw = ctxMetrics["systemPromptTokensEstimated"]?.value;
+  const systemPromptTokens = typeof spTokensRaw === "number" ? spTokensRaw : null;
+
+  const toolCountRaw = ctxMetrics["toolCount"]?.value;
+  const toolCount = typeof toolCountRaw === "number" ? toolCountRaw : null;
 
   const modelCount = snapshot.modelPool?.models?.length ?? null;
 
@@ -117,7 +118,8 @@ export function extractRow(
   let securityPostureScore: number | null = null;
   if (prevSnapshot !== undefined) {
     const report = diffSnapshots(prevSnapshot, snapshot);
-    securityPostureScore = report.securityPostureScore;
+    const score = report.securityPostureScore;
+    securityPostureScore = typeof score === "number" ? score : null;
   }
 
   const schemaVersion = snapshot.schemaVersion ?? null;
@@ -279,8 +281,8 @@ export function buildExportRows(baselinesDir: string): ExportRow[] {
   const paths = collectBaselinePaths(baselinesDir);
   const snapshots: MetricSnapshot[] = paths.map(loadSnapshot);
   // Sort by capturedAt (ascending) so securityPostureScore diffs adjacent snapshots correctly,
-  // even if filenames diverge from capture timestamps (e.g. backfilled or renamed files).
-  snapshots.sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
+  // even if filenames diverge from capture timestamps. Use Date.parse for robust ISO comparison.
+  snapshots.sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
 
   return snapshots.map((snap, i) => extractRow(snap, i > 0 ? snapshots[i - 1] : undefined));
 }
