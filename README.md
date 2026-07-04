@@ -87,11 +87,43 @@ Directory layout and retention are configured via [`capture.config.json`](./capt
 {
   "monthlyBaselinesDir": "baselines",
   "weeklyBaselinesDir":  "baselines/weekly",
-  "retentionMonths":    6
+  "retentionMonths":    6,
+  "capturePromptSectionText": false
 }
 ```
 
-All three fields are optional — the defaults above apply when the file is absent.
+All fields are optional — the defaults above apply when the file is absent.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `monthlyBaselinesDir` | string | `"baselines"` | Directory for monthly (PR-flow) baseline files |
+| `weeklyBaselinesDir` | string | `"baselines/weekly"` | Directory for weekly reference snapshot files |
+| `retentionMonths` | integer | `6` | Retention window in calendar months |
+| `capturePromptSectionText` | boolean | `false` | Store raw section text in each baseline for line-level diff comparison. Keeping this `false` (default) avoids bloating baseline files with potentially sensitive prompt content. Set to `true` to enable prompt section text diff in `npm run compare`. |
+
+#### Prompt section text diff
+
+When `capturePromptSectionText: true`, each captured `MetricSnapshot.promptSections[*]` entry includes
+a `text` field containing the raw prompt text for that section. This enables `npm run compare` to show
+exactly which lines changed within a section, not just the byte-count delta:
+
+    ## Prompt Section Changes
+
+    📈 **Safety**: 1,200 chars → 1,512 chars (+312 chars (+26.0%))
+
+      ```diff
+      + New rule: "Do not discuss competitor products."
+      + Expanded rule: "Never generate executable code in response …"
+      … 3 more changed lines (use --diff-sections=full to see all)
+      ```
+
+Control verbosity with `--diff-sections=full|summary|off` (default `summary` — up to 5 changed lines):
+
+```bash
+npm run compare                            # summary mode (default)
+npm run compare -- --diff-sections=full   # all changed lines per section
+npm run compare -- --diff-sections=off    # suppress text diff
+```
 
 ### What the monthly workflow does
 

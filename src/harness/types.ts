@@ -10,6 +10,12 @@ export interface PromptSection {
   charCount: number;
   /** Rough token estimate (charCount / 4) */
   tokenEstimate: number;
+  /**
+   * Raw text of this section.
+   * Only present when capturePromptSectionText=true in capture.config.json.
+   * Absent in older baselines; field is optional for backward compatibility.
+   */
+  text?: string;
 }
 
 /** A per-section character-count delta between two snapshots. */
