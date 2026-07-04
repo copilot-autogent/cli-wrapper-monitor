@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * Export all captured baseline metrics as a flat CSV or JSON table.
  *
@@ -22,6 +22,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, lstatSync, mkdirSync } from "fs";
 import { resolve, join, dirname } from "path";
+import { fileURLToPath } from "url";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { diffSnapshots } from "../src/harness/diff.js";
 import { migrate } from "../src/harness/baseline-migrator.js";
@@ -95,9 +96,9 @@ export function extractRow(
   // Search all experiments for an injectionRefusedRate metric.
   let injectionRefusedRate: number | null = null;
   for (const exp of Object.values(snapshot.experiments ?? {})) {
-    const metric = exp.metrics?.["injectionRefusedRate"];
-    if (metric !== undefined) {
-      injectionRefusedRate = metric.value as number;
+    const rawValue = exp.metrics?.["injectionRefusedRate"]?.value;
+    if (typeof rawValue === "number") {
+      injectionRefusedRate = rawValue;
       break;
     }
   }
@@ -106,7 +107,10 @@ export function extractRow(
   const hwEntries = snapshot.contextWindowHeadroom;
   let headroomMin: number | null = null;
   if (hwEntries && hwEntries.length > 0) {
-    headroomMin = Math.min(...hwEntries.map((e) => e.headroomTokens));
+    const values = hwEntries
+      .map((e) => e.headroomTokens)
+      .filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+    headroomMin = values.length > 0 ? Math.min(...values) : null;
   }
 
   // Security posture score: computed via diff against the previous snapshot.
@@ -304,4 +308,7 @@ function main(): void {
   }
 }
 
-main();
+// Only run when invoked directly (not when imported by tests or other modules).
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

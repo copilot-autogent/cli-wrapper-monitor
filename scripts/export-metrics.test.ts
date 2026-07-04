@@ -8,7 +8,6 @@ import { describe, it, expect } from "vitest";
 import { extractRow, serializeCSV, serializeJSON, buildExportRows } from "./export-metrics.js";
 import type { ExportRow } from "./export-metrics.js";
 import type { MetricSnapshot } from "../src/harness/types.js";
-import { vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Fixtures
