@@ -25,12 +25,21 @@ export function truncateAnnotation(text: string, maxLen = ANNOTATION_TRUNCATE_LE
 /**
  * Load a single annotation for the given ISO date (YYYY-MM-DD).
  * Returns the file content (trimmed) if the file exists, or undefined if it doesn't.
- * Never throws for missing files — only throws on unexpected I/O errors.
+ * Never throws for missing files — uses try/catch to avoid TOCTOU race.
  */
 export function loadAnnotation(notesDir: string, date: string): string | undefined {
   const filePath = join(notesDir, `${date}.md`);
-  if (!existsSync(filePath)) return undefined;
-  return readFileSync(filePath, "utf-8").trim() || undefined;
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch (err: unknown) {
+    // ENOENT is the expected "no annotation" case; re-throw unexpected errors
+    if (err && typeof err === "object" && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw err;
+  }
+  return content.trim() || undefined;
 }
 
 /**
@@ -54,9 +63,12 @@ export function loadAnnotations(notesDir: string): Record<string, string> {
     const m = DATE_RE.exec(entry);
     if (!m) continue;
     const date = m[1];
-    const content = loadAnnotation(notesDir, date);
-    if (content !== undefined) {
-      result[date] = content;
+    // Read directly instead of delegating to loadAnnotation to avoid double stat
+    try {
+      const content = readFileSync(join(notesDir, entry), "utf-8").trim();
+      if (content) result[date] = content;
+    } catch {
+      // Skip unreadable files silently
     }
   }
 
