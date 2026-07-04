@@ -176,6 +176,11 @@ describe("resolveBaselineByDate", () => {
     expect(() => resolveBaselineByDate("2026-06-32", BASE)).toThrow(/Invalid date/);
   });
 
+  it("throws for structurally valid but impossible calendar dates", () => {
+    expect(() => resolveBaselineByDate("2026-02-30", BASE)).toThrow(/Invalid date/);
+    expect(() => resolveBaselineByDate("2026-04-31", BASE)).toThrow(/Invalid date/);
+  });
+
   it("throws with --list hint when date not found", () => {
     setupBaselines(["2026-06-03"], []);
     expect(() => resolveBaselineByDate("2026-05-01", BASE)).toThrow(

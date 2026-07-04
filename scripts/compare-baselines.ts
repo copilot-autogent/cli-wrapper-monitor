@@ -103,9 +103,11 @@ function parseArgs(): CliArgs {
   if (!a && positional[0]) a = positional[0];
   if (!b && positional[1]) b = positional[1];
 
-  // When --from/--to/--list are in use, explicit file paths are not required
-  const needsExplicitPaths = !list && from === null && to === null;
-  if (needsExplicitPaths && (!a || !b)) {
+  // Error only when the user provided EXACTLY ONE explicit file path without
+  // date flags — ambiguous intent. Zero paths is fine: main() auto-resolves.
+  // Both paths is fine: legacy explicit-path mode.
+  const hasDateFlags = from !== null || to !== null;
+  if (!list && !hasDateFlags && ((a && !b) || (!a && b))) {
     console.error(
       "Usage: npm run compare [options]\n\n" +
       "  Date-based (recommended):\n" +
@@ -448,15 +450,11 @@ async function main(): Promise<void> {
     if (from !== null) {
       resolvedA = resolveBaselineByDate(from, BASELINES_DIR);
     } else {
-      // No --from and no --to means we can't reach here (outer condition requires
-      // at least one to be non-null). When to !== null, use it directly; when
-      // to === null we already resolved resolvedB from the latest above — derive
-      // bDate from that latest entry.
-      const bDate = to !== null ? to : findLatestBaseline(allBaselines)!.date;
-      const prev = findPreviousBaseline(bDate, allBaselines);
+      // from === null here, but to !== null (outer condition guarantees one of them is set)
+      const prev = findPreviousBaseline(to!, allBaselines);
       if (!prev) {
         throw new Error(
-          `No baseline found before ${bDate}; run \`npm run compare -- --list\` to see available dates`
+          `No baseline found before ${to}; run \`npm run compare -- --list\` to see available dates`
         );
       }
       resolvedA = prev.path;

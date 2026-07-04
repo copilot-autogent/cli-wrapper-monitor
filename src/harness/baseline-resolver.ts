@@ -70,10 +70,17 @@ export function resolveBaselineByDate(date: string, baselinesDir: string): strin
     );
   }
   // Basic calendar-range validation to surface typos early
-  const [year, month, day] = date.split("-").map(Number);
+  const [, month, day] = date.split("-").map(Number);
   if (month < 1 || month > 12 || day < 1 || day > 31) {
     throw new Error(
       `Invalid date "${date}" — month must be 01–12 and day must be 01–31`
+    );
+  }
+  // Deeper check: feed through Date constructor to catch impossible combos (e.g. Feb 31)
+  const d = new Date(`${date}T00:00:00Z`);
+  if (isNaN(d.getTime()) || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) {
+    throw new Error(
+      `Invalid date "${date}" — not a valid calendar date (e.g. no Feb 30)`
     );
   }
 
