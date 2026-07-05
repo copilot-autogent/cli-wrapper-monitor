@@ -83,7 +83,8 @@ Both workflows accept manual-trigger inputs:
 
 ### Capture configuration
 
-Directory layout and retention are configured via [`capture.config.json`](./capture.config.json) in the repository root:
+Directory layout and retention are configured via [`capture.config.json`](./capture.config.json) in the repository root.  
+The schema defaults (applied when the file is absent) are:
 
 ```json
 {
@@ -95,7 +96,7 @@ Directory layout and retention are configured via [`capture.config.json`](./capt
 }
 ```
 
-All fields are optional — the defaults above apply when the file is absent.
+The repo's `capture.config.json` ships with `captureProbeResults: true` so that automated monthly and weekly baseline captures write per-probe security-posture data (required for `npm run probe-audit` trend views).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -103,7 +104,7 @@ All fields are optional — the defaults above apply when the file is absent.
 | `weeklyBaselinesDir` | string | `"baselines/weekly"` | Directory for weekly reference snapshot files |
 | `retentionMonths` | integer | `6` | Retention window in calendar months |
 | `capturePromptSectionText` | boolean | `false` | Store raw section text in each baseline for line-level diff comparison. Keeping this `false` (default) avoids bloating baseline files with potentially sensitive prompt content. Set to `true` to enable prompt section text diff in `npm run compare`. |
-| `captureProbeResults` | boolean | `false` | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). |
+| `captureProbeResults` | boolean | `false` | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe trend breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). **The repo's `capture.config.json` sets this to `true`** so automated monthly and weekly captures include probe-level data for category-level drift detection. |
 
 #### Prompt section text diff
 
@@ -378,7 +379,11 @@ npm run archive -- --older-than-months 12
 
 ### Enabling per-probe storage
 
-Set `captureProbeResults: true` in `capture.config.json` before running `npm run capture`. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run).
+`captureProbeResults: true` is set in `capture.config.json`, so **automated monthly and weekly GH Actions captures already store per-probe results** — no manual action needed. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run).
+
+> **⚠️ Token-absent captures:** if `GITHUB_TOKEN` is not available (e.g. a local run without credentials), the refusal-rate experiment is skipped and `probeResults[]` is omitted from the snapshot — the same visible symptom as a pre-#92 baseline. Check the capture log for `"skipped: no GITHUB_TOKEN"` to distinguish a collection gap from historical data.
+
+For local captures, the same `capture.config.json` applies. If you override the config file path, ensure `captureProbeResults: true` is present to get probe-level data.
 
 ### Report columns
 
@@ -393,11 +398,17 @@ Set `captureProbeResults: true` in `capture.config.json` before running `npm run
 
 ### Backward compatibility
 
-Baselines captured before `captureProbeResults` was added show:
+Three snapshot shapes appear in `--all` mode:
 
-> _probe detail unavailable (pre-#92)_
+| Snapshot type | `probeResults[]` | Single-baseline view | Rate column (`--all`) |
+|---|---|---|---|
+| Pre-#92 baseline | absent | `_probe detail unavailable (pre-#92)_` | `—` |
+| Captured without `GITHUB_TOKEN` | absent | `_probe detail unavailable (pre-#92)_` | `—` |
+| Post-#92 with token | populated | full pass/fail table | ✅/❌ icons |
 
-No changes to existing baseline files are required.
+The two absent-probe cases render identically in both views — check the capture log for a `"skipped: no GITHUB_TOKEN"` message to distinguish a current collection gap from historical data. No changes to existing baseline files are required.
+
+
 
 ### Examples
 
