@@ -379,7 +379,9 @@ npm run archive -- --older-than-months 12
 
 ### Enabling per-probe storage
 
-`captureProbeResults: true` is set in `capture.config.json`, so **automated monthly and weekly GH Actions captures already store per-probe results** — no manual action needed. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run); captures without a token fall back silently and write no `probeResults[]`.
+`captureProbeResults: true` is set in `capture.config.json`, so **automated monthly and weekly GH Actions captures already store per-probe results** — no manual action needed. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run).
+
+> **⚠️ Token-absent captures:** if `GITHUB_TOKEN` is not available (e.g. a local run without credentials), the refusal-rate experiment is skipped and `probeResults[]` is omitted from the snapshot — the same visible symptom as a pre-#92 baseline. Check the capture log for `"skipped: no GITHUB_TOKEN"` to distinguish a collection gap from historical data.
 
 For local captures, the same `capture.config.json` applies. If you override the config file path, ensure `captureProbeResults: true` is present to get probe-level data.
 
@@ -396,11 +398,15 @@ For local captures, the same `capture.config.json` applies. If you override the 
 
 ### Backward compatibility
 
-Baselines captured before `captureProbeResults` was added (pre-#92), or captured without a `GITHUB_TOKEN`, show:
+Two snapshot shapes appear in `--all` mode:
 
-> _probe detail unavailable (pre-#92)_
+| Snapshot type | `probeResults[]` | Rate column |
+|---|---|---|
+| Pre-#92 baseline | absent (field did not exist) | `—` |
+| Captured without `GITHUB_TOKEN` | absent (experiment skipped) | `—` |
+| Post-#92 with token | populated | ✅/❌ icons |
 
-No changes to existing baseline files are required. `--all` mode mixes historical snapshots that lack `probeResults[]` with newer ones that include them — the missing entries render as `—` in the rate column, providing a clear migration boundary.
+Both absent cases render identically in the rate column — check the capture log for a `"skipped: no GITHUB_TOKEN"` message to distinguish a current collection gap from historical data. No changes to existing baseline files are required.
 
 
 ### Examples
