@@ -83,7 +83,8 @@ Both workflows accept manual-trigger inputs:
 
 ### Capture configuration
 
-Directory layout and retention are configured via [`capture.config.json`](./capture.config.json) in the repository root:
+Directory layout and retention are configured via [`capture.config.json`](./capture.config.json) in the repository root.  
+The schema defaults (applied when the file is absent) are:
 
 ```json
 {
@@ -91,11 +92,11 @@ Directory layout and retention are configured via [`capture.config.json`](./capt
   "weeklyBaselinesDir":  "baselines/weekly",
   "retentionMonths":    6,
   "capturePromptSectionText": false,
-  "captureProbeResults": true
+  "captureProbeResults": false
 }
 ```
 
-All fields are optional — the defaults above apply when the file is absent.
+The repo's `capture.config.json` ships with `captureProbeResults: true` so that automated monthly and weekly baseline captures write per-probe security-posture data (required for `npm run probe-audit` trend views).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -103,7 +104,7 @@ All fields are optional — the defaults above apply when the file is absent.
 | `weeklyBaselinesDir` | string | `"baselines/weekly"` | Directory for weekly reference snapshot files |
 | `retentionMonths` | integer | `6` | Retention window in calendar months |
 | `capturePromptSectionText` | boolean | `false` | Store raw section text in each baseline for line-level diff comparison. Keeping this `false` (default) avoids bloating baseline files with potentially sensitive prompt content. Set to `true` to enable prompt section text diff in `npm run compare`. |
-| `captureProbeResults` | boolean | `false` (default); **`true` in automated workflow config** | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). Set to `true` (as in the repo's `capture.config.json`) so automated monthly and weekly captures write probe-level security-posture data for drift detection. |
+| `captureProbeResults` | boolean | `false` | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe trend breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). **The repo's `capture.config.json` sets this to `true`** so automated monthly and weekly captures include probe-level data for category-level drift detection. |
 
 #### Prompt section text diff
 
@@ -395,11 +396,12 @@ For local captures, the same `capture.config.json` applies. If you override the 
 
 ### Backward compatibility
 
-Baselines captured before `captureProbeResults` was added show:
+Baselines captured before `captureProbeResults` was added (pre-#92), or captured without a `GITHUB_TOKEN`, show:
 
 > _probe detail unavailable (pre-#92)_
 
-No changes to existing baseline files are required.
+No changes to existing baseline files are required. `--all` mode mixes historical snapshots that lack `probeResults[]` with newer ones that include them — the missing entries render as `—` in the rate column, providing a clear migration boundary.
+
 
 ### Examples
 
