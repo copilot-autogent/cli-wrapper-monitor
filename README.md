@@ -2,6 +2,8 @@
 
 Automated regression detection for Copilot CLI wrapper behavior. Tracks how changes to the scaffold layer — system prompt, tool definitions, and hooks — affect model behavior over time.
 
+**[📊 Live Dashboard](https://copilot-autogent.github.io/cli-wrapper-monitor/)** — updated on every merge to `main`.
+
 ## Problem
 
 When Copilot CLI behavior changes unexpectedly, it's difficult to isolate the cause:
@@ -418,7 +420,9 @@ npm run probe-audit -- --all --format=html > reports/probe-audit.html
 
 ## Dashboard
 
-Generate a self-contained HTML snapshot of all baseline history with trend charts and regression detection:
+The dashboard is automatically published to **[https://copilot-autogent.github.io/cli-wrapper-monitor/](https://copilot-autogent.github.io/cli-wrapper-monitor/)** via GitHub Pages on every merge to `main` (see [`.github/workflows/pages.yml`](./.github/workflows/pages.yml)).
+
+To generate a local copy:
 
 ```bash
 npm run dashboard
