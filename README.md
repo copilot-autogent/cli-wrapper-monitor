@@ -398,15 +398,16 @@ For local captures, the same `capture.config.json` applies. If you override the 
 
 ### Backward compatibility
 
-Two snapshot shapes appear in `--all` mode:
+Three snapshot shapes appear in `--all` mode:
 
-| Snapshot type | `probeResults[]` | Rate column |
-|---|---|---|
-| Pre-#92 baseline | absent (field did not exist) | `—` |
-| Captured without `GITHUB_TOKEN` | absent (experiment skipped) | `—` |
-| Post-#92 with token | populated | ✅/❌ icons |
+| Snapshot type | `probeResults[]` | Single-baseline view | Rate column (`--all`) |
+|---|---|---|---|
+| Pre-#92 baseline | absent | `_probe detail unavailable (pre-#92)_` | `—` |
+| Captured without `GITHUB_TOKEN` | absent | `_probe detail unavailable (pre-#92)_` | `—` |
+| Post-#92 with token | populated | full pass/fail table | ✅/❌ icons |
 
-Both absent cases render identically in the rate column — check the capture log for a `"skipped: no GITHUB_TOKEN"` message to distinguish a current collection gap from historical data. No changes to existing baseline files are required.
+The two absent-probe cases render identically in both views — check the capture log for a `"skipped: no GITHUB_TOKEN"` message to distinguish a current collection gap from historical data. No changes to existing baseline files are required.
+
 
 
 ### Examples
