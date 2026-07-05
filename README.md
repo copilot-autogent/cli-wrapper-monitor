@@ -91,7 +91,7 @@ Directory layout and retention are configured via [`capture.config.json`](./capt
   "weeklyBaselinesDir":  "baselines/weekly",
   "retentionMonths":    6,
   "capturePromptSectionText": false,
-  "captureProbeResults": false
+  "captureProbeResults": true
 }
 ```
 
@@ -103,7 +103,7 @@ All fields are optional — the defaults above apply when the file is absent.
 | `weeklyBaselinesDir` | string | `"baselines/weekly"` | Directory for weekly reference snapshot files |
 | `retentionMonths` | integer | `6` | Retention window in calendar months |
 | `capturePromptSectionText` | boolean | `false` | Store raw section text in each baseline for line-level diff comparison. Keeping this `false` (default) avoids bloating baseline files with potentially sensitive prompt content. Set to `true` to enable prompt section text diff in `npm run compare`. |
-| `captureProbeResults` | boolean | `false` | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). |
+| `captureProbeResults` | boolean | `false` (default); **`true` in automated workflow config** | Store per-probe pass/fail results in `MetricSnapshot.probeResults[]`. Required for `npm run probe-audit` to show per-probe breakdown. Only has effect when the refusal-rate experiment runs (requires `GITHUB_TOKEN`). Set to `true` (as in the repo's `capture.config.json`) so automated monthly and weekly captures write probe-level security-posture data for drift detection. |
 
 #### Prompt section text diff
 
@@ -378,7 +378,9 @@ npm run archive -- --older-than-months 12
 
 ### Enabling per-probe storage
 
-Set `captureProbeResults: true` in `capture.config.json` before running `npm run capture`. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run).
+`captureProbeResults: true` is set in `capture.config.json`, so **automated monthly and weekly GH Actions captures already store per-probe results** — no manual action needed. This requires `GITHUB_TOKEN` (the refusal-rate experiment must run); captures without a token fall back silently and write no `probeResults[]`.
+
+For local captures, the same `capture.config.json` applies. If you override the config file path, ensure `captureProbeResults: true` is present to get probe-level data.
 
 ### Report columns
 

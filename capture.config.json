@@ -1,5 +1,6 @@
 {
   "monthlyBaselinesDir": "baselines",
   "weeklyBaselinesDir": "baselines/weekly",
-  "retentionMonths": 6
+  "retentionMonths": 6,
+  "captureProbeResults": true
 }
