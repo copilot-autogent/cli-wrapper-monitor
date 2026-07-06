@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { MetricSnapshot } from './types.js';
+import type { MetricSnapshot, PromptSectionChange } from './types.js';
 import { diffSnapshots } from './diff.js';
 import type { DiffReport } from './types.js';
+import { diffPromptSectionTexts } from './prompt-sections.js';
 
 /**
  * Resolve the two most recent ISO-date-sorted baseline files from `baselinesDir`.
@@ -83,11 +84,75 @@ function truncateForDiscord(msg: string): string {
   return msg.slice(0, cutoff) + TRUNCATION_SUFFIX;
 }
 
+/** Maximum number of changed sections to show before truncating with "…and N more". */
+const MAX_SECTION_ENTRIES = 5;
+
+/**
+ * Format a single section's size change as a compact string.
+ * E.g. "+1,234 chars (+5.2%)" or "-500 chars (-2.0%)" or "new (+1,234 chars)"
+ */
+function formatSectionChange(change: PromptSectionChange): string {
+  const sign = change.deltaAbsolute >= 0 ? '+' : '';
+  const absStr = `${sign}${change.deltaAbsolute.toLocaleString()} chars`;
+  if (change.baselineCharCount === null) return `new (${absStr})`;
+  if (change.currentCharCount === null) return 'removed';
+  const pctStr = change.deltaPct !== null ? ` (${sign}${change.deltaPct.toFixed(1)}%)` : '';
+  return `${absStr}${pctStr}`;
+}
+
+/**
+ * Build the optional "Section changes:" block for the digest.
+ *
+ * Uses char-count deltas from the DiffReport and, when section text is available
+ * (capturePromptSectionText=true), also surfaces same-size rewrites via
+ * line-level text diffs (diffPromptSectionTexts).
+ *
+ * Returns an empty array when sections are unavailable or unchanged.
+ */
+function buildSectionChangesBlock(
+  report: DiffReport,
+  prior: MetricSnapshot,
+  current: MetricSnapshot,
+): string[] {
+  if (!report.promptSectionsAvailable) return [];
+
+  // Sections with a non-zero char-count delta
+  const sizeChanges = report.promptSectionChanges.filter((c) => c.deltaAbsolute !== 0);
+  const sizeChangeNames = new Set(sizeChanges.map((c) => c.name));
+
+  // Additionally detect same-size rewrites via line-level text diffs (when text captured)
+  const textDiffs = diffPromptSectionTexts(prior.promptSections, current.promptSections, 5);
+  const rewriteEntries: Array<{ name: string; label: string }> = [];
+  for (const [name, td] of textDiffs) {
+    if (sizeChangeNames.has(name)) continue; // already covered
+    if (!td.unavailable && td.totalChangedLines > 0) {
+      rewriteEntries.push({ name, label: 'same size, text rewritten' });
+    }
+  }
+
+  const allChanges: Array<{ name: string; label: string }> = [
+    ...sizeChanges.map((c) => ({ name: c.name, label: formatSectionChange(c) })),
+    ...rewriteEntries,
+  ];
+
+  if (allChanges.length === 0) return [];
+
+  const lines: string[] = ['**Section changes:**'];
+  const toShow = allChanges.slice(0, MAX_SECTION_ENTRIES);
+  const extra = allChanges.length - MAX_SECTION_ENTRIES;
+
+  for (const { name, label } of toShow) {
+    lines.push(`  • ${name}: ${label}`);
+  }
+  if (extra > 0) {
+    lines.push(`  …and ${extra} more section${extra > 1 ? 's' : ''} changed`);
+  }
+
+  return lines;
+}
+
 /**
  * Build a compact Discord-ready digest message from two snapshots.
- *
- * When `prior` is null (only a single baseline exists) a "first capture" notice
- * is returned instead of a diff.
  *
  * @param current   - The latest snapshot.
  * @param prior     - The second-most-recent snapshot, or null if unavailable.
@@ -112,6 +177,7 @@ export function buildDigestMessage(
   const report = diffSnapshots(prior, current);
   lines.push(...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)));
   lines.push(...buildMetricLines(current, report));
+  lines.push(...buildSectionChangesBlock(report, prior, current));
   return truncateForDiscord(lines.join('\n'));
 }
 
