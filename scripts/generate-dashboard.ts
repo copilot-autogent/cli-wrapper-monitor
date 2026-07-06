@@ -4,6 +4,7 @@
  *
  * Usage:
  *   npx tsx scripts/generate-dashboard.ts [--output <path>]
+ *   npx tsx scripts/generate-dashboard.ts [--output=<path>]
  *   npm run dashboard
  *
  * Default output: reports/dashboard.html
@@ -13,6 +14,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, lstatSync, mkdirSync } from "fs";
 import { resolve, join, dirname } from "path";
+import { fileURLToPath } from "url";
 import type { MetricSnapshot } from "../src/harness/types.js";
 import { validateBaselineFile } from "../src/harness/validator.js";
 import {
@@ -695,19 +697,43 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
 // Entry point
 // ---------------------------------------------------------------------------
 
-function main(): void {
-  const args = process.argv.slice(2);
-  let output = "reports/dashboard.html";
+const DEFAULT_OUTPUT = "reports/dashboard.html";
+
+/**
+ * Parse the `--output` flag from CLI args, accepting BOTH forms:
+ *   --output <path>   (space-separated)
+ *   --output=<path>   (equals form — used by the Publish Dashboard workflow)
+ * Returns the resolved output path, or the default when the flag is absent.
+ */
+export function parseOutputArg(args: string[]): string {
+  let output = DEFAULT_OUTPUT;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--output") {
+    const arg = args[i];
+    if (arg === "--output") {
       if (i + 1 >= args.length) {
-        console.error(`Error: --output requires a path argument`);
-        process.exit(1);
+        throw new Error("--output requires a path argument");
       }
       output = args[++i];
+    } else if (arg.startsWith("--output=")) {
+      const value = arg.slice("--output=".length);
+      if (value === "") {
+        throw new Error("--output requires a path argument");
+      }
+      output = value;
     }
   }
+  return output;
+}
 
+function main(): void {
+  let output: string;
+  try {
+    output = parseOutputArg(process.argv.slice(2));
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+    return;
+  }
   const snapshots = loadAll("baselines");
   console.log(`Loaded ${snapshots.length} baseline snapshot${snapshots.length !== 1 ? "s" : ""}`);
   for (const s of snapshots) {
@@ -728,4 +754,6 @@ function main(): void {
   console.log(`\nDashboard written to: ${outPath}`);
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}
