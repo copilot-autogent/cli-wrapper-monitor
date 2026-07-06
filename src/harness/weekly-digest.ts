@@ -89,15 +89,28 @@ const MAX_SECTION_ENTRIES = 5;
 
 /**
  * Format a single section's size change as a compact string.
- * E.g. "+1,234 chars (+5.2%)" or "-500 chars (-2.0%)" or "new (+1,234 chars)"
+ * E.g. "+1,234 chars (+5.2%)" or "-500 chars (-2.0%)" or "new" or "removed"
  */
 function formatSectionChange(change: PromptSectionChange): string {
-  const sign = change.deltaAbsolute >= 0 ? '+' : '';
-  const absStr = `${sign}${change.deltaAbsolute.toLocaleString('en-US')} chars`;
-  if (change.baselineCharCount === null) return `new (${absStr})`;
+  if (change.baselineCharCount === null) {
+    // New section: show size only when non-zero to avoid "new (+0 chars)" noise
+    if (change.deltaAbsolute === 0) return 'new';
+    return `new (+${change.deltaAbsolute.toLocaleString('en-US')} chars)`;
+  }
   if (change.currentCharCount === null) return 'removed';
-  const pctStr = change.deltaPct !== null ? ` (${sign}${change.deltaPct.toFixed(1)}%)` : '';
-  return `${absStr}${pctStr}`;
+  const charSign = change.deltaAbsolute >= 0 ? '+' : '';
+  const absStr = `${charSign}${change.deltaAbsolute.toLocaleString('en-US')} chars`;
+  if (change.deltaPct !== null) {
+    // Derive pct sign independently from deltaPct value to avoid sign disagreement
+    const pctSign = change.deltaPct >= 0 ? '+' : '';
+    return `${absStr} (${pctSign}${change.deltaPct.toFixed(1)}%)`;
+  }
+  return absStr;
+}
+
+/** Sanitize a section name for safe Discord embedding (strip @-mentions, newlines). */
+function sanitizeSectionName(name: string): string {
+  return name.replace(/@/g, '').replace(/[\r\n]+/g, ' ').trim();
 }
 
 /**
@@ -132,10 +145,17 @@ function buildSectionChangesBlock(
     }
   }
 
-  const allChanges: Array<{ name: string; label: string }> = [
-    ...sizeChanges.map((c) => ({ name: c.name, label: formatSectionChange(c) })),
-    ...rewriteEntries,
+  const allChanges: Array<{ name: string; label: string; magnitude: number }> = [
+    ...sizeChanges.map((c) => ({
+      name: sanitizeSectionName(c.name),
+      label: formatSectionChange(c),
+      magnitude: Math.abs(c.deltaAbsolute),
+    })),
+    ...rewriteEntries.map((e) => ({ ...e, magnitude: 0 })),
   ];
+
+  // Sort by magnitude descending so the most significant changes appear first
+  allChanges.sort((a, b) => b.magnitude - a.magnitude);
 
   if (allChanges.length === 0) return [];
 

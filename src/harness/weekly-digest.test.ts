@@ -284,6 +284,24 @@ describe('buildDigestMessage — section changes present', () => {
     expect(msg).toContain('Section changes:');
     expect(msg).toContain('Safety');
     expect(msg).toContain('new');
+    // Should NOT include "(+0 chars)" noise for a zero-length new section
+    expect(msg).not.toContain('+0 chars');
+  });
+
+  it('truncates to MAX 5 sections and appends "…and 1 more" (singular)', () => {
+    const priorSections = Array.from({ length: 6 }, (_, i) => ({
+      name: `Section${i}`,
+      charCount: 1_000 + i * 10, // different sizes so sort is deterministic
+      tokenEstimate: 250,
+    }));
+    const currentSections = priorSections.map((s) => ({
+      ...s,
+      charCount: s.charCount + 100, // all 6 sections grew
+    }));
+    const prior = makeSnapshot({ promptSections: priorSections });
+    const current = makeSnapshot({ promptSections: currentSections });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('…and 1 more section changed');
   });
 
 
