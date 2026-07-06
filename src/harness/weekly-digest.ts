@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { MetricSnapshot } from './types.js';
+import type { MetricSnapshot, PromptSectionChange } from './types.js';
 import { diffSnapshots } from './diff.js';
 import type { DiffReport } from './types.js';
+import { diffPromptSectionTexts } from './prompt-sections.js';
 
 /**
  * Resolve the two most recent ISO-date-sorted baseline files from `baselinesDir`.
@@ -83,11 +84,107 @@ function truncateForDiscord(msg: string): string {
   return msg.slice(0, cutoff) + TRUNCATION_SUFFIX;
 }
 
+/** Maximum number of changed sections to show before truncating with "…and N more". */
+const MAX_SECTION_ENTRIES = 5;
+
+/**
+ * Format a single section's size change as a compact string.
+ * E.g. "+1,234 chars (+5.2%)" or "-500 chars (-2.0%)" or "new" or "removed"
+ */
+function formatSectionChange(change: PromptSectionChange): string {
+  if (change.baselineCharCount === null) {
+    // New section: show size only when non-zero to avoid "new (+0 chars)" noise
+    if (change.deltaAbsolute === 0) return 'new';
+    // Use Math.abs — a "new" section always grows from 0, delta is always positive
+    return `new (+${Math.abs(change.deltaAbsolute).toLocaleString('en-US')} chars)`;
+  }
+  if (change.currentCharCount === null) return 'removed';
+  const charSign = change.deltaAbsolute >= 0 ? '+' : '';
+  const absStr = `${charSign}${change.deltaAbsolute.toLocaleString('en-US')} chars`;
+  if (change.deltaPct !== null && isFinite(change.deltaPct)) {
+    // Skip the percentage for non-finite values (e.g. Infinity when baseline charCount was 0)
+    const pctSign = change.deltaPct >= 0 ? '+' : '';
+    return `${absStr} (${pctSign}${change.deltaPct.toFixed(1)}%)`;
+  }
+  return absStr;
+}
+
+/** Sanitize a section name for safe Discord embedding (strip @-mentions, newlines, Markdown). */
+function sanitizeSectionName(name: string): string {
+  return name
+    .replace(/@/g, '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[`*_~|]/g, '')
+    .trim();
+}
+
+/**
+ * Build the optional "Section changes:" block for the digest.
+ *
+ * Uses char-count deltas from the DiffReport and, when section text is available
+ * (capturePromptSectionText=true), also surfaces same-size rewrites via
+ * line-level text diffs (diffPromptSectionTexts).
+ *
+ * Returns an empty array when sections are unavailable or unchanged.
+ */
+function buildSectionChangesBlock(
+  report: DiffReport,
+  prior: MetricSnapshot,
+  current: MetricSnapshot,
+): string[] {
+  if (!report.promptSectionsAvailable) return [];
+
+  // Sections with a non-zero char-count delta OR a null side (section added/removed)
+  const sizeChanges = report.promptSectionChanges.filter(
+    (c) => c.deltaAbsolute !== 0 || c.baselineCharCount === null || c.currentCharCount === null,
+  );
+  const sizeChangeNames = new Set(sizeChanges.map((c) => c.name));
+
+  // Additionally detect same-size rewrites via line-level text diffs (when text captured)
+  // diffPromptSectionTexts accepts undefined/null for either side — handled defensively.
+  const textDiffs = diffPromptSectionTexts(prior.promptSections, current.promptSections, 5);
+  const rewriteEntries: Array<{ name: string; label: string; magnitude: number }> = [];
+  for (const [name, td] of textDiffs) {
+    if (sizeChangeNames.has(name)) continue; // already covered
+    if (!td.unavailable && td.totalChangedLines > 0) {
+      rewriteEntries.push({
+        name: sanitizeSectionName(name),
+        label: 'same size, text rewritten',
+        magnitude: td.totalChangedLines, // use line count as relevance signal
+      });
+    }
+  }
+
+  const allChanges: Array<{ name: string; label: string; magnitude: number }> = [
+    ...sizeChanges.map((c) => ({
+      name: sanitizeSectionName(c.name),
+      label: formatSectionChange(c),
+      magnitude: Math.abs(c.deltaAbsolute),
+    })),
+    ...rewriteEntries,
+  ];
+
+  // Sort by magnitude descending so the most significant changes appear first
+  allChanges.sort((a, b) => b.magnitude - a.magnitude);
+
+  if (allChanges.length === 0) return [];
+
+  const lines: string[] = ['**Section changes:**'];
+  const toShow = allChanges.slice(0, MAX_SECTION_ENTRIES);
+  const extra = allChanges.length - MAX_SECTION_ENTRIES;
+
+  for (const { name, label } of toShow) {
+    lines.push(`  • ${name}: ${label}`);
+  }
+  if (extra > 0) {
+    lines.push(`  …and ${extra} more section${extra > 1 ? 's' : ''} changed`);
+  }
+
+  return lines;
+}
+
 /**
  * Build a compact Discord-ready digest message from two snapshots.
- *
- * When `prior` is null (only a single baseline exists) a "first capture" notice
- * is returned instead of a diff.
  *
  * @param current   - The latest snapshot.
  * @param prior     - The second-most-recent snapshot, or null if unavailable.
@@ -112,6 +209,7 @@ export function buildDigestMessage(
   const report = diffSnapshots(prior, current);
   lines.push(...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)));
   lines.push(...buildMetricLines(current, report));
+  lines.push(...buildSectionChangesBlock(report, prior, current));
   return truncateForDiscord(lines.join('\n'));
 }
 

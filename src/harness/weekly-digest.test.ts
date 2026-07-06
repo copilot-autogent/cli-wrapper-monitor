@@ -175,8 +175,184 @@ describe('buildDigestMessage — headroom', () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveLatestBaselinePair
+// buildDigestMessage — section changes (section-diff-present path)
 // ---------------------------------------------------------------------------
+
+describe('buildDigestMessage — section changes present', () => {
+  it('includes "Section changes:" block when a section grew', () => {
+    const prior = makeSnapshot({
+      promptSections: [
+        { name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 },
+        { name: 'Introduction', charCount: 5_000, tokenEstimate: 1_250 },
+      ],
+    });
+    const current = makeSnapshot({
+      promptSections: [
+        { name: 'Tools', charCount: 12_000, tokenEstimate: 3_000 }, // +2000 chars
+        { name: 'Introduction', charCount: 5_000, tokenEstimate: 1_250 },
+      ],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('**Section changes:**');
+    expect(msg).toContain('• Tools:');
+    expect(msg).toContain('+2,000 chars');
+  });
+
+  it('includes delta percentage when baseline section is present', () => {
+    const prior = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
+    });
+    const current = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 11_000, tokenEstimate: 2_750 }],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('+10.0%');
+  });
+
+  it('shows "new" for a section that did not exist in prior baseline', () => {
+    const prior = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
+    });
+    const current = makeSnapshot({
+      promptSections: [
+        { name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 },
+        { name: 'Safety', charCount: 2_000, tokenEstimate: 500 },
+      ],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Safety');
+    expect(msg).toContain('new');
+  });
+
+  it('shows "removed" for a section that no longer exists in current', () => {
+    const prior = makeSnapshot({
+      promptSections: [
+        { name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 },
+        { name: 'Safety', charCount: 2_000, tokenEstimate: 500 },
+      ],
+    });
+    const current = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Safety');
+    expect(msg).toContain('removed');
+  });
+
+  it('truncates to MAX 5 sections and appends "…and N more"', () => {
+    const priorSections = Array.from({ length: 7 }, (_, i) => ({
+      name: `Section${i}`,
+      charCount: 1_000,
+      tokenEstimate: 250,
+    }));
+    const currentSections = priorSections.map((s) => ({
+      ...s,
+      charCount: s.charCount + 100, // all sections grew → 7 changes
+    }));
+    const prior = makeSnapshot({ promptSections: priorSections });
+    const current = makeSnapshot({ promptSections: currentSections });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('**Section changes:**');
+    expect(msg).toContain('…and 2 more sections changed');
+  });
+
+  it('shows negative delta for a section that shrank', () => {
+    const prior = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
+    });
+    const current = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 9_500, tokenEstimate: 2_375 }],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Section changes:');
+    expect(msg).toContain('Tools:');
+    expect(msg).toContain('-500 chars');
+    expect(msg).toContain('-5.0%');
+  });
+
+  it('reports a newly added zero-length section (null baselineCharCount)', () => {
+    const prior = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 1_000, tokenEstimate: 250 }],
+    });
+    const current = makeSnapshot({
+      promptSections: [
+        { name: 'Tools', charCount: 1_000, tokenEstimate: 250 },
+        { name: 'Safety', charCount: 0, tokenEstimate: 0 }, // zero-length, new
+      ],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Section changes:');
+    expect(msg).toContain('Safety');
+    expect(msg).toContain('new');
+    // Should NOT include "(+0 chars)" noise for a zero-length new section
+    expect(msg).not.toContain('+0 chars');
+  });
+
+  it('truncates to MAX 5 sections and appends "…and 1 more" (singular)', () => {
+    const priorSections = Array.from({ length: 6 }, (_, i) => ({
+      name: `Section${i}`,
+      charCount: 1_000 + i * 10, // different sizes so sort is deterministic
+      tokenEstimate: 250,
+    }));
+    const currentSections = priorSections.map((s) => ({
+      ...s,
+      charCount: s.charCount + 100, // all 6 sections grew
+    }));
+    const prior = makeSnapshot({ promptSections: priorSections });
+    const current = makeSnapshot({ promptSections: currentSections });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('…and 1 more section changed');
+  });
+
+
+  it('detects text rewrite when char count is unchanged but section text differs', () => {
+    const prior = makeSnapshot({
+      promptSections: [
+        { name: 'Introduction', charCount: 100, tokenEstimate: 25, text: 'Hello world\nLine two\n' },
+      ],
+    });
+    const current = makeSnapshot({
+      promptSections: [
+        { name: 'Introduction', charCount: 100, tokenEstimate: 25, text: 'Hello earth\nLine two\n' },
+      ],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Section changes:');
+    expect(msg).toContain('Introduction');
+    expect(msg).toContain('same size, text rewritten');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDigestMessage — section-diff-absent paths
+// ---------------------------------------------------------------------------
+
+describe('buildDigestMessage — no section changes', () => {
+  it('omits "Section changes:" block when sections are identical', () => {
+    const sections = [
+      { name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 },
+      { name: 'Introduction', charCount: 5_000, tokenEstimate: 1_250 },
+    ];
+    const snap = makeSnapshot({ promptSections: sections });
+    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    expect(msg).not.toContain('Section changes:');
+  });
+
+  it('omits "Section changes:" block when neither snapshot has promptSections', () => {
+    const snap = makeSnapshot(); // no promptSections field
+    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    expect(msg).not.toContain('Section changes:');
+  });
+
+  it('omits "Section changes:" block when prior is null (first capture)', () => {
+    const snap = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
+    });
+    const msg = buildDigestMessage(snap, null, '2026-07-07');
+    expect(msg).not.toContain('Section changes:');
+  });
+});
+
 
 describe('resolveLatestBaselinePair', () => {
   // Each test gets its own unique temp dir to ensure full isolation.
