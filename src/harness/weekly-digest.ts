@@ -93,7 +93,7 @@ const MAX_SECTION_ENTRIES = 5;
  */
 function formatSectionChange(change: PromptSectionChange): string {
   const sign = change.deltaAbsolute >= 0 ? '+' : '';
-  const absStr = `${sign}${change.deltaAbsolute.toLocaleString()} chars`;
+  const absStr = `${sign}${change.deltaAbsolute.toLocaleString('en-US')} chars`;
   if (change.baselineCharCount === null) return `new (${absStr})`;
   if (change.currentCharCount === null) return 'removed';
   const pctStr = change.deltaPct !== null ? ` (${sign}${change.deltaPct.toFixed(1)}%)` : '';
@@ -116,8 +116,10 @@ function buildSectionChangesBlock(
 ): string[] {
   if (!report.promptSectionsAvailable) return [];
 
-  // Sections with a non-zero char-count delta
-  const sizeChanges = report.promptSectionChanges.filter((c) => c.deltaAbsolute !== 0);
+  // Sections with a non-zero char-count delta OR a null side (section added/removed)
+  const sizeChanges = report.promptSectionChanges.filter(
+    (c) => c.deltaAbsolute !== 0 || c.baselineCharCount === null || c.currentCharCount === null,
+  );
   const sizeChangeNames = new Set(sizeChanges.map((c) => c.name));
 
   // Additionally detect same-size rewrites via line-level text diffs (when text captured)

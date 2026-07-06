@@ -256,6 +256,37 @@ describe('buildDigestMessage — section changes present', () => {
     expect(msg).toContain('…and 2 more sections changed');
   });
 
+  it('shows negative delta for a section that shrank', () => {
+    const prior = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
+    });
+    const current = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 9_500, tokenEstimate: 2_375 }],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Section changes:');
+    expect(msg).toContain('Tools:');
+    expect(msg).toContain('-500 chars');
+    expect(msg).toContain('-5.0%');
+  });
+
+  it('reports a newly added zero-length section (null baselineCharCount)', () => {
+    const prior = makeSnapshot({
+      promptSections: [{ name: 'Tools', charCount: 1_000, tokenEstimate: 250 }],
+    });
+    const current = makeSnapshot({
+      promptSections: [
+        { name: 'Tools', charCount: 1_000, tokenEstimate: 250 },
+        { name: 'Safety', charCount: 0, tokenEstimate: 0 }, // zero-length, new
+      ],
+    });
+    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('Section changes:');
+    expect(msg).toContain('Safety');
+    expect(msg).toContain('new');
+  });
+
+
   it('detects text rewrite when char count is unchanged but section text differs', () => {
     const prior = makeSnapshot({
       promptSections: [
