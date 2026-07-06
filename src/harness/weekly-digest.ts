@@ -95,22 +95,27 @@ function formatSectionChange(change: PromptSectionChange): string {
   if (change.baselineCharCount === null) {
     // New section: show size only when non-zero to avoid "new (+0 chars)" noise
     if (change.deltaAbsolute === 0) return 'new';
-    return `new (+${change.deltaAbsolute.toLocaleString('en-US')} chars)`;
+    // Use Math.abs — a "new" section always grows from 0, delta is always positive
+    return `new (+${Math.abs(change.deltaAbsolute).toLocaleString('en-US')} chars)`;
   }
   if (change.currentCharCount === null) return 'removed';
   const charSign = change.deltaAbsolute >= 0 ? '+' : '';
   const absStr = `${charSign}${change.deltaAbsolute.toLocaleString('en-US')} chars`;
-  if (change.deltaPct !== null) {
-    // Derive pct sign independently from deltaPct value to avoid sign disagreement
+  if (change.deltaPct !== null && isFinite(change.deltaPct)) {
+    // Skip the percentage for non-finite values (e.g. Infinity when baseline charCount was 0)
     const pctSign = change.deltaPct >= 0 ? '+' : '';
     return `${absStr} (${pctSign}${change.deltaPct.toFixed(1)}%)`;
   }
   return absStr;
 }
 
-/** Sanitize a section name for safe Discord embedding (strip @-mentions, newlines). */
+/** Sanitize a section name for safe Discord embedding (strip @-mentions, newlines, Markdown). */
 function sanitizeSectionName(name: string): string {
-  return name.replace(/@/g, '').replace(/[\r\n]+/g, ' ').trim();
+  return name
+    .replace(/@/g, '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[`*_~|]/g, '')
+    .trim();
 }
 
 /**
@@ -136,12 +141,17 @@ function buildSectionChangesBlock(
   const sizeChangeNames = new Set(sizeChanges.map((c) => c.name));
 
   // Additionally detect same-size rewrites via line-level text diffs (when text captured)
+  // diffPromptSectionTexts accepts undefined/null for either side — handled defensively.
   const textDiffs = diffPromptSectionTexts(prior.promptSections, current.promptSections, 5);
-  const rewriteEntries: Array<{ name: string; label: string }> = [];
+  const rewriteEntries: Array<{ name: string; label: string; magnitude: number }> = [];
   for (const [name, td] of textDiffs) {
     if (sizeChangeNames.has(name)) continue; // already covered
     if (!td.unavailable && td.totalChangedLines > 0) {
-      rewriteEntries.push({ name, label: 'same size, text rewritten' });
+      rewriteEntries.push({
+        name: sanitizeSectionName(name),
+        label: 'same size, text rewritten',
+        magnitude: td.totalChangedLines, // use line count as relevance signal
+      });
     }
   }
 
@@ -151,7 +161,7 @@ function buildSectionChangesBlock(
       label: formatSectionChange(c),
       magnitude: Math.abs(c.deltaAbsolute),
     })),
-    ...rewriteEntries.map((e) => ({ ...e, magnitude: 0 })),
+    ...rewriteEntries,
   ];
 
   // Sort by magnitude descending so the most significant changes appear first
