@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '30 0 * * 1'  # Every Monday ~00:30 UTC (best-effort, after weekly-capture at 00:00)
 
 permissions:
   contents: read
