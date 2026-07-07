@@ -172,10 +172,10 @@ export function formatHeadroomTable(entries: ContextWindowHeadroomEntry[]): stri
  */
 export function detectFirstTimeCrossings(
   current: ContextWindowHeadroomEntry[],
-  previous: ContextWindowHeadroomEntry[] | undefined,
+  previous: ContextWindowHeadroomEntry[] | null | undefined,
 ): ContextWindowHeadroomEntry[] {
   // No prior headroom data → first run after rollout; do not alert.
-  if (previous === undefined) return [];
+  if (previous == null) return [];
 
   const prevMap = new Map<string, HeadroomStatus>(
     previous.map((e) => [e.modelId, e.status]),
