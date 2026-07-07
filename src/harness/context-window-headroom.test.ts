@@ -264,6 +264,13 @@ describe('detectFirstTimeCrossings', () => {
     expect(detectFirstTimeCrossings(current, undefined)).toHaveLength(0);
   });
 
+  it('returns empty when previous is null (older baselines serialize contextWindowHeadroom as null)', () => {
+    // Older baselines write contextWindowHeadroom: null to JSON.
+    // null must be treated the same as undefined (first run) to avoid TypeError.
+    const current = [makeEntry('small', 'high-fill')];
+    expect(detectFirstTimeCrossings(current, null)).toHaveLength(0);
+  });
+
   it('returns flagged model when previous is an empty array (pool known, model is new)', () => {
     const current = [makeEntry('new-model', 'high-fill')];
     const previous: ContextWindowHeadroomEntry[] = [];
