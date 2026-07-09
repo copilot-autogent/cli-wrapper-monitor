@@ -93,7 +93,7 @@ describe('buildDigestMessage — stable baseline', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildDigestMessage — BREAKING regression', () => {
-  it('shows 🔴 when tool count drops', () => {
+  it('classifies as ALERT (🚨) when tool count drops', () => {
     const prior = makeSnapshot();
     const current = makeSnapshot({
       experiments: {
@@ -108,9 +108,11 @@ describe('buildDigestMessage — BREAKING regression', () => {
         },
       },
     });
-    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
-    expect(msg).toContain('🔴');
-    expect(msg).toMatch(/BREAKING/i);
+    const { message: msg, tier } = buildDigestMessage(current, prior, '2026-07-07');
+    // A tool count change is an ALERT condition — 🚨 is the stronger regression signal
+    expect(tier).toBe('alert');
+    expect(msg).toContain('🚨');
+    expect(msg).toContain('ALERT');
   });
 });
 

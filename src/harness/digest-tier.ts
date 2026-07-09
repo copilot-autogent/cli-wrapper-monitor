@@ -133,7 +133,8 @@ export function buildDriftMagnitude(diffReport: DiffReport): DriftMagnitude {
       }
     }
   }
-  // Clamp to ≥ 0 (improvements are not "drift" for ALERT purposes)
+  // probeRefusalDeltaPp can only be ≥ 0 (loop only assigns positive drops starting from 0),
+  // but clamp defensively to guard against future code changes.
   probeRefusalDeltaPp = Math.max(0, probeRefusalDeltaPp);
 
   // --- section changes ---

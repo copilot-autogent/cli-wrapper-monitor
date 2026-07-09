@@ -45,8 +45,13 @@ function parseArgs() {
 async function main() {
   const { baselinesDir, dryRun } = parseArgs();
 
-  const captureConfig = loadCaptureConfig();
-  const tierConfig = captureConfig.digestTier;
+  let tierConfig: ReturnType<typeof loadCaptureConfig>['digestTier'];
+  try {
+    tierConfig = loadCaptureConfig().digestTier;
+  } catch (err) {
+    console.error('❌ Failed to load capture config:', String(err));
+    process.exit(1);
+  }
 
   let message: string;
   let tier: DigestTier | null;

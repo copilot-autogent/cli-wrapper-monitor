@@ -124,15 +124,15 @@ export function loadCaptureConfig(configPath = 'capture.config.json'): CaptureCo
     const tierConfig: DigestTierConfig = {};
     if ('alertSystemPromptDeltaPct' in dtObj) {
       const v = dtObj.alertSystemPromptDeltaPct;
-      if (typeof v !== 'number' || v < 0) {
-        throw new Error(`${configPath}: digestTier.alertSystemPromptDeltaPct must be a non-negative number`);
+      if (typeof v !== 'number' || v <= 0) {
+        throw new Error(`${configPath}: digestTier.alertSystemPromptDeltaPct must be a positive number`);
       }
       tierConfig.alertSystemPromptDeltaPct = v;
     }
     if ('alertProbeRefusalDeltaPp' in dtObj) {
       const v = dtObj.alertProbeRefusalDeltaPp;
-      if (typeof v !== 'number' || v < 0) {
-        throw new Error(`${configPath}: digestTier.alertProbeRefusalDeltaPp must be a non-negative number`);
+      if (typeof v !== 'number' || v <= 0) {
+        throw new Error(`${configPath}: digestTier.alertProbeRefusalDeltaPp must be a positive number`);
       }
       tierConfig.alertProbeRefusalDeltaPp = v;
     }

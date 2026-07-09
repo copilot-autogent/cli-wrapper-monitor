@@ -349,7 +349,7 @@ describe('classifyDigestTier — ALERT', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -360,7 +360,7 @@ describe('classifyDigestTier — ALERT', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -371,7 +371,7 @@ describe('classifyDigestTier — ALERT', () => {
       toolCountDelta: 1,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -382,7 +382,7 @@ describe('classifyDigestTier — ALERT', () => {
       toolCountDelta: -3,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -393,7 +393,7 @@ describe('classifyDigestTier — ALERT', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 5,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -404,7 +404,7 @@ describe('classifyDigestTier — ALERT', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 10,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -428,7 +428,7 @@ describe('classifyDigestTier — boundary values', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -450,7 +450,7 @@ describe('classifyDigestTier — boundary values', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 5.0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -489,7 +489,7 @@ describe('classifyDigestTier — custom thresholds', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     // undefined = "digestTier key absent from config" — should still alert at default threshold
     expect(classifyDigestTier(mag, undefined)).toBe('alert');
@@ -501,7 +501,7 @@ describe('classifyDigestTier — custom thresholds', () => {
       toolCountDelta: 0,
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
-      hasAnyDrift: false,
+      hasAnyDrift: true,
     };
     // Partial config: only override probeRefusalDeltaPp; systemPromptDeltaPct uses default (5)
     expect(classifyDigestTier(mag, { alertProbeRefusalDeltaPp: 10 })).toBe('alert');

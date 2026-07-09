@@ -215,11 +215,12 @@ export function buildDigestMessage(
   const today = runDate ?? new Date().toISOString().slice(0, 10);
   const captureDate = isoToDate(current.capturedAt);
 
-  const lines: string[] = [`📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`];
-
   if (prior === null) {
-    lines.push(`✅ First baseline captured (${captureDate}) — no prior snapshot to compare.`);
-    lines.push(...buildMetricLines(current));
+    const lines = [
+      `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
+      `✅ First baseline captured (${captureDate}) — no prior snapshot to compare.`,
+      ...buildMetricLines(current),
+    ];
     return { message: truncateForDiscord(lines.join('\n')), tier: null };
   }
 
@@ -229,24 +230,34 @@ export function buildDigestMessage(
 
   // STABLE: collapse to a single line
   if (tier === 'stable') {
-    const stableLine = `✅ Stable — no significant changes detected (${today})`;
-    return { message: truncateForDiscord(stableLine), tier };
+    return {
+      message: truncateForDiscord(`✅ Stable — no significant changes detected (${today})`),
+      tier,
+    };
   }
 
-  // ALERT: prepend 🚨 header + include section changes + probe breakdown
+  // ALERT: 🚨 header + metric lines + section changes + probe breakdown.
+  // Does NOT call buildStatusLine to avoid a contradictory ✅ inside a 🚨 block
+  // (e.g. tool-count change with no BREAKING metrics).  The 🚨 header itself
+  // serves as the status signal; regression/warning detail still appears via
+  // the DiffReport-driven metric marks (🔄, 🔴, 🟡) in buildMetricLines.
   if (tier === 'alert') {
-    lines[0] = `🚨 **ALERT — CLI Wrapper Monitor — Weekly Digest** (${today})`;
-    lines.push(...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)));
-    lines.push(...buildMetricLines(current, report));
-    lines.push(...buildSectionChangesBlock(report, prior, current));
-    lines.push(...buildProbeBreakdown(report));
+    const lines = [
+      `🚨 **ALERT — CLI Wrapper Monitor — Weekly Digest** (${today})`,
+      ...buildMetricLines(current, report),
+      ...buildSectionChangesBlock(report, prior, current),
+      ...buildProbeBreakdown(report),
+    ];
     return { message: truncateForDiscord(lines.join('\n')), tier };
   }
 
   // CHANGE: current format (unchanged)
-  lines.push(...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)));
-  lines.push(...buildMetricLines(current, report));
-  lines.push(...buildSectionChangesBlock(report, prior, current));
+  const lines = [
+    `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
+    ...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)),
+    ...buildMetricLines(current, report),
+    ...buildSectionChangesBlock(report, prior, current),
+  ];
   return { message: truncateForDiscord(lines.join('\n')), tier };
 }
 
