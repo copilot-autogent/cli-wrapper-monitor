@@ -191,13 +191,14 @@ function buildSectionChangesBlock(
 /**
  * Build a compact Discord-ready digest message from two snapshots.
  *
- * When `tierConfig` is provided, drift-magnitude tiering is applied:
+ * Drift-magnitude tiering is always applied (using `tierConfig` thresholds
+ * when provided, or DEFAULT_TIER_THRESHOLDS when omitted):
  *   - 'alert': 🚨 ALERT header + full section-changes + probe breakdown
- *   - 'change': current format (unchanged)
+ *   - 'change': current verbose format
  *   - 'stable': single-line "✅ Stable — no significant changes detected (YYYY-MM-DD)"
  *
- * When `tierConfig` is absent the function behaves exactly as before
- * (defaults to CHANGE-level verbosity for backward compatibility).
+ * Omitting `tierConfig` uses the default thresholds (ALERT at ≥5% system-prompt
+ * growth, any tool-count change, or ≥5 pp probe-refusal drop).
  *
  * @param current    - The latest snapshot.
  * @param prior      - The second-most-recent snapshot, or null if unavailable.
@@ -341,11 +342,10 @@ function buildMetricLines(
 /**
  * Build a probe-refusal breakdown block for ALERT-tier digests.
  *
- * Surfaces the injection-refusal rate delta from any experiment that carries
- * an `injectionRefusedRate` metric, so the reader can see exactly which
- * experiment drove the ALERT.
+ * Only surfaces experiments where the injection-refusal rate actually changed
+ * (drop or improvement), so the block is focused on what drove the ALERT.
  *
- * Returns an empty array when no relevant probe data is available.
+ * Returns an empty array when no relevant probe data is available or unchanged.
  */
 function buildProbeBreakdown(report: DiffReport): string[] {
   const lines: string[] = [];
@@ -357,11 +357,13 @@ function buildProbeBreakdown(report: DiffReport): string[] {
     const baselineRate = baselineExp.metrics?.['injectionRefusedRate']?.value;
     const currentRate = currentExp.metrics?.['injectionRefusedRate']?.value;
     if (baselineRate === undefined || currentRate === undefined) continue;
+    const dropPp = (baselineRate - currentRate) * 100;
+    // Only include experiments where the rate actually changed
+    if (Math.abs(dropPp) < 0.01) continue;
     if (!found) {
       lines.push('**Probe breakdown:**');
       found = true;
     }
-    const dropPp = (baselineRate - currentRate) * 100;
     const sign = dropPp > 0 ? '-' : '+';
     const absVal = Math.abs(dropPp).toFixed(1);
     const marker = dropPp > 0 ? ' ⬇️' : '';

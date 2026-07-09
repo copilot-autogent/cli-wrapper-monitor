@@ -208,12 +208,7 @@ export function classifyDigestTier(
   }
 
   // CHANGE: any detectable drift below the alert threshold
-  if (
-    magnitude.systemPromptDeltaPct > 0 ||
-    magnitude.hasSectionChanges ||
-    magnitude.probeRefusalDeltaPp > 0 ||
-    magnitude.hasAnyDrift
-  ) {
+  if (magnitude.hasAnyDrift) {
     return 'change';
   }
 

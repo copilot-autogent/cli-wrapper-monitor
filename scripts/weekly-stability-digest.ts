@@ -24,6 +24,7 @@
 
 import { sendWebhookWithRetry } from '../src/harness/webhook-utils.js';
 import { runWeeklyDigest } from '../src/harness/weekly-digest.js';
+import type { DigestTier } from '../src/harness/digest-tier.js';
 import { loadCaptureConfig } from './capture-config.js';
 
 function parseArgs() {
@@ -48,7 +49,7 @@ async function main() {
   const tierConfig = captureConfig.digestTier;
 
   let message: string;
-  let tier: string | null;
+  let tier: DigestTier | null;
   try {
     ({ message, tier } = runWeeklyDigest(baselinesDir, tierConfig));
   } catch (err) {

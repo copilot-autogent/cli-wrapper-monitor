@@ -11,8 +11,6 @@ import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { DigestTierConfig } from '../src/harness/digest-tier.js';
 
-export type { DigestTierConfig };
-
 export interface CaptureConfig {
   /** Directory for monthly (PR-flow) baseline files (default: "baselines") */
   monthlyBaselinesDir: string;
