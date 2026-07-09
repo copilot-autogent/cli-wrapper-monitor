@@ -238,9 +238,11 @@ export async function findExistingAlertIssue(
   const { repo, token, baseUrl } = resolveApiOptions(opts);
   if (!token) return null;
 
-  // Search for open issues with the regression-alert label and metric in the title.
-  // Quote the label name to handle the colon in "type:regression-alert" correctly.
-  const searchQuery = `repo:${repo} is:issue is:open label:"type:regression-alert" "[ALERT] ${metric} drifted" in:title`;
+  // Search for open issues with the regression-alert label and metric+drifted in the title.
+  // Avoid `[ALERT]` brackets in the search term — GitHub strips `[` `]` punctuation,
+  // which could cause phrase-matching to silently fail. Instead, match on the stable
+  // non-bracketed token "<metric> drifted" which always appears in the title.
+  const searchQuery = `repo:${repo} is:issue is:open label:"type:regression-alert" "${metric} drifted" in:title`;
   const url = `${baseUrl}/search/issues?q=${encodeURIComponent(searchQuery)}&per_page=1`;
 
   const res = await fetch(url, {

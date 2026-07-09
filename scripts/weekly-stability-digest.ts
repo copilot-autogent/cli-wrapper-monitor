@@ -31,8 +31,7 @@
 import { sendWebhookWithRetry } from '../src/harness/webhook-utils.js';
 import { runWeeklyDigest } from '../src/harness/weekly-digest.js';
 import { fileAlertIssuesIfNeeded } from '../src/harness/alert-issue-filer.js';
-import type { DigestTier } from '../src/harness/digest-tier.js';
-import type { DriftMagnitude } from '../src/harness/digest-tier.js';
+import type { DigestTier, DriftMagnitude } from '../src/harness/digest-tier.js';
 import type { MetricSnapshot } from '../src/harness/types.js';
 import { loadCaptureConfig } from './capture-config.js';
 
