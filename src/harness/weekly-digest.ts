@@ -8,7 +8,7 @@ import {
   buildDriftMagnitude,
   classifyDigestTier,
 } from './digest-tier.js';
-import type { DigestTierConfig, DigestTier } from './digest-tier.js';
+import type { DigestTierConfig, DigestTier, DriftMagnitude } from './digest-tier.js';
 
 /**
  * Resolve the two most recent ISO-date-sorted baseline files from `baselinesDir`.
@@ -204,14 +204,21 @@ function buildSectionChangesBlock(
  * @param prior      - The second-most-recent snapshot, or null if unavailable.
  * @param runDate    - ISO date string for the digest date (defaults to today).
  * @param tierConfig - Optional tier-threshold config from capture.config.json.
- * @returns          `{ message, tier }` — tier is null when prior is null (first capture).
+ * @returns          `{ message, tier, magnitude, prior, current }` — `tier` and `magnitude`
+ *                   are null when prior is null (first capture).
  */
 export function buildDigestMessage(
   current: MetricSnapshot,
   prior: MetricSnapshot | null,
   runDate?: string,
   tierConfig?: DigestTierConfig,
-): { message: string; tier: DigestTier | null } {
+): {
+  message: string;
+  tier: DigestTier | null;
+  magnitude: DriftMagnitude | null;
+  prior: MetricSnapshot | null;
+  current: MetricSnapshot;
+} {
   const today = runDate ?? new Date().toISOString().slice(0, 10);
   const captureDate = isoToDate(current.capturedAt);
 
@@ -221,7 +228,7 @@ export function buildDigestMessage(
       `✅ First baseline captured (${captureDate}) — no prior snapshot to compare.`,
       ...buildMetricLines(current),
     ];
-    return { message: truncateForDiscord(lines.join('\n')), tier: null };
+    return { message: truncateForDiscord(lines.join('\n')), tier: null, magnitude: null, prior, current };
   }
 
   const report = diffSnapshots(prior, current);
@@ -233,6 +240,9 @@ export function buildDigestMessage(
     return {
       message: truncateForDiscord(`✅ Stable — no significant changes detected (${today})`),
       tier,
+      magnitude,
+      prior,
+      current,
     };
   }
 
@@ -248,7 +258,7 @@ export function buildDigestMessage(
       ...buildSectionChangesBlock(report, prior, current),
       ...buildProbeBreakdown(report),
     ];
-    return { message: truncateForDiscord(lines.join('\n')), tier };
+    return { message: truncateForDiscord(lines.join('\n')), tier, magnitude, prior, current };
   }
 
   // CHANGE: current format (unchanged)
@@ -258,7 +268,7 @@ export function buildDigestMessage(
     ...buildMetricLines(current, report),
     ...buildSectionChangesBlock(report, prior, current),
   ];
-  return { message: truncateForDiscord(lines.join('\n')), tier };
+  return { message: truncateForDiscord(lines.join('\n')), tier, magnitude, prior, current };
 }
 
 /**
@@ -389,16 +399,23 @@ function buildProbeBreakdown(report: DiffReport): string[] {
 
 /**
  * Run the digest end-to-end: find latest two baselines, diff, and return the
- * Discord message string and tier.  Uses the provided baselines directory.
+ * Discord message string, tier, drift magnitude, and snapshot pair.
  *
  * @param baselinesDir - Directory containing baseline JSON files.
  * @param tierConfig   - Optional tier-threshold config from capture.config.json.
- * @returns `{ message, tier }` — tier is null when there is no prior snapshot.
+ * @returns `{ message, tier, magnitude, prior, current }` — `tier` and `magnitude`
+ *          are null when there is no prior snapshot.
  */
 export function runWeeklyDigest(
   baselinesDir: string = 'baselines',
   tierConfig?: DigestTierConfig,
-): { message: string; tier: DigestTier | null } {
+): {
+  message: string;
+  tier: DigestTier | null;
+  magnitude: DriftMagnitude | null;
+  prior: MetricSnapshot | null;
+  current: MetricSnapshot;
+} {
   const [priorPath, latestPath] = resolveLatestBaselinePair(baselinesDir);
   const current = loadSnapshot(latestPath);
   const prior = priorPath ? loadSnapshot(priorPath) : null;
