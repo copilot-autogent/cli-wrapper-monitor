@@ -38,36 +38,53 @@ function makeSnapshot(overrides: Partial<MetricSnapshot> = {}): MetricSnapshot {
 // buildDigestMessage — stable (no regressions)
 // ---------------------------------------------------------------------------
 
-describe('buildDigestMessage — stable baseline', () => {
+describe('buildDigestMessage — change-tier baseline (no regressions, minor drift)', () => {
+  // Use systemPromptHash diff to force CHANGE tier (no regressions, but drift detected)
+  // so metric bullets still appear in the verbose format.
+  function makeChangePair() {
+    return {
+      prior: makeSnapshot({ systemPromptHash: 'sha256:aaaa' }),
+      current: makeSnapshot({ systemPromptHash: 'sha256:bbbb' }),
+    };
+  }
+
   it('includes the digest header with run date', () => {
-    const snap = makeSnapshot();
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { prior, current } = makeChangePair();
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('📊 **CLI Wrapper Monitor — Weekly Digest** (2026-07-07)');
   });
 
   it('shows ✅ when no regressions', () => {
-    const snap = makeSnapshot();
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { prior, current } = makeChangePair();
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('✅ No regressions detected');
   });
 
   it('includes tool count bullet', () => {
-    const snap = makeSnapshot();
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { prior, current } = makeChangePair();
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('• Tools: 21');
   });
 
   it('includes hook count bullet with "stable" when unchanged', () => {
-    const snap = makeSnapshot();
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { prior, current } = makeChangePair();
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('• Hooks: 3 (fingerprint stable)');
   });
 
   it('includes system prompt stats', () => {
-    const snap = makeSnapshot();
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { prior, current } = makeChangePair();
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toMatch(/• System prompt:.*156/);
     expect(msg).toMatch(/• System prompt:.*39/);
+  });
+
+  it('produces single-line stable message when truly nothing changed', () => {
+    const snap = makeSnapshot();
+    const { message: msg, tier } = buildDigestMessage(snap, snap, '2026-07-07');
+    expect(tier).toBe('stable');
+    expect(msg).toMatch(/✅ Stable — no significant changes detected \(2026-07-07\)/);
+    expect(msg).not.toContain('• Tools:');
   });
 });
 
@@ -76,7 +93,7 @@ describe('buildDigestMessage — stable baseline', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildDigestMessage — BREAKING regression', () => {
-  it('shows 🔴 when tool count drops', () => {
+  it('classifies as ALERT (🚨) when tool count drops', () => {
     const prior = makeSnapshot();
     const current = makeSnapshot({
       experiments: {
@@ -91,9 +108,11 @@ describe('buildDigestMessage — BREAKING regression', () => {
         },
       },
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
-    expect(msg).toContain('🔴');
-    expect(msg).toMatch(/BREAKING/i);
+    const { message: msg, tier } = buildDigestMessage(current, prior, '2026-07-07');
+    // A tool count change is an ALERT condition — 🚨 is the stronger regression signal
+    expect(tier).toBe('alert');
+    expect(msg).toContain('🚨');
+    expect(msg).toContain('ALERT');
   });
 });
 
@@ -105,14 +124,14 @@ describe('buildDigestMessage — WARNING (hook body change)', () => {
   it('shows 🟡 when hook body changes without count change', () => {
     const prior = makeSnapshot({ hookSourceHash: 'sha256:aaaa' });
     const current = makeSnapshot({ hookSourceHash: 'sha256:bbbb' });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('🟡');
   });
 
   it('shows hook fingerprint changed marker', () => {
     const prior = makeSnapshot({ hookSourceHash: 'sha256:aaaa' });
     const current = makeSnapshot({ hookSourceHash: 'sha256:bbbb' });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('fingerprint changed');
   });
 });
@@ -124,7 +143,7 @@ describe('buildDigestMessage — WARNING (hook body change)', () => {
 describe('buildDigestMessage — no prior baseline', () => {
   it('handles null prior gracefully', () => {
     const snap = makeSnapshot();
-    const msg = buildDigestMessage(snap, null, '2026-07-07');
+    const { message: msg } = buildDigestMessage(snap, null, '2026-07-07');
     expect(msg).toContain('✅ First baseline captured');
     expect(msg).not.toContain('🔴');
   });
@@ -136,39 +155,44 @@ describe('buildDigestMessage — no prior baseline', () => {
 
 describe('buildDigestMessage — headroom', () => {
   it('shows headroom percentage when contextWindowHeadroom is present', () => {
-    const snap = makeSnapshot({
-      contextWindowHeadroom: [
-        {
-          modelId: 'claude-sonnet',
-          state: 'enabled',
-          contextWindow: 200_000,
-          systemPromptTokens: 40_000,
-          headroomTokens: 160_000,
-          promptFillPct: 20,
-          status: 'ok',
-        },
-      ],
-    });
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const headroom = [
+      {
+        modelId: 'claude-sonnet',
+        state: 'enabled',
+        contextWindow: 200_000,
+        systemPromptTokens: 40_000,
+        headroomTokens: 160_000,
+        promptFillPct: 20,
+        status: 'ok' as const,
+      },
+    ];
+    const prior = makeSnapshot({ systemPromptHash: 'sha256:aaaa', contextWindowHeadroom: headroom });
+    const current = makeSnapshot({ systemPromptHash: 'sha256:bbbb', contextWindowHeadroom: headroom });
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toMatch(/Headroom.*80%/);
     expect(msg).toContain('✅');
   });
 
   it('shows ⚠️ when headroom is below 50%', () => {
-    const snap = makeSnapshot({
-      contextWindowHeadroom: [
-        {
-          modelId: 'claude-sonnet',
-          state: 'enabled',
-          contextWindow: 200_000,
-          systemPromptTokens: 150_000,
-          headroomTokens: 50_000,
-          promptFillPct: 75,
-          status: 'high-fill',
-        },
-      ],
-    });
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const prior = makeSnapshot({ systemPromptHash: 'sha256:aaaa', contextWindowHeadroom: [{
+      modelId: 'claude-sonnet',
+      state: 'enabled',
+      contextWindow: 200_000,
+      systemPromptTokens: 150_000,
+      headroomTokens: 50_000,
+      promptFillPct: 75,
+      status: 'high-fill' as const,
+    }] });
+    const current = makeSnapshot({ systemPromptHash: 'sha256:bbbb', contextWindowHeadroom: [{
+      modelId: 'claude-sonnet',
+      state: 'enabled',
+      contextWindow: 200_000,
+      systemPromptTokens: 150_000,
+      headroomTokens: 50_000,
+      promptFillPct: 75,
+      status: 'high-fill' as const,
+    }] });
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('⚠️');
     expect(msg).toContain('below 50% threshold');
   });
@@ -192,7 +216,7 @@ describe('buildDigestMessage — section changes present', () => {
         { name: 'Introduction', charCount: 5_000, tokenEstimate: 1_250 },
       ],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('**Section changes:**');
     expect(msg).toContain('• Tools:');
     expect(msg).toContain('+2,000 chars');
@@ -205,7 +229,7 @@ describe('buildDigestMessage — section changes present', () => {
     const current = makeSnapshot({
       promptSections: [{ name: 'Tools', charCount: 11_000, tokenEstimate: 2_750 }],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('+10.0%');
   });
 
@@ -219,7 +243,7 @@ describe('buildDigestMessage — section changes present', () => {
         { name: 'Safety', charCount: 2_000, tokenEstimate: 500 },
       ],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('Safety');
     expect(msg).toContain('new');
   });
@@ -234,7 +258,7 @@ describe('buildDigestMessage — section changes present', () => {
     const current = makeSnapshot({
       promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('Safety');
     expect(msg).toContain('removed');
   });
@@ -251,7 +275,7 @@ describe('buildDigestMessage — section changes present', () => {
     }));
     const prior = makeSnapshot({ promptSections: priorSections });
     const current = makeSnapshot({ promptSections: currentSections });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('**Section changes:**');
     expect(msg).toContain('…and 2 more sections changed');
   });
@@ -263,7 +287,7 @@ describe('buildDigestMessage — section changes present', () => {
     const current = makeSnapshot({
       promptSections: [{ name: 'Tools', charCount: 9_500, tokenEstimate: 2_375 }],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('Section changes:');
     expect(msg).toContain('Tools:');
     expect(msg).toContain('-500 chars');
@@ -280,7 +304,7 @@ describe('buildDigestMessage — section changes present', () => {
         { name: 'Safety', charCount: 0, tokenEstimate: 0 }, // zero-length, new
       ],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('Section changes:');
     expect(msg).toContain('Safety');
     expect(msg).toContain('new');
@@ -300,23 +324,26 @@ describe('buildDigestMessage — section changes present', () => {
     }));
     const prior = makeSnapshot({ promptSections: priorSections });
     const current = makeSnapshot({ promptSections: currentSections });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('…and 1 more section changed');
   });
 
 
   it('detects text rewrite when char count is unchanged but section text differs', () => {
+    // Use different systemPromptHash to ensure CHANGE tier (text rewrites don't affect charCount)
     const prior = makeSnapshot({
+      systemPromptHash: 'sha256:before',
       promptSections: [
         { name: 'Introduction', charCount: 100, tokenEstimate: 25, text: 'Hello world\nLine two\n' },
       ],
     });
     const current = makeSnapshot({
+      systemPromptHash: 'sha256:after',
       promptSections: [
         { name: 'Introduction', charCount: 100, tokenEstimate: 25, text: 'Hello earth\nLine two\n' },
       ],
     });
-    const msg = buildDigestMessage(current, prior, '2026-07-07');
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
     expect(msg).toContain('Section changes:');
     expect(msg).toContain('Introduction');
     expect(msg).toContain('same size, text rewritten');
@@ -334,13 +361,13 @@ describe('buildDigestMessage — no section changes', () => {
       { name: 'Introduction', charCount: 5_000, tokenEstimate: 1_250 },
     ];
     const snap = makeSnapshot({ promptSections: sections });
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { message: msg } = buildDigestMessage(snap, snap, '2026-07-07');
     expect(msg).not.toContain('Section changes:');
   });
 
   it('omits "Section changes:" block when neither snapshot has promptSections', () => {
     const snap = makeSnapshot(); // no promptSections field
-    const msg = buildDigestMessage(snap, snap, '2026-07-07');
+    const { message: msg } = buildDigestMessage(snap, snap, '2026-07-07');
     expect(msg).not.toContain('Section changes:');
   });
 
@@ -348,7 +375,7 @@ describe('buildDigestMessage — no section changes', () => {
     const snap = makeSnapshot({
       promptSections: [{ name: 'Tools', charCount: 10_000, tokenEstimate: 2_500 }],
     });
-    const msg = buildDigestMessage(snap, null, '2026-07-07');
+    const { message: msg } = buildDigestMessage(snap, null, '2026-07-07');
     expect(msg).not.toContain('Section changes:');
   });
 });

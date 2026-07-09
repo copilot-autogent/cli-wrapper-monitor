@@ -9,6 +9,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
+import type { DigestTierConfig } from '../src/harness/digest-tier.js';
 
 export interface CaptureConfig {
   /** Directory for monthly (PR-flow) baseline files (default: "baselines") */
@@ -29,6 +30,14 @@ export interface CaptureConfig {
    * Only has effect when the refusal-rate experiment runs (requires GITHUB_TOKEN).
    */
   captureProbeResults: boolean;
+  /**
+   * Digest tier classification thresholds.
+   * Absent (undefined) means use DEFAULT_TIER_THRESHOLDS from digest-tier.ts.
+   * ALERT on: systemPromptDeltaPct ≥ alertSystemPromptDeltaPct (default 5%)
+   *           OR toolCountDelta ≠ 0
+   *           OR probeRefusalDeltaPp ≥ alertProbeRefusalDeltaPp (default 5 pp)
+   */
+  digestTier?: DigestTierConfig;
 }
 
 export const DEFAULT_CONFIG: CaptureConfig = {
@@ -37,6 +46,7 @@ export const DEFAULT_CONFIG: CaptureConfig = {
   retentionMonths: 6,
   capturePromptSectionText: false,
   captureProbeResults: false,
+  digestTier: undefined,
 };
 
 /**
@@ -103,6 +113,30 @@ export function loadCaptureConfig(configPath = 'capture.config.json'): CaptureCo
       throw new Error(`${configPath}: captureProbeResults must be a boolean`);
     }
     config.captureProbeResults = obj.captureProbeResults;
+  }
+
+  if ('digestTier' in obj) {
+    const dt = obj.digestTier;
+    if (typeof dt !== 'object' || dt === null || Array.isArray(dt)) {
+      throw new Error(`${configPath}: digestTier must be an object`);
+    }
+    const dtObj = dt as Record<string, unknown>;
+    const tierConfig: DigestTierConfig = {};
+    if ('alertSystemPromptDeltaPct' in dtObj) {
+      const v = dtObj.alertSystemPromptDeltaPct;
+      if (!Number.isFinite(v as number) || (v as number) <= 0) {
+        throw new Error(`${configPath}: digestTier.alertSystemPromptDeltaPct must be a finite positive number`);
+      }
+      tierConfig.alertSystemPromptDeltaPct = v as number;
+    }
+    if ('alertProbeRefusalDeltaPp' in dtObj) {
+      const v = dtObj.alertProbeRefusalDeltaPp;
+      if (!Number.isFinite(v as number) || (v as number) <= 0) {
+        throw new Error(`${configPath}: digestTier.alertProbeRefusalDeltaPp must be a finite positive number`);
+      }
+      tierConfig.alertProbeRefusalDeltaPp = v as number;
+    }
+    config.digestTier = tierConfig;
   }
 
   return config;

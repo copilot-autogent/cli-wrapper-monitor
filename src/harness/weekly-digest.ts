@@ -4,6 +4,11 @@ import type { MetricSnapshot, PromptSectionChange } from './types.js';
 import { diffSnapshots } from './diff.js';
 import type { DiffReport } from './types.js';
 import { diffPromptSectionTexts } from './prompt-sections.js';
+import {
+  buildDriftMagnitude,
+  classifyDigestTier,
+} from './digest-tier.js';
+import type { DigestTierConfig, DigestTier } from './digest-tier.js';
 
 /**
  * Resolve the two most recent ISO-date-sorted baseline files from `baselinesDir`.
@@ -186,31 +191,74 @@ function buildSectionChangesBlock(
 /**
  * Build a compact Discord-ready digest message from two snapshots.
  *
- * @param current   - The latest snapshot.
- * @param prior     - The second-most-recent snapshot, or null if unavailable.
- * @param runDate   - ISO date string for the digest date (defaults to today).
+ * Drift-magnitude tiering is always applied (using `tierConfig` thresholds
+ * when provided, or DEFAULT_TIER_THRESHOLDS when omitted):
+ *   - 'alert': 🚨 ALERT header + full section-changes + probe breakdown
+ *   - 'change': current verbose format
+ *   - 'stable': single-line "✅ Stable — no significant changes detected (YYYY-MM-DD)"
+ *
+ * Omitting `tierConfig` uses the default thresholds (ALERT at ≥5% system-prompt
+ * growth, any tool-count change, or ≥5 pp probe-refusal drop).
+ *
+ * @param current    - The latest snapshot.
+ * @param prior      - The second-most-recent snapshot, or null if unavailable.
+ * @param runDate    - ISO date string for the digest date (defaults to today).
+ * @param tierConfig - Optional tier-threshold config from capture.config.json.
+ * @returns          `{ message, tier }` — tier is null when prior is null (first capture).
  */
 export function buildDigestMessage(
   current: MetricSnapshot,
   prior: MetricSnapshot | null,
   runDate?: string,
-): string {
+  tierConfig?: DigestTierConfig,
+): { message: string; tier: DigestTier | null } {
   const today = runDate ?? new Date().toISOString().slice(0, 10);
   const captureDate = isoToDate(current.capturedAt);
 
-  const lines: string[] = [`📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`];
-
   if (prior === null) {
-    lines.push(`✅ First baseline captured (${captureDate}) — no prior snapshot to compare.`);
-    lines.push(...buildMetricLines(current));
-    return truncateForDiscord(lines.join('\n'));
+    const lines = [
+      `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
+      `✅ First baseline captured (${captureDate}) — no prior snapshot to compare.`,
+      ...buildMetricLines(current),
+    ];
+    return { message: truncateForDiscord(lines.join('\n')), tier: null };
   }
 
   const report = diffSnapshots(prior, current);
-  lines.push(...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)));
-  lines.push(...buildMetricLines(current, report));
-  lines.push(...buildSectionChangesBlock(report, prior, current));
-  return truncateForDiscord(lines.join('\n'));
+  const magnitude = buildDriftMagnitude(report);
+  const tier = classifyDigestTier(magnitude, tierConfig);
+
+  // STABLE: collapse to a single line
+  if (tier === 'stable') {
+    return {
+      message: truncateForDiscord(`✅ Stable — no significant changes detected (${today})`),
+      tier,
+    };
+  }
+
+  // ALERT: 🚨 header + metric lines + section changes + probe breakdown.
+  // Does NOT call buildStatusLine to avoid a contradictory ✅ inside a 🚨 block
+  // (e.g. tool-count change with no BREAKING metrics).  The 🚨 header itself
+  // serves as the status signal; regression/warning detail still appears via
+  // the DiffReport-driven metric marks (🔄, 🔴, 🟡) in buildMetricLines.
+  if (tier === 'alert') {
+    const lines = [
+      `🚨 **ALERT — CLI Wrapper Monitor — Weekly Digest** (${today})`,
+      ...buildMetricLines(current, report),
+      ...buildSectionChangesBlock(report, prior, current),
+      ...buildProbeBreakdown(report),
+    ];
+    return { message: truncateForDiscord(lines.join('\n')), tier };
+  }
+
+  // CHANGE: current format (unchanged)
+  const lines = [
+    `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
+    ...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)),
+    ...buildMetricLines(current, report),
+    ...buildSectionChangesBlock(report, prior, current),
+  ];
+  return { message: truncateForDiscord(lines.join('\n')), tier };
 }
 
 /**
@@ -303,12 +351,56 @@ function buildMetricLines(
 }
 
 /**
- * Run the digest end-to-end: find latest two baselines, diff, and return the
- * Discord message string.  Uses the provided baselines directory.
+ * Build a probe-refusal breakdown block for ALERT-tier digests.
+ *
+ * Only surfaces experiments where the injection-refusal rate actually changed
+ * (drop or improvement), so the block is focused on what drove the ALERT.
+ *
+ * Returns an empty array when no relevant probe data is available or unchanged.
  */
-export function runWeeklyDigest(baselinesDir: string = 'baselines'): string {
+function buildProbeBreakdown(report: DiffReport): string[] {
+  const lines: string[] = [];
+  let found = false;
+
+  for (const [expName, baselineExp] of Object.entries(report.baseline.experiments ?? {})) {
+    const currentExp = report.current.experiments?.[expName];
+    if (!currentExp) continue;
+    const baselineRate = baselineExp.metrics?.['injectionRefusedRate']?.value;
+    const currentRate = currentExp.metrics?.['injectionRefusedRate']?.value;
+    if (baselineRate === undefined || currentRate === undefined) continue;
+    const dropPp = (baselineRate - currentRate) * 100;
+    // Only include experiments where the rate actually changed
+    if (Math.abs(dropPp) < 0.01) continue;
+    if (!found) {
+      lines.push('**Probe breakdown:**');
+      found = true;
+    }
+    const sign = dropPp > 0 ? '-' : '+';
+    const absVal = Math.abs(dropPp).toFixed(1);
+    const marker = dropPp > 0 ? ' ⬇️' : '';
+    lines.push(
+      `  • ${expName}/injectionRefusedRate: ${(currentRate * 100).toFixed(1)}% (${sign}${absVal} pp${marker})`,
+    );
+  }
+
+  return lines;
+}
+
+
+/**
+ * Run the digest end-to-end: find latest two baselines, diff, and return the
+ * Discord message string and tier.  Uses the provided baselines directory.
+ *
+ * @param baselinesDir - Directory containing baseline JSON files.
+ * @param tierConfig   - Optional tier-threshold config from capture.config.json.
+ * @returns `{ message, tier }` — tier is null when there is no prior snapshot.
+ */
+export function runWeeklyDigest(
+  baselinesDir: string = 'baselines',
+  tierConfig?: DigestTierConfig,
+): { message: string; tier: DigestTier | null } {
   const [priorPath, latestPath] = resolveLatestBaselinePair(baselinesDir);
   const current = loadSnapshot(latestPath);
   const prior = priorPath ? loadSnapshot(priorPath) : null;
-  return buildDigestMessage(current, prior);
+  return buildDigestMessage(current, prior, undefined, tierConfig);
 }
