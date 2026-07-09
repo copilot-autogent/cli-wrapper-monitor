@@ -24,6 +24,7 @@
 
 import { sendWebhookWithRetry } from '../src/harness/webhook-utils.js';
 import { runWeeklyDigest } from '../src/harness/weekly-digest.js';
+import { loadCaptureConfig } from './capture-config.js';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -43,12 +44,21 @@ function parseArgs() {
 async function main() {
   const { baselinesDir, dryRun } = parseArgs();
 
+  const captureConfig = loadCaptureConfig();
+  const tierConfig = captureConfig.digestTier;
+
   let message: string;
+  let tier: string | null;
   try {
-    message = runWeeklyDigest(baselinesDir);
+    ({ message, tier } = runWeeklyDigest(baselinesDir, tierConfig));
   } catch (err) {
     console.error('❌ Failed to generate weekly digest:', String(err));
     process.exit(1);
+  }
+
+  if (dryRun) {
+    const tierLabel = tier ?? 'n/a (first capture)';
+    console.log(`[dry-run] Digest tier: ${tierLabel}`);
   }
 
   console.log('=== Weekly Digest ===');
@@ -80,3 +90,4 @@ main().catch((err) => {
   console.error('❌ Unexpected fatal error:', err);
   process.exit(1);
 });
+
