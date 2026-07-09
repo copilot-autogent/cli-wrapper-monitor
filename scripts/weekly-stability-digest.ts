@@ -88,7 +88,21 @@ async function main() {
     return;
   }
 
-  // File GitHub issues for ALERT-tier drift (best-effort; never blocks the digest).
+  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
+  if (!webhookUrl) {
+    console.warn('⚠️  DISCORD_WEBHOOK_URL not set — skipping Discord notification.');
+  } else {
+    try {
+      await sendWebhookWithRetry(webhookUrl, { content: message }, 'weekly-digest');
+      console.log('✅ Discord notification sent.');
+    } catch {
+      // sendWebhookWithRetry already logs the error and writes a dead-letter entry.
+      // We exit 0 deliberately so a webhook failure doesn't block the workflow.
+      console.warn('⚠️  Discord notification failed (see above). Continuing.');
+    }
+  }
+
+  // File GitHub issues for ALERT-tier drift (best-effort; always runs after Discord).
   if (tier === 'alert' && magnitude !== null && prior !== null) {
     const captureDate = current.capturedAt.slice(0, 10);
     try {
@@ -102,24 +116,9 @@ async function main() {
       });
     } catch (err) {
       // Should not happen (fileAlertIssuesIfNeeded catches per-trigger errors),
-      // but guard against unexpected throws to keep the digest running.
+      // but guard against unexpected throws to keep the workflow clean.
       console.warn('⚠️  Unexpected error during GitHub issue filing (continuing):', String(err));
     }
-  }
-
-  const webhookUrl = process.env['DISCORD_WEBHOOK_URL'];
-  if (!webhookUrl) {
-    console.warn('⚠️  DISCORD_WEBHOOK_URL not set — skipping Discord notification.');
-    return;
-  }
-
-  try {
-    await sendWebhookWithRetry(webhookUrl, { content: message }, 'weekly-digest');
-    console.log('✅ Discord notification sent.');
-  } catch {
-    // sendWebhookWithRetry already logs the error and writes a dead-letter entry.
-    // We exit 0 deliberately so a webhook failure doesn't block the workflow.
-    console.warn('⚠️  Discord notification failed (see above). Continuing.');
   }
 }
 

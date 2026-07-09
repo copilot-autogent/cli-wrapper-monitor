@@ -113,7 +113,12 @@ export function extractAlertTriggers(
       priorChars !== undefined ? `${priorChars.toLocaleString('en-US')} chars` : 'unknown';
     const toVal =
       currentChars !== undefined ? `${currentChars.toLocaleString('en-US')} chars` : 'unknown';
-    const sign = currentChars !== undefined && priorChars !== undefined && currentChars >= priorChars ? '+' : '';
+    // Determine sign from actual values; magnitude.systemPromptDeltaPct is always absolute.
+    const isIncrease =
+      currentChars !== undefined && priorChars !== undefined
+        ? currentChars >= priorChars
+        : true; // unknown direction — show no sign rather than misleading sign
+    const sign = isIncrease ? '+' : '-';
     triggers.push({
       metric: 'systemPromptChars',
       fromValue: fromVal,
@@ -234,8 +239,8 @@ export async function findExistingAlertIssue(
   if (!token) return null;
 
   // Search for open issues with the regression-alert label and metric in the title.
-  // The GitHub search API is the most reliable way to query across title/label.
-  const searchQuery = `repo:${repo} is:issue is:open label:type:regression-alert "[ALERT] ${metric} drifted" in:title`;
+  // Quote the label name to handle the colon in "type:regression-alert" correctly.
+  const searchQuery = `repo:${repo} is:issue is:open label:"type:regression-alert" "[ALERT] ${metric} drifted" in:title`;
   const url = `${baseUrl}/search/issues?q=${encodeURIComponent(searchQuery)}&per_page=1`;
 
   const res = await fetch(url, {
@@ -269,7 +274,15 @@ export async function createAlertIssue(
   opts?: GitHubApiOptions,
 ): Promise<number> {
   const { repo, token, baseUrl } = resolveApiOptions(opts);
-  const [owner, repoName] = repo.split('/');
+  const slashIndex = repo.indexOf('/');
+  if (slashIndex < 1 || slashIndex === repo.length - 1) {
+    throw new Error(
+      `Invalid GITHUB_REPOSITORY format: expected "owner/repo", got "${repo}". ` +
+        'Set GITHUB_REPOSITORY or pass githubApi.repo explicitly.',
+    );
+  }
+  const owner = repo.slice(0, slashIndex);
+  const repoName = repo.slice(slashIndex + 1);
 
   const url = `${baseUrl}/repos/${owner}/${repoName}/issues`;
   const res = await fetch(url, {
