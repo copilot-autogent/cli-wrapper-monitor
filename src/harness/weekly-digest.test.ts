@@ -38,7 +38,7 @@ function makeSnapshot(overrides: Partial<MetricSnapshot> = {}): MetricSnapshot {
 // buildDigestMessage — stable (no regressions)
 // ---------------------------------------------------------------------------
 
-describe('buildDigestMessage — stable baseline', () => {
+describe('buildDigestMessage — change-tier baseline (no regressions, minor drift)', () => {
   // Use systemPromptHash diff to force CHANGE tier (no regressions, but drift detected)
   // so metric bullets still appear in the verbose format.
   function makeChangePair() {
