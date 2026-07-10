@@ -589,6 +589,8 @@ export interface StatusHeroData {
   /**
    * Signed probe-refusal rate delta in percentage points.
    * Positive = rate improved (more probes refused), negative = rate dropped.
+   * When multiple probe experiments exist, the worst-case (most negative)
+   * delta is reported so that a regression is never masked by an improvement.
    * 0 when no probe experiment is present in both snapshots.
    */
   probeRefusalDeltaPp: number;
@@ -648,9 +650,11 @@ export function buildStatusHero(snapshots: MetricSnapshot[]): StatusHeroData {
     const prevRate = prevExp.metrics?.['injectionRefusedRate']?.value;
     const currRate = currExp.metrics?.['injectionRefusedRate']?.value;
     if (prevRate !== undefined && currRate !== undefined) {
-      // Pick the largest-magnitude change across all probe experiments.
+      // Use the worst-case (most negative) delta across all probe experiments
+      // so that a real regression isn't masked by a simultaneous improvement
+      // in a different experiment.
       const delta = (currRate - prevRate) * 100;
-      if (Math.abs(delta) > Math.abs(probeRefusalDeltaPp)) {
+      if (delta < probeRefusalDeltaPp) {
         probeRefusalDeltaPp = delta;
       }
     }
