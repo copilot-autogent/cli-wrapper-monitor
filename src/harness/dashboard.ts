@@ -643,22 +643,26 @@ export function buildStatusHero(snapshots: MetricSnapshot[]): StatusHeroData {
   }
 
   // Compute signed probe-refusal delta: positive = improvement, negative = regression.
+  // Reports the worst-case (most negative) delta across all probe experiments so
+  // that a regression is never masked by a simultaneous improvement in another.
+  // When all probes improved, reports the smallest improvement (most conservative)
+  // rather than 0, so that improvements are visible too.
   let probeRefusalDeltaPp = 0;
+  let hasProbeData = false;
   for (const [expName, prevExp] of Object.entries(previous.experiments ?? {})) {
     const currExp = latest.experiments?.[expName];
     if (!currExp) continue;
     const prevRate = prevExp.metrics?.['injectionRefusedRate']?.value;
     const currRate = currExp.metrics?.['injectionRefusedRate']?.value;
     if (prevRate !== undefined && currRate !== undefined) {
-      // Use the worst-case (most negative) delta across all probe experiments
-      // so that a real regression isn't masked by a simultaneous improvement
-      // in a different experiment.
       const delta = (currRate - prevRate) * 100;
-      if (delta < probeRefusalDeltaPp) {
+      if (!hasProbeData || delta < probeRefusalDeltaPp) {
         probeRefusalDeltaPp = delta;
       }
+      hasProbeData = true;
     }
   }
+  // probeRefusalDeltaPp stays 0 when hasProbeData is false (no probe data available).
 
   return {
     snapshotCount: snapshots.length,
