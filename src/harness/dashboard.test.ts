@@ -8,6 +8,8 @@ import {
   extractRegressions,
   extractModelPoolHistory,
   generateSparklineSVG,
+  buildStatusHero,
+  generateStatusHeroHTML,
 } from "./dashboard.js";
 
 // ---------------------------------------------------------------------------
@@ -414,5 +416,237 @@ describe("generateSparklineSVG", () => {
       { strokeColor: "#ff0000" }
     );
     expect(svg).toContain("#ff0000");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildStatusHero
+// ---------------------------------------------------------------------------
+
+describe("buildStatusHero", () => {
+  it("returns tier=null and snapshotCount=0 for empty snapshots", () => {
+    const hero = buildStatusHero([]);
+    expect(hero.tier).toBeNull();
+    expect(hero.snapshotCount).toBe(0);
+    expect(hero.latestDate).toBeNull();
+    expect(hero.previousDate).toBeNull();
+  });
+
+  it("returns tier=null for a single snapshot", () => {
+    const hero = buildStatusHero([SNAP_A]);
+    expect(hero.tier).toBeNull();
+    expect(hero.snapshotCount).toBe(1);
+    expect(hero.latestDate).toBe("2026-05-01");
+    expect(hero.previousDate).toBeNull();
+  });
+
+  it("returns STABLE when no meaningful drift between two identical snapshots", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_A]);
+    expect(hero.tier).toBe("stable");
+    expect(hero.systemPromptDeltaPct).toBe(0);
+    expect(hero.toolCountDelta).toBe(0);
+    expect(hero.probeRefusalDeltaPp).toBe(0);
+  });
+
+  it("returns CHANGE when system prompt grows but below ALERT threshold", () => {
+    // SNAP_B has systemPromptChars=150000 vs SNAP_A=100000 → 50% → ALERT
+    // Use a small increase to test CHANGE path
+    const snapBSmall = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 103000, unit: "chars", description: "" }, // +3% → below 5% ALERT
+            systemPromptTokensEstimated: { value: 25750, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapBSmall]);
+    expect(hero.tier).toBe("change");
+    expect(hero.systemPromptDeltaPct).toBeCloseTo(3, 0);
+  });
+
+  it("returns ALERT when system prompt delta exceeds threshold", () => {
+    // SNAP_A=100k, SNAP_B=150k → +50% → ALERT (signed)
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    expect(hero.tier).toBe("alert");
+    expect(hero.systemPromptDeltaPct).toBeCloseTo(50, 0);
+  });
+
+  it("systemPromptDeltaPct is negative when prompt shrinks", () => {
+    const snapSmaller = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 90000, unit: "chars", description: "" }, // -10%
+            systemPromptTokensEstimated: { value: 22500, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapSmaller]);
+    expect(hero.systemPromptDeltaPct).toBeCloseTo(-10, 0);
+  });
+
+  it("returns ALERT when tool count changes", () => {
+    // SNAP_B (toolCount=20) → SNAP_TOOL_DROP (toolCount=10) → ALERT
+    const hero = buildStatusHero([SNAP_B, SNAP_TOOL_DROP]);
+    expect(hero.tier).toBe("alert");
+    expect(hero.toolCountDelta).toBe(-10);
+  });
+
+  it("uses two most-recent snapshots when more than two provided", () => {
+    // Three snapshots: A(100k) → B(150k) → TOOL_DROP(150k, 10 tools)
+    // Hero should compare B vs TOOL_DROP (two most recent)
+    const hero = buildStatusHero([SNAP_A, SNAP_B, SNAP_TOOL_DROP]);
+    expect(hero.previousDate).toBe("2026-06-01");
+    expect(hero.latestDate).toBe("2026-07-01");
+    expect(hero.tier).toBe("alert"); // tool count changed
+  });
+
+  it("sets previousDate and latestDate from the comparison pair", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    expect(hero.previousDate).toBe("2026-05-01");
+    expect(hero.latestDate).toBe("2026-06-01");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateStatusHeroHTML
+// ---------------------------------------------------------------------------
+
+describe("generateStatusHeroHTML", () => {
+  it("renders STABLE badge with green background class", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_A]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("hero-badge-stable");
+    expect(html).toContain("✅ STABLE");
+    expect(html).toContain("status-hero-stable");
+  });
+
+  it("renders CHANGE badge with yellow background class", () => {
+    const snapChange = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 103000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 25750, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapChange]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("hero-badge-change");
+    expect(html).toContain("🔄 CHANGE");
+    expect(html).toContain("status-hero-change");
+  });
+
+  it("renders ALERT badge with red background class", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("hero-badge-alert");
+    expect(html).toContain("🚨 ALERT");
+    expect(html).toContain("status-hero-alert");
+  });
+
+  it("renders key deltas in the hero", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("System Prompt Δ");
+    expect(html).toContain("Tool Count Δ");
+    expect(html).toContain("Probe Refusal Δ");
+  });
+
+  it("renders comparison window dates", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("Latest vs Previous: 2026-05-01 → 2026-06-01");
+  });
+
+  it("renders generated timestamp when provided", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero, "2026-07-10T10:00:00.000Z");
+    expect(html).toContain("Dashboard generated: 2026-07-10 10:00Z");
+  });
+
+  it("omits generated timestamp when not provided", () => {
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).not.toContain("Dashboard generated:");
+  });
+
+  it("renders insufficient-data message for 0 snapshots", () => {
+    const hero = buildStatusHero([]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("INSUFFICIENT DATA");
+    expect(html).toContain("0 baselines captured");
+    expect(html).toContain("hero-badge-insufficient");
+  });
+
+  it("renders insufficient-data message for 1 snapshot", () => {
+    const hero = buildStatusHero([SNAP_A]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("INSUFFICIENT DATA");
+    expect(html).toContain("1 baseline captured");
+  });
+
+  it("shows signed delta for tool count increases", () => {
+    const snapMore = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 100000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 25000, unit: "tokens", description: "" },
+            toolCount: { value: 25, unit: "tools", description: "" }, // +5 vs SNAP_A
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapMore]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("+5"); // signed tool delta
+  });
+
+  it("shows +% prefix when system prompt grew", () => {
+    // SNAP_A=100k → SNAP_B=150k → +50%
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("+50.0%");
+  });
+
+  it("shows negative % when system prompt shrank", () => {
+    const snapSmaller = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 90000, unit: "chars", description: "" }, // -10%
+            systemPromptTokensEstimated: { value: 22500, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapSmaller]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("-10.0%");
   });
 });

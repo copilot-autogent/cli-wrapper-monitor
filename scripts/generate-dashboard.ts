@@ -28,6 +28,8 @@ import {
   extractPromptSectionBars,
   generatePromptSectionStackedBarSVG,
   SECTION_COLORS,
+  buildStatusHero,
+  generateStatusHeroHTML,
   type SummaryCardData,
   type RegressionEntry,
   type ModelPoolEntry,
@@ -436,7 +438,9 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
   const regressions = extractRegressions(snapshots);
   const modelHistory = extractModelPoolHistory(snapshots);
   const sectionBars = extractPromptSectionBars(snapshots);
+  const hero = buildStatusHero(snapshots);
 
+  const heroSection = generateStatusHeroHTML(hero, generatedAt);
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
   const sparklinesSection = renderSparklines(toolSeries, tokensSeries, injectionSeries, milestones);
   const velocitySection = renderChangeVelocity(snapshots);
@@ -665,6 +669,66 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
     .velocity-nodata   { color: #aaa; }
 
     .ref-date { font-size: 0.8rem; }
+
+    /* Status hero */
+    .status-hero {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      padding: 6px 18px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      width: fit-content;
+    }
+
+    .hero-badge-stable       { background: #d5f5e3; color: #1e6b3c; }
+    .hero-badge-change       { background: #fef3cd; color: #7a5000; }
+    .hero-badge-alert        { background: #fde8e8; color: #922b21; }
+    .hero-badge-insufficient { background: #eaf0fb; color: #2471a3; }
+
+    .hero-insufficient-msg { color: #888; font-style: italic; }
+
+    .hero-deltas {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .hero-delta {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hero-delta-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+    }
+
+    .hero-delta-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .hero-window,
+    .hero-generated {
+      font-size: 0.82rem;
+      color: #888;
+    }
   </style>
 </head>
 <body>
@@ -676,6 +740,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
   </header>
 
   <main>
+    ${heroSection}
     ${summarySection}
     ${sparklinesSection}
     ${sectionBreakdownSection}

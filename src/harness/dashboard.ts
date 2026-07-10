@@ -5,6 +5,12 @@
 
 import type { MetricSnapshot } from "./types.js";
 import { extractTrendRow } from "./trend-report.js";
+import { diffSnapshots } from "./diff.js";
+import {
+  buildDriftMagnitude,
+  classifyDigestTier,
+  type DigestTier,
+} from "./digest-tier.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -553,6 +559,177 @@ export function generateSparklineSVG(
 
   lines.push(`</svg>`);
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Status hero
+// ---------------------------------------------------------------------------
+
+/**
+ * Data model for the top-of-page status hero section.
+ * Computed from the two most-recent snapshots via buildDriftMagnitude /
+ * classifyDigestTier.  When fewer than two snapshots are available,
+ * `tier` is null and the hero renders an "Insufficient data" message.
+ */
+export interface StatusHeroData {
+  /** Total number of snapshots available. */
+  snapshotCount: number;
+  /**
+   * Classified tier for the most-recent comparison, or null when there are
+   * fewer than two snapshots (insufficient data for a comparison).
+   */
+  tier: DigestTier | null;
+  /**
+   * Signed percentage change of the system prompt char count.
+   * Positive = grew, negative = shrank.  0 when metrics are absent.
+   */
+  systemPromptDeltaPct: number;
+  /** Net tool-count delta (positive = added, negative = removed). */
+  toolCountDelta: number;
+  /**
+   * Signed probe-refusal rate delta in percentage points.
+   * Positive = rate improved (more probes refused), negative = rate dropped.
+   * When multiple probe experiments exist, the worst-case (most negative)
+   * delta is reported so that a regression is never masked by an improvement.
+   * 0 when no probe experiment is present in both snapshots.
+   */
+  probeRefusalDeltaPp: number;
+  /** ISO date string (YYYY-MM-DD) of the previous (baseline) snapshot. */
+  previousDate: string | null;
+  /** ISO date string (YYYY-MM-DD) of the most-recent (current) snapshot. */
+  latestDate: string | null;
+}
+
+/**
+ * Build a StatusHeroData object from all available snapshots.
+ * Uses the two most-recent snapshots (by capturedAt) as the comparison pair.
+ * Tier classification delegates to buildDriftMagnitude + classifyDigestTier
+ * (same logic as the weekly digest).  Signed deltas are computed directly
+ * from the snapshot metrics so the hero can communicate direction of change.
+ */
+export function buildStatusHero(snapshots: MetricSnapshot[]): StatusHeroData {
+  if (snapshots.length < 2) {
+    const latestDate =
+      snapshots.length === 1 ? snapshots[0].capturedAt.slice(0, 10) : null;
+    return {
+      snapshotCount: snapshots.length,
+      tier: null,
+      systemPromptDeltaPct: 0,
+      toolCountDelta: 0,
+      probeRefusalDeltaPp: 0,
+      previousDate: null,
+      latestDate,
+    };
+  }
+
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+  );
+  const previous = sorted[sorted.length - 2];
+  const latest = sorted[sorted.length - 1];
+
+  const diffReport = diffSnapshots(previous, latest);
+  const magnitude = buildDriftMagnitude(diffReport);
+  const tier = classifyDigestTier(magnitude);
+
+  // Compute signed system-prompt delta directly (DriftMagnitude is always absolute).
+  let systemPromptDeltaPct = 0;
+  const prevSysChars =
+    previous.experiments['context-tax']?.metrics?.['systemPromptChars']?.value;
+  const latestSysChars =
+    latest.experiments['context-tax']?.metrics?.['systemPromptChars']?.value;
+  if (prevSysChars !== undefined && latestSysChars !== undefined && prevSysChars > 0) {
+    systemPromptDeltaPct = ((latestSysChars - prevSysChars) / prevSysChars) * 100;
+  }
+
+  // Compute signed probe-refusal delta: positive = improvement, negative = regression.
+  // Reports the worst-case (most negative) delta across all probe experiments so
+  // that a regression is never masked by a simultaneous improvement in another.
+  // When all probes improved, reports the smallest improvement (most conservative)
+  // rather than 0, so that improvements are visible too.
+  let probeRefusalDeltaPp = 0;
+  let hasProbeData = false;
+  for (const [expName, prevExp] of Object.entries(previous.experiments ?? {})) {
+    const currExp = latest.experiments?.[expName];
+    if (!currExp) continue;
+    const prevRate = prevExp.metrics?.['injectionRefusedRate']?.value;
+    const currRate = currExp.metrics?.['injectionRefusedRate']?.value;
+    if (prevRate !== undefined && currRate !== undefined) {
+      const delta = (currRate - prevRate) * 100;
+      if (!hasProbeData || delta < probeRefusalDeltaPp) {
+        probeRefusalDeltaPp = delta;
+      }
+      hasProbeData = true;
+    }
+  }
+  // probeRefusalDeltaPp stays 0 when hasProbeData is false (no probe data available).
+
+  return {
+    snapshotCount: snapshots.length,
+    tier,
+    systemPromptDeltaPct,
+    toolCountDelta: magnitude.toolCountDelta,
+    probeRefusalDeltaPp,
+    previousDate: previous.capturedAt.slice(0, 10),
+    latestDate: latest.capturedAt.slice(0, 10),
+  };
+}
+
+/**
+ * Generate the HTML for the status hero section.
+ *
+ * @param hero        - Data computed by buildStatusHero().
+ * @param generatedAt - UTC ISO timestamp (e.g. `new Date().toISOString()`) to
+ *   display as the "Dashboard generated" line.  When omitted, that line is not
+ *   rendered.  The value is truncated to minute precision and labelled Z, so
+ *   callers MUST pass a UTC ISO string to avoid incorrect timezone labelling.
+ */
+export function generateStatusHeroHTML(
+  hero: StatusHeroData,
+  generatedAt?: string,
+): string {
+  const generatedLine = generatedAt
+    ? `\n  <div class="hero-generated">Dashboard generated: ${xmlEscape(
+        generatedAt.slice(0, 16).replace("T", " "),
+      )}Z</div>`
+    : "";
+
+  if (hero.tier === null) {
+    return `<section class="section status-hero status-hero-insufficient">
+  <div class="hero-badge hero-badge-insufficient">⚠️ INSUFFICIENT DATA</div>
+  <div class="hero-insufficient-msg">Insufficient data — ${hero.snapshotCount} baseline${hero.snapshotCount !== 1 ? "s" : ""} captured</div>${generatedLine}
+</section>`;
+  }
+
+  const TIER_META: Record<DigestTier, { badge: string; cssClass: string }> = {
+    stable: { badge: "✅ STABLE", cssClass: "hero-badge-stable" },
+    change: { badge: "🔄 CHANGE", cssClass: "hero-badge-change" },
+    alert:  { badge: "🚨 ALERT",  cssClass: "hero-badge-alert"  },
+  };
+
+  const { badge, cssClass } = TIER_META[hero.tier];
+
+  // Format a signed number with explicit +/- prefix to show direction.
+  const fmtSigned = (n: number, decimals = 1): string =>
+    (n > 0 ? "+" : "") + n.toFixed(decimals);
+
+  const signedInt = (n: number): string => (n > 0 ? `+${n}` : String(n));
+
+  const deltaItems = [
+    `<div class="hero-delta"><span class="hero-delta-label">System Prompt Δ</span><span class="hero-delta-value">${fmtSigned(hero.systemPromptDeltaPct)}%</span></div>`,
+    `<div class="hero-delta"><span class="hero-delta-label">Tool Count Δ</span><span class="hero-delta-value">${signedInt(hero.toolCountDelta)}</span></div>`,
+    `<div class="hero-delta"><span class="hero-delta-label">Probe Refusal Δ</span><span class="hero-delta-value">${fmtSigned(hero.probeRefusalDeltaPp)} pp</span></div>`,
+  ].join("\n    ");
+
+  const window = `Latest vs Previous: ${xmlEscape(hero.previousDate!)} → ${xmlEscape(hero.latestDate!)}`;
+
+  return `<section class="section status-hero status-hero-${hero.tier}">
+  <div class="hero-badge ${cssClass}">${badge}</div>
+  <div class="hero-deltas">
+    ${deltaItems}
+  </div>
+  <div class="hero-window">${window}</div>${generatedLine}
+</section>`;
 }
 
 // ---------------------------------------------------------------------------
