@@ -471,10 +471,29 @@ describe("buildStatusHero", () => {
   });
 
   it("returns ALERT when system prompt delta exceeds threshold", () => {
-    // SNAP_A=100k, SNAP_B=150k → 50% → ALERT
+    // SNAP_A=100k, SNAP_B=150k → +50% → ALERT (signed)
     const hero = buildStatusHero([SNAP_A, SNAP_B]);
     expect(hero.tier).toBe("alert");
     expect(hero.systemPromptDeltaPct).toBeCloseTo(50, 0);
+  });
+
+  it("systemPromptDeltaPct is negative when prompt shrinks", () => {
+    const snapSmaller = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 90000, unit: "chars", description: "" }, // -10%
+            systemPromptTokensEstimated: { value: 22500, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapSmaller]);
+    expect(hero.systemPromptDeltaPct).toBeCloseTo(-10, 0);
   });
 
   it("returns ALERT when tool count changes", () => {
@@ -601,6 +620,33 @@ describe("generateStatusHeroHTML", () => {
     });
     const hero = buildStatusHero([SNAP_A, snapMore]);
     const html = generateStatusHeroHTML(hero);
-    expect(html).toContain("+5"); // signed delta
+    expect(html).toContain("+5"); // signed tool delta
+  });
+
+  it("shows +% prefix when system prompt grew", () => {
+    // SNAP_A=100k → SNAP_B=150k → +50%
+    const hero = buildStatusHero([SNAP_A, SNAP_B]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("+50.0%");
+  });
+
+  it("shows negative % when system prompt shrank", () => {
+    const snapSmaller = makeSnap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 90000, unit: "chars", description: "" }, // -10%
+            systemPromptTokensEstimated: { value: 22500, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+      },
+    });
+    const hero = buildStatusHero([SNAP_A, snapSmaller]);
+    const html = generateStatusHeroHTML(hero);
+    expect(html).toContain("-10.0%");
   });
 });
