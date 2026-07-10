@@ -5,6 +5,12 @@
 
 import type { MetricSnapshot } from "./types.js";
 import { extractTrendRow } from "./trend-report.js";
+import { diffSnapshots } from "./diff.js";
+import {
+  buildDriftMagnitude,
+  classifyDigestTier,
+  type DigestTier,
+} from "./digest-tier.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -553,6 +559,129 @@ export function generateSparklineSVG(
 
   lines.push(`</svg>`);
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Status hero
+// ---------------------------------------------------------------------------
+
+/**
+ * Data model for the top-of-page status hero section.
+ * Computed from the two most-recent snapshots via buildDriftMagnitude /
+ * classifyDigestTier.  When fewer than two snapshots are available,
+ * `tier` is null and the hero renders an "Insufficient data" message.
+ */
+export interface StatusHeroData {
+  /** Total number of snapshots available. */
+  snapshotCount: number;
+  /**
+   * Classified tier for the most-recent comparison, or null when there are
+   * fewer than two snapshots (insufficient data for a comparison).
+   */
+  tier: DigestTier | null;
+  /** Absolute percentage change of the system prompt char count (always ≥ 0). */
+  systemPromptDeltaPct: number;
+  /** Net tool-count delta (positive = added, negative = removed). */
+  toolCountDelta: number;
+  /** Drop in probe-refusal rate in percentage points (always ≥ 0). */
+  probeRefusalDeltaPp: number;
+  /** ISO date string (YYYY-MM-DD) of the previous (baseline) snapshot. */
+  previousDate: string | null;
+  /** ISO date string (YYYY-MM-DD) of the most-recent (current) snapshot. */
+  latestDate: string | null;
+}
+
+/**
+ * Build a StatusHeroData object from all available snapshots.
+ * Uses the two most-recent snapshots (by capturedAt) as the comparison pair,
+ * delegating to buildDriftMagnitude + classifyDigestTier — the same logic
+ * used by the weekly digest — so the hero and digest always agree.
+ */
+export function buildStatusHero(snapshots: MetricSnapshot[]): StatusHeroData {
+  if (snapshots.length < 2) {
+    const latestDate =
+      snapshots.length === 1 ? snapshots[0].capturedAt.slice(0, 10) : null;
+    return {
+      snapshotCount: snapshots.length,
+      tier: null,
+      systemPromptDeltaPct: 0,
+      toolCountDelta: 0,
+      probeRefusalDeltaPp: 0,
+      previousDate: null,
+      latestDate,
+    };
+  }
+
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+  );
+  const previous = sorted[sorted.length - 2];
+  const latest = sorted[sorted.length - 1];
+
+  const diffReport = diffSnapshots(previous, latest);
+  const magnitude = buildDriftMagnitude(diffReport);
+  const tier = classifyDigestTier(magnitude);
+
+  return {
+    snapshotCount: snapshots.length,
+    tier,
+    systemPromptDeltaPct: magnitude.systemPromptDeltaPct,
+    toolCountDelta: magnitude.toolCountDelta,
+    probeRefusalDeltaPp: magnitude.probeRefusalDeltaPp,
+    previousDate: previous.capturedAt.slice(0, 10),
+    latestDate: latest.capturedAt.slice(0, 10),
+  };
+}
+
+/**
+ * Generate the HTML for the status hero section.
+ *
+ * @param hero   - Data computed by buildStatusHero().
+ * @param generatedAt - ISO timestamp to display as "Dashboard generated" line.
+ *   When omitted, the generated-at line is not rendered.
+ */
+export function generateStatusHeroHTML(
+  hero: StatusHeroData,
+  generatedAt?: string,
+): string {
+  const generatedLine = generatedAt
+    ? `\n  <div class="hero-generated">Dashboard generated: ${xmlEscape(
+        generatedAt.slice(0, 16).replace("T", " "),
+      )}Z</div>`
+    : "";
+
+  if (hero.tier === null) {
+    return `<section class="section status-hero status-hero-insufficient">
+  <div class="hero-badge hero-badge-insufficient">⚠️ INSUFFICIENT DATA</div>
+  <div class="hero-insufficient-msg">Insufficient data — ${hero.snapshotCount} baseline${hero.snapshotCount !== 1 ? "s" : ""} captured</div>${generatedLine}
+</section>`;
+  }
+
+  const TIER_META: Record<DigestTier, { badge: string; cssClass: string }> = {
+    stable: { badge: "✅ STABLE", cssClass: "hero-badge-stable" },
+    change: { badge: "🔄 CHANGE", cssClass: "hero-badge-change" },
+    alert:  { badge: "🚨 ALERT",  cssClass: "hero-badge-alert"  },
+  };
+
+  const { badge, cssClass } = TIER_META[hero.tier];
+
+  const signedDelta = (n: number): string => (n > 0 ? `+${n}` : String(n));
+
+  const deltaItems = [
+    `<div class="hero-delta"><span class="hero-delta-label">System Prompt Δ</span><span class="hero-delta-value">${hero.systemPromptDeltaPct.toFixed(1)}%</span></div>`,
+    `<div class="hero-delta"><span class="hero-delta-label">Tool Count Δ</span><span class="hero-delta-value">${signedDelta(hero.toolCountDelta)}</span></div>`,
+    `<div class="hero-delta"><span class="hero-delta-label">Probe Refusal Δ</span><span class="hero-delta-value">${hero.probeRefusalDeltaPp.toFixed(1)} pp</span></div>`,
+  ].join("\n    ");
+
+  const window = `Latest vs Previous: ${xmlEscape(hero.previousDate!)} → ${xmlEscape(hero.latestDate!)}`;
+
+  return `<section class="section status-hero status-hero-${hero.tier}">
+  <div class="hero-badge ${cssClass}">${badge}</div>
+  <div class="hero-deltas">
+    ${deltaItems}
+  </div>
+  <div class="hero-window">${window}</div>${generatedLine}
+</section>`;
 }
 
 // ---------------------------------------------------------------------------
