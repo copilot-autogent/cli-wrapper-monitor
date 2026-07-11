@@ -454,7 +454,7 @@ describe("generateSparklineSVG", () => {
     expect(svg).not.toContain("Not enough data");
   });
 
-  it("embeds label when provided", () => {
+  it("embeds label when provided (≥3 valid points)", () => {
     const svg = generateSparklineSVG(
       [
         { date: "2026-05-01", value: 100 },
@@ -464,6 +464,24 @@ describe("generateSparklineSVG", () => {
       { label: "My Metric" }
     );
     expect(svg).toContain("My Metric");
+  });
+
+  it("embeds label in 'Not enough data' placeholder (1 point)", () => {
+    const svg = generateSparklineSVG(
+      [{ date: "2026-05-01", value: 100 }],
+      { label: "Tool Count over time" }
+    );
+    expect(svg).toContain("Not enough data");
+    expect(svg).toContain("Tool Count over time");
+  });
+
+  it("embeds label in 'No data' placeholder (all nulls)", () => {
+    const svg = generateSparklineSVG(
+      [{ date: "2026-05-01", value: null }],
+      { label: "Probe Refusal Rate" }
+    );
+    expect(svg).toContain("No data");
+    expect(svg).toContain("Probe Refusal Rate");
   });
 
   it("respects custom stroke color", () => {

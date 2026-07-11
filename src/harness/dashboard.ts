@@ -481,10 +481,12 @@ export function generateSparklineSVG(
     .filter((p): p is SparklinePoint & { value: number } => p.value !== null)
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   if (valid.length === 0) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" font-size="11" fill="#999">No data</text></svg>`;
+    const labelText = label ? `\n<text x="${width / 2}" y="${height - 2}" text-anchor="middle" font-size="10" fill="#555" font-weight="600">${xmlEscape(label)}</text>` : "";
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" font-size="11" fill="#999">No data</text>${labelText}</svg>`;
   }
   if (valid.length < 3) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" font-size="11" fill="#aaa">Not enough data (${valid.length} point${valid.length !== 1 ? "s" : ""} — need ≥3)</text></svg>`;
+    const labelText = label ? `\n<text x="${width / 2}" y="${height - 2}" text-anchor="middle" font-size="10" fill="#555" font-weight="600">${xmlEscape(label)}</text>` : "";
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width / 2}" y="${height / 2}" text-anchor="middle" font-size="11" fill="#aaa">Not enough data (${valid.length} point${valid.length !== 1 ? "s" : ""} — need ≥3)</text>${labelText}</svg>`;
   }
 
   // Use reduce instead of spread to avoid call-stack overflow on large arrays
