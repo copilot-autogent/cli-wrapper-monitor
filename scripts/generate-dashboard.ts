@@ -222,7 +222,7 @@ function renderSparklines(
   const charsSvg = generateSparklineSVG(charsSeries, {
     strokeColor: "#2980b9",
     label: "System Prompt Size (chars) over time",
-    formatValue: (v) => `${Math.round(v / 1000)}k`,
+    formatValue: (v) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)),
     milestones,
   });
 
