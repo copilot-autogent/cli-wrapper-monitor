@@ -20,7 +20,7 @@ import { validateBaselineFile } from "../src/harness/validator.js";
 import {
   extractSummaryCard,
   extractToolCountSeries,
-  extractSystemPromptTokensSeries,
+  extractSystemPromptCharsSeries,
   extractInjectionRefusalSeries,
   extractRegressions,
   extractModelPoolHistory,
@@ -209,7 +209,7 @@ function renderSummaryCard(card: SummaryCardData): string {
 
 function renderSparklines(
   toolSeries: SparklinePoint[],
-  tokensSeries: SparklinePoint[],
+  charsSeries: SparklinePoint[],
   injectionSeries: SparklinePoint[],
   milestones: Record<string, string> = {}
 ): string {
@@ -219,9 +219,9 @@ function renderSparklines(
     formatValue: (v) => Math.round(v).toString(),
     milestones,
   });
-  const tokensSvg = generateSparklineSVG(tokensSeries, {
+  const charsSvg = generateSparklineSVG(charsSeries, {
     strokeColor: "#2980b9",
-    label: "System Prompt Tokens (est.) over time",
+    label: "System Prompt Size (chars) over time",
     formatValue: (v) => `${Math.round(v / 1000)}k`,
     milestones,
   });
@@ -244,7 +244,7 @@ function renderSparklines(
       ${toolSvg}
     </div>
     <div class="sparkline-card">
-      ${tokensSvg}
+      ${charsSvg}
     </div>
     <div class="sparkline-card">
       ${injectionSvg}
@@ -433,7 +433,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
 
   const card = extractSummaryCard(snapshots);
   const toolSeries = extractToolCountSeries(snapshots);
-  const tokensSeries = extractSystemPromptTokensSeries(snapshots);
+  const charsSeries = extractSystemPromptCharsSeries(snapshots);
   const injectionSeries = extractInjectionRefusalSeries(snapshots);
   const regressions = extractRegressions(snapshots);
   const modelHistory = extractModelPoolHistory(snapshots);
@@ -442,7 +442,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
 
   const heroSection = generateStatusHeroHTML(hero, generatedAt);
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
-  const sparklinesSection = renderSparklines(toolSeries, tokensSeries, injectionSeries, milestones);
+  const sparklinesSection = renderSparklines(toolSeries, charsSeries, injectionSeries, milestones);
   const velocitySection = renderChangeVelocity(snapshots);
   const regressionsSection = renderRegressionTimeline(regressions, snapshotCount);
   const modelPoolSection = renderModelPool(modelHistory, snapshotCount);

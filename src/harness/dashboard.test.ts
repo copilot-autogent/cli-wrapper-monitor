@@ -4,6 +4,7 @@ import {
   extractSummaryCard,
   extractToolCountSeries,
   extractSystemPromptTokensSeries,
+  extractSystemPromptCharsSeries,
   extractInjectionRefusalSeries,
   extractRegressions,
   extractModelPoolHistory,
@@ -152,6 +153,37 @@ describe("extractInjectionRefusalSeries", () => {
     });
     const series = extractInjectionRefusalSeries([snap]);
     expect(series[0].value).toBe(0.9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractSystemPromptCharsSeries
+// ---------------------------------------------------------------------------
+
+describe("extractSystemPromptCharsSeries", () => {
+  it("extracts systemPromptChars from each snapshot", () => {
+    const series = extractSystemPromptCharsSeries([SNAP_A, SNAP_B]);
+    expect(series).toHaveLength(2);
+    expect(series[0].value).toBe(100000);
+    expect(series[1].value).toBe(150000);
+  });
+
+  it("returns null when systemPromptChars metric is absent", () => {
+    const snap = makeSnap({
+      capturedAt: "2026-05-01T00:00:00.000Z",
+      experiments: {},
+    });
+    const series = extractSystemPromptCharsSeries([snap]);
+    expect(series[0].value).toBeNull();
+  });
+
+  it("returns empty array for no snapshots", () => {
+    expect(extractSystemPromptCharsSeries([])).toHaveLength(0);
+  });
+
+  it("preserves date from snapshot capturedAt", () => {
+    const series = extractSystemPromptCharsSeries([SNAP_A]);
+    expect(series[0].date).toBe("2026-05-01");
   });
 });
 
@@ -384,7 +416,7 @@ describe("generateSparklineSVG", () => {
     expect(svg).toContain("No data");
   });
 
-  it("generates valid SVG with points", () => {
+  it("generates valid SVG with ≥3 points", () => {
     const svg = generateSparklineSVG([
       { date: "2026-05-01", value: 100 },
       { date: "2026-06-01", value: 150 },
@@ -396,15 +428,39 @@ describe("generateSparklineSVG", () => {
     expect(svg).toContain("<circle");
   });
 
-  it("renders with single data point", () => {
+  it("returns not-enough-data SVG for single valid data point", () => {
     const svg = generateSparklineSVG([{ date: "2026-05-01", value: 100 }]);
-    expect(svg).toContain("<svg");
-    expect(svg).not.toContain("No data");
+    expect(svg).toContain("Not enough data");
+    expect(svg).toContain("1 point");
+  });
+
+  it("returns not-enough-data SVG for exactly two valid data points", () => {
+    const svg = generateSparklineSVG([
+      { date: "2026-05-01", value: 100 },
+      { date: "2026-06-01", value: 150 },
+    ]);
+    expect(svg).toContain("Not enough data");
+    expect(svg).toContain("2 points");
+  });
+
+  it("renders correctly for exactly three valid data points", () => {
+    const svg = generateSparklineSVG([
+      { date: "2026-05-01", value: 100 },
+      { date: "2026-06-01", value: 120 },
+      { date: "2026-07-01", value: 110 },
+    ]);
+    expect(svg).toContain("<path");
+    expect(svg).toContain("<circle");
+    expect(svg).not.toContain("Not enough data");
   });
 
   it("embeds label when provided", () => {
     const svg = generateSparklineSVG(
-      [{ date: "2026-05-01", value: 100 }],
+      [
+        { date: "2026-05-01", value: 100 },
+        { date: "2026-06-01", value: 120 },
+        { date: "2026-07-01", value: 110 },
+      ],
       { label: "My Metric" }
     );
     expect(svg).toContain("My Metric");
@@ -412,10 +468,61 @@ describe("generateSparklineSVG", () => {
 
   it("respects custom stroke color", () => {
     const svg = generateSparklineSVG(
-      [{ date: "2026-05-01", value: 100 }],
+      [
+        { date: "2026-05-01", value: 100 },
+        { date: "2026-06-01", value: 120 },
+        { date: "2026-07-01", value: 110 },
+      ],
       { strokeColor: "#ff0000" }
     );
     expect(svg).toContain("#ff0000");
+  });
+
+  it("orders points by date regardless of input order (monotonic x-axis)", () => {
+    // Provide points out-of-order; the SVG should still render correctly (no crash)
+    const svg = generateSparklineSVG([
+      { date: "2026-07-01", value: 130 },
+      { date: "2026-05-01", value: 100 },
+      { date: "2026-06-01", value: 150 },
+    ]);
+    expect(svg).toContain("<path");
+    // First date label should be the earliest (2026-05-01)
+    const firstLabelIdx = svg.indexOf("2026-05-01");
+    const lastLabelIdx = svg.lastIndexOf("2026-07-01");
+    expect(firstLabelIdx).toBeLessThan(lastLabelIdx);
+  });
+
+  it("embeds date+value in dot tooltips", () => {
+    const svg = generateSparklineSVG([
+      { date: "2026-05-01", value: 100 },
+      { date: "2026-06-01", value: 200 },
+      { date: "2026-07-01", value: 150 },
+    ]);
+    expect(svg).toContain("2026-05-01");
+    expect(svg).toContain("2026-06-01");
+    expect(svg).toContain("2026-07-01");
+  });
+
+  it("handles sparse data with some null values gracefully", () => {
+    // 2 valid + 1 null → only 2 valid → not enough data
+    const svg = generateSparklineSVG([
+      { date: "2026-05-01", value: 100 },
+      { date: "2026-06-01", value: null },
+      { date: "2026-07-01", value: 130 },
+    ]);
+    expect(svg).toContain("Not enough data");
+  });
+
+  it("renders full sparkline when nulls bring valid count to ≥3", () => {
+    const svg = generateSparklineSVG([
+      { date: "2026-04-01", value: 90 },
+      { date: "2026-05-01", value: 100 },
+      { date: "2026-06-01", value: null },
+      { date: "2026-07-01", value: 130 },
+    ]);
+    // 3 valid points (null excluded) → full sparkline
+    expect(svg).toContain("<path");
+    expect(svg).not.toContain("Not enough data");
   });
 });
 
