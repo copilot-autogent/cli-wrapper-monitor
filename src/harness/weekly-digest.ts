@@ -150,21 +150,26 @@ function buildToolSurfaceChangesBlock(
   // Both sides unavailable → nothing to show
   if (priorNames === null && currentNames === null) return [];
 
-  // Backward-compat: prior has no named data, current does (or vice versa) → note unavailability
+  // Backward-compat: prior has no named data → note unavailability
   if (priorNames === null) {
     const priorDate = isoToDate(prior.capturedAt);
     return [`**Tool surface changes:** tool name history unavailable before ${priorDate}`];
   }
-  if (currentNames === null) return [];
+  // Current has no named data → note unavailability (possible capture failure)
+  if (currentNames === null) {
+    const currentDate = isoToDate(current.capturedAt);
+    return [`**Tool surface changes:** tool name history unavailable for ${currentDate}`];
+  }
 
   const added = [...currentNames].filter((n) => !priorNames.has(n)).sort();
   const removed = [...priorNames].filter((n) => !currentNames.has(n)).sort();
 
   if (added.length === 0 && removed.length === 0) return [];
 
-  /** Strip Discord markdown, @-mentions, and newlines from a tool name. */
+  /** Strip Discord markdown, @-mentions, and angle-bracket mention syntax from a tool name. */
   function sanitizeToolName(name: string): string {
     return name
+      .replace(/<[^>]*>/g, '') // strip <#channel>, <@user>, <@&role>, etc.
       .replace(/@/g, '')
       .replace(/[\r\n]+/g, ' ')
       .replace(/[`*_~|]/g, '')
