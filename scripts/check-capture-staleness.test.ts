@@ -83,6 +83,24 @@ describe('extractDateFromFilename', () => {
     expect(extractDateFromFilename('2026-02-31.json')).toBeNull();
     expect(extractDateFromFilename('2026-04-31.json')).toBeNull(); // April has 30 days
   });
+
+  it('extracts YYYY-MM-DD from weekly snapshot filename', () => {
+    expect(extractDateFromFilename('snapshot-2026-07-06T04-19-38-596Z.json')).toBe('2026-07-06');
+  });
+
+  it('extracts date from snapshot filename with different timestamp formats', () => {
+    expect(extractDateFromFilename('snapshot-2026-01-15T12-00-00-000Z.json')).toBe('2026-01-15');
+    expect(extractDateFromFilename('snapshot-2025-12-31T23-59-59-999Z.json')).toBe('2025-12-31');
+  });
+
+  it('returns null for snapshot filename without T separator', () => {
+    expect(extractDateFromFilename('snapshot-2026-07-06.json')).toBeNull();
+  });
+
+  it('returns null for snapshot filename with invalid date', () => {
+    expect(extractDateFromFilename('snapshot-2026-99-01T00-00-00-000Z.json')).toBeNull();
+    expect(extractDateFromFilename('snapshot-2026-02-31T00-00-00-000Z.json')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -117,6 +135,31 @@ describe('findMostRecentBaseline', () => {
   it('returns a single date file correctly', () => {
     const deps = makeDeps({ readdirSyncFn: () => ['2026-07-03.json'] });
     expect(findMostRecentBaseline('/baselines', deps)).toBe('2026-07-03');
+  });
+
+  it('resolves weekly snapshot files alongside latest.json', () => {
+    const deps = makeDeps({
+      readdirSyncFn: () => ['latest.json', 'snapshot-2026-07-06T04-19-38-596Z.json'],
+    });
+    expect(findMostRecentBaseline('/baselines/weekly', deps)).toBe('2026-07-06');
+  });
+
+  it('returns most recent date when mixing flat monthly and weekly snapshot filenames', () => {
+    const deps = makeDeps({
+      readdirSyncFn: () => [
+        'latest.json',
+        '2026-06-30.json',
+        'snapshot-2026-07-06T04-19-38-596Z.json',
+      ],
+    });
+    expect(findMostRecentBaseline('/baselines/weekly', deps)).toBe('2026-07-06');
+  });
+
+  it('rejects non-timestamp snapshot files (e.g. Tgarbage after date)', () => {
+    const deps = makeDeps({
+      readdirSyncFn: () => ['latest.json', 'snapshot-2026-07-06Tgarbage.json'],
+    });
+    expect(findMostRecentBaseline('/baselines/weekly', deps)).toBeNull();
   });
 });
 
