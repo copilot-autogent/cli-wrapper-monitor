@@ -46,6 +46,7 @@ function makeMagnitude(overrides: Partial<DriftMagnitude> = {}): DriftMagnitude 
     probeRefusalDeltaPp: 0,
     hasSectionChanges: false,
     hasAnyDrift: false,
+    toolSurfaceChanges: 0,
     ...overrides,
   };
 }

@@ -159,8 +159,10 @@ export function buildDriftMagnitude(diffReport: DiffReport): DriftMagnitude {
   // Resolve the best available tool-name sets for each snapshot.
   // Preference: toolNames (explicit sorted list) → toolSchemas keys → null (unavailable).
   function resolveToolNameSet(snap: { toolNames?: string[]; toolSchemas?: Record<string, unknown> }): Set<string> | null {
-    if (snap.toolNames !== undefined) return new Set(snap.toolNames);
-    if (snap.toolSchemas !== undefined) return new Set(Object.keys(snap.toolSchemas));
+    // Use `!= null` to guard against both `undefined` (field absent) and `null`
+    // (older baselines persist `toolSchemas: null`). `Object.keys(null)` throws.
+    if (snap.toolNames != null) return new Set(snap.toolNames);
+    if (snap.toolSchemas != null) return new Set(Object.keys(snap.toolSchemas));
     return null;
   }
   const baselineToolNames = resolveToolNameSet(baseline);
