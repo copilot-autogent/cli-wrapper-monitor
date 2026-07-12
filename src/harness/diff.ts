@@ -288,7 +288,7 @@ export function diffSnapshots(
   const baselineTrackedToolCount = baseline.toolSchemas
     ? Object.keys(baseline.toolSchemas).length
     : 0;
-  if (baseline.toolSchemas !== undefined && current.toolSchemas === undefined && baselineTrackedToolCount > 0) {
+  if (baseline.toolSchemas != null && current.toolSchemas == null && baselineTrackedToolCount > 0) {
     structuralBreaks.push(
       `Tool schema data disappeared — baseline had ${baselineTrackedToolCount} tool(s) tracked but current snapshot has no toolSchemas`,
     );
@@ -522,7 +522,7 @@ export function formatDiffReport(report: DiffReport): string {
         );
       }
     }
-  } else if (report.baseline.toolSchemas !== undefined && report.current.toolSchemas !== undefined) {
+  } else if (report.baseline.toolSchemas != null && report.current.toolSchemas != null) {
     lines.push('', '## Tool Schema Changes', '', '> No tool schema changes detected.', '');
   }
 
