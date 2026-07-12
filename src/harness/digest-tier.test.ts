@@ -291,6 +291,7 @@ describe('classifyDigestTier — STABLE', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: false,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('stable');
   });
@@ -304,6 +305,7 @@ describe('classifyDigestTier — CHANGE', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true, // systemPromptDeltaPct > 0 → hasAnyDrift always true
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('change');
   });
@@ -315,6 +317,7 @@ describe('classifyDigestTier — CHANGE', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: true,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('change');
   });
@@ -326,6 +329,7 @@ describe('classifyDigestTier — CHANGE', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('change');
   });
@@ -337,6 +341,7 @@ describe('classifyDigestTier — CHANGE', () => {
       probeRefusalDeltaPp: 3,
       hasSectionChanges: false,
       hasAnyDrift: true, // probeRefusalDeltaPp > 0 → hasAnyDrift always true
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('change');
   });
@@ -350,6 +355,7 @@ describe('classifyDigestTier — ALERT', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -361,6 +367,7 @@ describe('classifyDigestTier — ALERT', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -372,6 +379,7 @@ describe('classifyDigestTier — ALERT', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -383,6 +391,7 @@ describe('classifyDigestTier — ALERT', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -394,6 +403,7 @@ describe('classifyDigestTier — ALERT', () => {
       probeRefusalDeltaPp: 5,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -405,6 +415,7 @@ describe('classifyDigestTier — ALERT', () => {
       probeRefusalDeltaPp: 10,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -418,6 +429,7 @@ describe('classifyDigestTier — boundary values', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('change');
   });
@@ -429,6 +441,7 @@ describe('classifyDigestTier — boundary values', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -440,6 +453,7 @@ describe('classifyDigestTier — boundary values', () => {
       probeRefusalDeltaPp: 4.99,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('change');
   });
@@ -451,6 +465,7 @@ describe('classifyDigestTier — boundary values', () => {
       probeRefusalDeltaPp: 5.0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     expect(classifyDigestTier(mag)).toBe('alert');
   });
@@ -464,6 +479,7 @@ describe('classifyDigestTier — custom thresholds', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     // Default threshold is 5 → change; with threshold 2 → alert
     expect(classifyDigestTier(mag)).toBe('change');
@@ -477,6 +493,7 @@ describe('classifyDigestTier — custom thresholds', () => {
       probeRefusalDeltaPp: 3,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     // Default threshold is 5 → change; with threshold 2 → alert
     expect(classifyDigestTier(mag)).toBe('change');
@@ -490,6 +507,7 @@ describe('classifyDigestTier — custom thresholds', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     // undefined = "digestTier key absent from config" — should still alert at default threshold
     expect(classifyDigestTier(mag, undefined)).toBe('alert');
@@ -502,6 +520,7 @@ describe('classifyDigestTier — custom thresholds', () => {
       probeRefusalDeltaPp: 0,
       hasSectionChanges: false,
       hasAnyDrift: true,
+      toolSurfaceChanges: 0,
     };
     // Partial config: only override probeRefusalDeltaPp; systemPromptDeltaPct uses default (5)
     expect(classifyDigestTier(mag, { alertProbeRefusalDeltaPp: 10 })).toBe('alert');

@@ -65,8 +65,10 @@ export interface ModelPoolEntry {
  * Returns null when neither field is present.
  */
 function resolveToolNames(snap: MetricSnapshot): string[] | null {
-  if (snap.toolNames !== undefined) return [...snap.toolNames].sort();
-  if (snap.toolSchemas !== undefined) return Object.keys(snap.toolSchemas).sort();
+  // Use `!= null` to guard against both `undefined` (field absent) and `null`
+  // (older baselines persist `toolSchemas: null`). `Object.keys(null)` throws.
+  if (snap.toolNames != null) return [...snap.toolNames].sort();
+  if (snap.toolSchemas != null) return Object.keys(snap.toolSchemas).sort();
   return null;
 }
 
