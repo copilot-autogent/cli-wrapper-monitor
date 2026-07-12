@@ -46,9 +46,10 @@ export const WEEKLY_STALENESS_THRESHOLD_DAYS = 9;
 
 // Regex matching baseline filename dates: YYYY-MM-DD (with optional suffix).
 const DATE_FILE_RE = /^(\d{4}-\d{2}-\d{2})(?:-.+)?\.json$/;
-// Regex matching weekly snapshot filenames: snapshot-YYYY-MM-DDT<time>.json
-// Requires at least one digit after T to reject backup-style files (Tgarbage).
-const SNAPSHOT_FILE_RE = /^snapshot-(\d{4}-\d{2}-\d{2})T\d.*\.json$/;
+// Regex matching weekly snapshot filenames: snapshot-YYYY-MM-DDTHH-MM-SS-mssZ.json
+// Matches exactly the timestamp format written by capture-autogent-baseline.ts.
+
+const SNAPSHOT_FILE_RE = /^snapshot-(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/;
 
 // ---------------------------------------------------------------------------
 // Types
