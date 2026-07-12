@@ -489,9 +489,9 @@ describe('buildDigestMessage — tool surface changes', () => {
     expect(msg).not.toContain('+tool');
   });
 
-  it('swap (A removed, B added, count constant): CHANGE despite Δcount=0', () => {
+  it('swap (A removed, B added, count constant): ALERT triggered by toolSurfaceChanges >= 2', () => {
     const prior = makeToolSnapshot(['tool-a', 'tool-b']);
-    // tool-b removed, tool-c added — count unchanged at 2
+    // tool-b removed, tool-c added — count unchanged at 2, but 2 named changes → ALERT
     const current = makeToolSnapshot(['tool-a', 'tool-c']);
     const { message: msg, tier } = buildDigestMessage(current, prior, '2026-07-07');
     // 2 changes → ALERT tier

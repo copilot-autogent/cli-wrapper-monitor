@@ -83,11 +83,12 @@ export function extractToolNamesDiff(
   const priorNames = resolveToolNames(prior);
   const currentNames = resolveToolNames(current);
   if (priorNames === null || currentNames === null) return { added: null, removed: null };
+  // Use Sets to de-duplicate entries (guards against malformed snapshots with duplicate names)
   const priorSet = new Set(priorNames);
   const currentSet = new Set(currentNames);
   return {
-    added: currentNames.filter((n) => !priorSet.has(n)),
-    removed: priorNames.filter((n) => !currentSet.has(n)),
+    added: [...currentSet].filter((n) => !priorSet.has(n)).sort(),
+    removed: [...priorSet].filter((n) => !currentSet.has(n)).sort(),
   };
 }
 
@@ -822,18 +823,21 @@ export function generateToolNamesHTML(card: SummaryCardData): string {
         ? ''
         : '<div class="tool-diff-note">No tool name changes since previous snapshot.</div>';
 
-  // Render each tool name; highlight added/removed
+  // Render each tool name; highlight added/removed.
+  // Merge current names + removed names into a single globally-sorted list.
   const addedSet = new Set(added);
   const removedSet = new Set(removed);
-  // Removed tools only visible in this block as a deletion record (not in current names)
-  const toolItems: string[] = [];
-  for (const name of card.toolNames) {
-    const cls = addedSet.has(name) ? ' class="tool-item-added"' : '';
-    toolItems.push(`<li${cls}>${xmlEscape(name)}</li>`);
-  }
-  for (const name of removed) {
-    toolItems.push(`<li class="tool-item-removed">${xmlEscape(name)} (removed)</li>`);
-  }
+  type ToolItem = { name: string; status: 'added' | 'removed' | 'current' };
+  const allItems: ToolItem[] = [
+    ...card.toolNames.map((n) => ({ name: n, status: (addedSet.has(n) ? 'added' : 'current') as ToolItem['status'] })),
+    ...removed.map((n) => ({ name: n, status: 'removed' as const })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+
+  const toolItems = allItems.map(({ name, status }) => {
+    if (status === 'added') return `<li class="tool-item-added">${xmlEscape(name)}</li>`;
+    if (status === 'removed') return `<li class="tool-item-removed">${xmlEscape(name)} (removed)</li>`;
+    return `<li>${xmlEscape(name)}</li>`;
+  });
 
   return `<details class="tool-names-details">
   <summary class="tool-names-summary">Tools (${card.toolNames.length})${badge}</summary>

@@ -178,11 +178,14 @@ function buildToolSurfaceChangesBlock(
 
   const lines: string[] = ['**Tool surface changes:**'];
   for (const name of added) {
-    lines.push(`  +${sanitizeToolName(name)}`);
+    const safe = sanitizeToolName(name);
+    if (safe) lines.push(`  +${safe}`);
   }
   for (const name of removed) {
-    lines.push(`  -${sanitizeToolName(name)}`);
+    const safe = sanitizeToolName(name);
+    if (safe) lines.push(`  -${safe}`);
   }
+  if (lines.length === 1) return []; // all names sanitized to empty
   return lines;
 }
 
