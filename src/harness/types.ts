@@ -161,14 +161,16 @@ export interface MetricSnapshot {
    * Sorted list of tool names (IDs) captured at baseline time.
    * Used for named addition/removal diffs across snapshots.
    * Absent in older baselines that pre-date named-tool tracking; treat as unknown when missing.
+   * Persisted baselines may store `null` (not `undefined`) for this field — guard with `!= null`.
    */
-  toolNames?: string[];
+  toolNames?: string[] | null;
   /**
    * Per-tool parameter schemas captured at baseline time.
    * Keys are tool names; values describe parameter counts, names, and description fingerprint.
    * Absent in older baselines that pre-date schema tracking.
+   * Persisted baselines may store `null` (not `undefined`) for this field — guard with `!= null`.
    */
-  toolSchemas?: Record<string, ToolParamSchema>;
+  toolSchemas?: Record<string, ToolParamSchema> | null;
   /**
    * sha256 fingerprint over all tool schemas (canonical JSON, sorted by tool name).
    * Changes iff any tool definition changed (params, description, etc.).

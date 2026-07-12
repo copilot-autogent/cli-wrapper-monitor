@@ -142,8 +142,8 @@ export function diffModelPool(
  * schema tracking.
  */
 export function diffToolSchemas(
-  baseline: Record<string, ToolParamSchema> | undefined,
-  current: Record<string, ToolParamSchema> | undefined,
+  baseline: Record<string, ToolParamSchema> | null | undefined,
+  current: Record<string, ToolParamSchema> | null | undefined,
 ): ToolSchemaChange[] {
   // Don't diff when either side lacks schema data — avoids false churn
   // against pre-feature baselines (every tool would appear as added/removed).
