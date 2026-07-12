@@ -751,6 +751,15 @@ describe('buildDriftMagnitude — toolSurfaceChanges', () => {
     const mag = buildDriftMagnitude(diffOf(prior, current));
     expect(mag.toolSurfaceChanges).toBe(1);
   });
+  it('treats null toolSchemas as absent without throwing (regression: Object.keys(null))', () => {
+    // Older baselines persist `toolSchemas: null` (not undefined). resolveToolNameSet
+    // must not call Object.keys(null), which threw and broke the Pages build (#127).
+    const prior = makeSnapshot({ toolSchemas: null } as unknown as Partial<MetricSnapshot>);
+    const current = makeSnapshot({ toolNames: ['a', 'b'] });
+    expect(() => buildDriftMagnitude(diffOf(prior, current))).not.toThrow();
+    // prior is unresolvable (null) → no named-tool comparison possible → 0
+    expect(buildDriftMagnitude(diffOf(prior, current)).toolSurfaceChanges).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

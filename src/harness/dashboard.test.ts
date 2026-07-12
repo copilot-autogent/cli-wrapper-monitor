@@ -845,6 +845,15 @@ describe("extractToolNamesDiff", () => {
     expect(removed).toBeNull();
   });
 
+  it("treats null toolNames as absent (regression: != null guard)", () => {
+    const prior = snap({ capturedAt: "2026-05-01T00:00:00.000Z", toolNames: null } as unknown as Partial<MetricSnapshot> & { capturedAt: string });
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    expect(() => extractToolNamesDiff(prior, current)).not.toThrow();
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toBeNull();
+    expect(removed).toBeNull();
+  });
+
   it("falls back to toolSchemas keys when toolNames absent", () => {
     const prior = snap({
       capturedAt: "2026-05-01T00:00:00.000Z",
