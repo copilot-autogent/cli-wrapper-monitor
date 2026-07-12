@@ -139,8 +139,8 @@ function buildToolSurfaceChangesBlock(
 ): string[] {
   // Resolve best available name set for each snapshot
   function nameSet(snap: MetricSnapshot): Set<string> | null {
-    if (snap.toolNames !== undefined) return new Set(snap.toolNames);
-    if (snap.toolSchemas !== undefined) return new Set(Object.keys(snap.toolSchemas));
+    if (snap.toolNames != null) return new Set(snap.toolNames);
+    if (snap.toolSchemas != null) return new Set(Object.keys(snap.toolSchemas));
     return null;
   }
 
