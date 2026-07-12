@@ -715,6 +715,8 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   if (Object.keys(toolSchemas).length > 0) {
     snapshot.toolSchemas = toolSchemas;
     snapshot.toolSchemaHash = toolSchemaHash;
+    // Store sorted list of tool names for named addition/removal diffs.
+    snapshot.toolNames = toolDefs.map((t) => t.name).sort();
   }
 
   // Attach section breakdown when prompt content is available.

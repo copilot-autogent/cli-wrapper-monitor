@@ -26,6 +26,12 @@ export interface SummaryCardData {
   headroomPct: number | null;
   model: string;
   sdkVersion: string;
+  /** Sorted list of tool names from the latest snapshot, or null when unavailable. */
+  toolNames: string[] | null;
+  /** Tool names added since the previous snapshot, or null when diff unavailable. */
+  toolNamesAdded: string[] | null;
+  /** Tool names removed since the previous snapshot, or null when diff unavailable. */
+  toolNamesRemoved: string[] | null;
 }
 
 export interface SparklinePoint {
@@ -54,6 +60,38 @@ export interface ModelPoolEntry {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve the best available tool-name set for a snapshot.
+ * Prefers `toolNames` (explicit sorted list); falls back to `toolSchemas` keys.
+ * Returns null when neither field is present.
+ */
+function resolveToolNames(snap: MetricSnapshot): string[] | null {
+  if (snap.toolNames !== undefined) return [...snap.toolNames].sort();
+  if (snap.toolSchemas !== undefined) return Object.keys(snap.toolSchemas).sort();
+  return null;
+}
+
+/**
+ * Compute named tool additions and removals between two snapshots.
+ * Returns `{ added, removed }` sorted alphabetically, or nulls when either side lacks
+ * tool-name data (backward-compat: old snapshots without toolNames/toolSchemas).
+ */
+export function extractToolNamesDiff(
+  prior: MetricSnapshot | null,
+  current: MetricSnapshot,
+): { added: string[] | null; removed: string[] | null } {
+  if (prior === null) return { added: null, removed: null };
+  const priorNames = resolveToolNames(prior);
+  const currentNames = resolveToolNames(current);
+  if (priorNames === null || currentNames === null) return { added: null, removed: null };
+  const priorSet = new Set(priorNames);
+  const currentSet = new Set(currentNames);
+  return {
+    added: currentNames.filter((n) => !priorSet.has(n)),
+    removed: priorNames.filter((n) => !currentSet.has(n)),
+  };
+}
+
+/**
  * Extract a summary card data object from the most-recent snapshot.
  * Defensively sorts by capturedAt to guarantee the latest is selected
  * regardless of input ordering.
@@ -65,7 +103,11 @@ export function extractSummaryCard(snapshots: MetricSnapshot[]): SummaryCardData
     (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime()
   );
   const latest = sorted[sorted.length - 1];
+  const previous = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
   const row = extractTrendRow(latest);
+
+  const toolNames = resolveToolNames(latest);
+  const { added: toolNamesAdded, removed: toolNamesRemoved } = extractToolNamesDiff(previous, latest);
 
   return {
     capturedAt: latest.capturedAt,
@@ -77,6 +119,9 @@ export function extractSummaryCard(snapshots: MetricSnapshot[]): SummaryCardData
     headroomPct: row.headroomPct,
     model: latest.model,
     sdkVersion: latest.sdkVersion,
+    toolNames,
+    toolNamesAdded,
+    toolNamesRemoved,
   };
 }
 
@@ -743,6 +788,62 @@ export function generateStatusHeroHTML(
   </div>
   <div class="hero-window">${window}</div>${generatedLine}
 </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Tool names collapsible list
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate an HTML `<details>` block showing the current tool names and
+ * highlighting any additions/removals since the previous snapshot.
+ *
+ * @param card - Summary card data containing toolNames, toolNamesAdded, toolNamesRemoved.
+ * @returns An HTML string, or empty string when no tool-name data is available.
+ */
+export function generateToolNamesHTML(card: SummaryCardData): string {
+  if (card.toolNames === null) return '';
+
+  const added = card.toolNamesAdded ?? [];
+  const removed = card.toolNamesRemoved ?? [];
+  const totalChanges = added.length + removed.length;
+
+  // Build badge next to the summary count
+  const badgeParts: string[] = [];
+  if (added.length > 0) badgeParts.push(`<span class="tool-badge tool-badge-added">+${added.length} added</span>`);
+  if (removed.length > 0) badgeParts.push(`<span class="tool-badge tool-badge-removed">-${removed.length} removed</span>`);
+  const badge = badgeParts.length > 0 ? ` ${badgeParts.join(' ')}` : '';
+
+  // Whether to indicate diff is unavailable (both snapshots exist but prior lacked names)
+  const diffNote =
+    card.toolNamesAdded === null && card.toolNamesRemoved === null
+      ? '<div class="tool-diff-note">Tool name history unavailable for previous snapshot — diff requires two snapshots with named-tool data.</div>'
+      : totalChanges > 0
+        ? ''
+        : '<div class="tool-diff-note">No tool name changes since previous snapshot.</div>';
+
+  // Render each tool name; highlight added/removed
+  const addedSet = new Set(added);
+  const removedSet = new Set(removed);
+  // Removed tools only visible in this block as a deletion record (not in current names)
+  const toolItems: string[] = [];
+  for (const name of card.toolNames) {
+    const cls = addedSet.has(name) ? ' class="tool-item-added"' : '';
+    toolItems.push(`<li${cls}>${xmlEscape(name)}</li>`);
+  }
+  for (const name of removed) {
+    toolItems.push(`<li class="tool-item-removed">${xmlEscape(name)} (removed)</li>`);
+  }
+
+  return `<details class="tool-names-details">
+  <summary class="tool-names-summary">Tools (${card.toolNames.length})${badge}</summary>
+  <div class="tool-names-body">
+    ${diffNote}
+    <ul class="tool-names-list">
+      ${toolItems.join('\n      ')}
+    </ul>
+  </div>
+</details>`;
 }
 
 // ---------------------------------------------------------------------------

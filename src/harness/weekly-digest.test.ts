@@ -436,3 +436,91 @@ describe('resolveLatestBaselinePair', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildDigestMessage — tool surface changes
+// ---------------------------------------------------------------------------
+
+describe('buildDigestMessage — tool surface changes', () => {
+  function makeToolSnapshot(toolNames: string[], overrides: Partial<MetricSnapshot> = {}): MetricSnapshot {
+    return makeSnapshot({
+      toolNames,
+      experiments: {
+        'context-tax': {
+          name: 'context-tax',
+          description: 'test',
+          metrics: {
+            systemPromptChars: { value: 156_000, unit: 'chars', description: '' },
+            systemPromptTokensEstimated: { value: 39_000, unit: 'tokens', description: '' },
+            toolCount: { value: toolNames.length, unit: 'tools', description: '' },
+          },
+        },
+      },
+      ...overrides,
+    });
+  }
+
+  it('no change: stable tier, no "Tool surface changes" section', () => {
+    const snap = makeToolSnapshot(['tool-a', 'tool-b', 'tool-c']);
+    const { message: msg, tier } = buildDigestMessage(snap, snap, '2026-07-07');
+    expect(tier).toBe('stable');
+    expect(msg).not.toContain('Tool surface changes');
+  });
+
+  it('add only: one new tool → ALERT (count delta triggers ALERT) + added section', () => {
+    const prior = makeToolSnapshot(['tool-a', 'tool-b']);
+    const current = makeToolSnapshot(['tool-a', 'tool-b', 'tool-c']);
+    const { message: msg, tier } = buildDigestMessage(current, prior, '2026-07-07');
+    // toolCountDelta = +1 → existing ALERT condition (count changed)
+    expect(tier).toBe('alert');
+    expect(msg).toContain('Tool surface changes');
+    expect(msg).toContain('+tool-c');
+    expect(msg).not.toContain('-tool');
+  });
+
+  it('remove only: one removed → ALERT (count delta triggers ALERT) + removed section', () => {
+    const prior = makeToolSnapshot(['tool-a', 'tool-b', 'tool-c']);
+    const current = makeToolSnapshot(['tool-a', 'tool-b']);
+    const { message: msg, tier } = buildDigestMessage(current, prior, '2026-07-07');
+    // toolCountDelta = -1 → existing ALERT condition (count changed)
+    expect(tier).toBe('alert');
+    expect(msg).toContain('Tool surface changes');
+    expect(msg).toContain('-tool-c');
+    expect(msg).not.toContain('+tool');
+  });
+
+  it('swap (A removed, B added, count constant): CHANGE despite Δcount=0', () => {
+    const prior = makeToolSnapshot(['tool-a', 'tool-b']);
+    // tool-b removed, tool-c added — count unchanged at 2
+    const current = makeToolSnapshot(['tool-a', 'tool-c']);
+    const { message: msg, tier } = buildDigestMessage(current, prior, '2026-07-07');
+    // 2 changes → ALERT tier
+    expect(tier).toBe('alert');
+    expect(msg).toContain('Tool surface changes');
+    expect(msg).toContain('+tool-c');
+    expect(msg).toContain('-tool-b');
+  });
+
+  it('ALERT threshold: ≥2 changes in single week triggers ALERT', () => {
+    const prior = makeToolSnapshot(['tool-a', 'tool-b', 'tool-c']);
+    // remove tool-c, add tool-d (2 total changes)
+    const current = makeToolSnapshot(['tool-a', 'tool-b', 'tool-d']);
+    const { tier } = buildDigestMessage(current, prior, '2026-07-07');
+    expect(tier).toBe('alert');
+  });
+
+  it('backward compat: prior has no toolNames → shows unavailability note', () => {
+    const prior = makeSnapshot(); // no toolNames
+    const current = makeToolSnapshot(['tool-a', 'tool-b']);
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('tool name history unavailable');
+  });
+
+  it('shows additions and removals in the Tool surface changes block', () => {
+    const prior = makeToolSnapshot(['alpha', 'beta', 'gamma']);
+    const current = makeToolSnapshot(['alpha', 'delta', 'gamma']); // beta removed, delta added
+    const { message: msg } = buildDigestMessage(current, prior, '2026-07-07');
+    expect(msg).toContain('+delta');
+    expect(msg).toContain('-beta');
+  });
+});
