@@ -30,6 +30,7 @@ import {
   SECTION_COLORS,
   buildStatusHero,
   generateStatusHeroHTML,
+  generateToolNamesHTML,
   type SummaryCardData,
   type RegressionEntry,
   type ModelPoolEntry,
@@ -441,6 +442,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
   const hero = buildStatusHero(snapshots);
 
   const heroSection = generateStatusHeroHTML(hero, generatedAt);
+  const toolNamesSection = card ? generateToolNamesHTML(card) : '';
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
   const sparklinesSection = renderSparklines(toolSeries, charsSeries, injectionSeries, milestones);
   const velocitySection = renderChangeVelocity(snapshots);
@@ -729,6 +731,52 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
       font-size: 0.82rem;
       color: #888;
     }
+
+    .tool-names-details {
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 6px 12px;
+      background: #fff;
+    }
+    .tool-names-summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 6px 0;
+      list-style: none;
+    }
+    .tool-names-summary::-webkit-details-marker { display: none; }
+    .tool-names-summary::before { content: "▶ "; font-size: 0.7em; color: #888; }
+    details[open] .tool-names-summary::before { content: "▼ "; }
+    .tool-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+    .tool-badge-added { background: #d4edda; color: #155724; }
+    .tool-badge-removed { background: #f8d7da; color: #721c24; }
+    .tool-names-body { padding: 8px 0; }
+    .tool-diff-note { font-size: 0.82rem; color: #888; margin-bottom: 8px; }
+    .tool-names-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .tool-names-list li {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.82rem;
+      background: #f0f2f5;
+      border: 1px solid #dee2e6;
+    }
+    .tool-item-added { background: #d4edda !important; border-color: #c3e6cb !important; color: #155724; }
+    .tool-item-removed { background: #f8d7da !important; border-color: #f5c6cb !important; color: #721c24; text-decoration: line-through; }
   </style>
 </head>
 <body>
@@ -742,6 +790,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
   <main>
     ${heroSection}
     ${summarySection}
+    ${toolNamesSection ? `<section class="section tool-names-section">\n  <h2>🔧 Tool Names</h2>\n  ${toolNamesSection}\n</section>` : ''}
     ${sparklinesSection}
     ${sectionBreakdownSection}
     ${velocitySection}

@@ -162,12 +162,21 @@ function buildToolSurfaceChangesBlock(
 
   if (added.length === 0 && removed.length === 0) return [];
 
+  /** Strip Discord markdown, @-mentions, and newlines from a tool name. */
+  function sanitizeToolName(name: string): string {
+    return name
+      .replace(/@/g, '')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/[`*_~|]/g, '')
+      .trim();
+  }
+
   const lines: string[] = ['**Tool surface changes:**'];
   for (const name of added) {
-    lines.push(`  +${name}`);
+    lines.push(`  +${sanitizeToolName(name)}`);
   }
   for (const name of removed) {
-    lines.push(`  -${name}`);
+    lines.push(`  -${sanitizeToolName(name)}`);
   }
   return lines;
 }
