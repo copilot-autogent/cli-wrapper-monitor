@@ -46,6 +46,8 @@ export const WEEKLY_STALENESS_THRESHOLD_DAYS = 9;
 
 // Regex matching baseline filename dates: YYYY-MM-DD (with optional suffix).
 const DATE_FILE_RE = /^(\d{4}-\d{2}-\d{2})(?:-.+)?\.json$/;
+// Regex matching weekly snapshot filenames: snapshot-YYYY-MM-DDT<time>.json
+const SNAPSHOT_FILE_RE = /^snapshot-(\d{4}-\d{2}-\d{2})T.*\.json$/;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,7 +93,7 @@ export interface StalenessCheckDeps {
  * invalid calendar date (e.g. 2026-99-99).
  */
 export function extractDateFromFilename(filename: string): string | null {
-  const m = DATE_FILE_RE.exec(filename);
+  const m = DATE_FILE_RE.exec(filename) ?? SNAPSHOT_FILE_RE.exec(filename);
   if (!m) return null;
   const dateStr = m[1]!;
   // Validate it is a real calendar date. Date.parse normalizes overflow dates
