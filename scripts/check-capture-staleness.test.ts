@@ -144,15 +144,22 @@ describe('findMostRecentBaseline', () => {
     expect(findMostRecentBaseline('/baselines/weekly', deps)).toBe('2026-07-06');
   });
 
-  it('returns most recent date when mixing monthly and weekly snapshot filenames', () => {
+  it('returns most recent date when mixing flat monthly and weekly snapshot filenames', () => {
     const deps = makeDeps({
       readdirSyncFn: () => [
         'latest.json',
-        'snapshot-2026-06-30T10-00-00-000Z.json',
+        '2026-06-30.json',
         'snapshot-2026-07-06T04-19-38-596Z.json',
       ],
     });
     expect(findMostRecentBaseline('/baselines/weekly', deps)).toBe('2026-07-06');
+  });
+
+  it('rejects non-timestamp snapshot files (e.g. Tgarbage after date)', () => {
+    const deps = makeDeps({
+      readdirSyncFn: () => ['latest.json', 'snapshot-2026-07-06Tgarbage.json'],
+    });
+    expect(findMostRecentBaseline('/baselines/weekly', deps)).toBeNull();
   });
 });
 
