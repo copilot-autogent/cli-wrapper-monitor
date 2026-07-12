@@ -712,6 +712,11 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   snapshot.systemPromptHash = systemPromptHash;
   snapshot.hookCount = hookCount;
   snapshot.hookSourceHash = hookSourceHash;
+  // Store sorted tool names when autogent was accessible (even if extraction found 0 tools,
+  // so that "all tools removed" scenarios produce toolNames: [] rather than the absent/unknown state).
+  if (autogentExists) {
+    snapshot.toolNames = toolDefs.map((t) => t.name).sort();
+  }
   if (Object.keys(toolSchemas).length > 0) {
     snapshot.toolSchemas = toolSchemas;
     snapshot.toolSchemaHash = toolSchemaHash;

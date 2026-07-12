@@ -124,6 +124,72 @@ function sanitizeSectionName(name: string): string {
 }
 
 /**
+ * Build the optional "Tool surface changes:" block for the digest.
+ *
+ * Computes added/removed tool names between the two snapshots using `toolNames`
+ * (preferred) or `toolSchemas` keys (fallback). Returns an empty array when
+ * neither snapshot carries named-tool data or when no names changed.
+ *
+ * When only one snapshot has toolNames/toolSchemas data and the other does not,
+ * returns a single-line note about unavailability (backward-compat path).
+ */
+function buildToolSurfaceChangesBlock(
+  prior: MetricSnapshot,
+  current: MetricSnapshot,
+): string[] {
+  // Resolve best available name set for each snapshot
+  function nameSet(snap: MetricSnapshot): Set<string> | null {
+    if (snap.toolNames !== undefined) return new Set(snap.toolNames);
+    if (snap.toolSchemas !== undefined) return new Set(Object.keys(snap.toolSchemas));
+    return null;
+  }
+
+  const priorNames = nameSet(prior);
+  const currentNames = nameSet(current);
+
+  // Both sides unavailable → nothing to show
+  if (priorNames === null && currentNames === null) return [];
+
+  // Backward-compat: prior has no named data → note unavailability
+  if (priorNames === null) {
+    const priorDate = isoToDate(prior.capturedAt);
+    return [`**Tool surface changes:** tool name history unavailable before ${priorDate}`];
+  }
+  // Current has no named data → note unavailability (possible capture failure)
+  if (currentNames === null) {
+    const currentDate = isoToDate(current.capturedAt);
+    return [`**Tool surface changes:** tool name history unavailable for ${currentDate}`];
+  }
+
+  const added = [...currentNames].filter((n) => !priorNames.has(n)).sort();
+  const removed = [...priorNames].filter((n) => !currentNames.has(n)).sort();
+
+  if (added.length === 0 && removed.length === 0) return [];
+
+  /** Strip Discord markdown, @-mentions, and angle-bracket mention syntax from a tool name. */
+  function sanitizeToolName(name: string): string {
+    return name
+      .replace(/<[^>]*>/g, '') // strip <#channel>, <@user>, <@&role>, etc.
+      .replace(/@/g, '')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/[`*_~|]/g, '')
+      .trim();
+  }
+
+  const lines: string[] = ['**Tool surface changes:**'];
+  for (const name of added) {
+    const safe = sanitizeToolName(name);
+    if (safe) lines.push(`  +${safe}`);
+  }
+  for (const name of removed) {
+    const safe = sanitizeToolName(name);
+    if (safe) lines.push(`  -${safe}`);
+  }
+  if (lines.length === 1) return []; // all names sanitized to empty
+  return lines;
+}
+
+/**
  * Build the optional "Section changes:" block for the digest.
  *
  * Uses char-count deltas from the DiffReport and, when section text is available
@@ -246,7 +312,7 @@ export function buildDigestMessage(
     };
   }
 
-  // ALERT: 🚨 header + metric lines + section changes + probe breakdown.
+  // ALERT: 🚨 header + metric lines + section changes + tool surface changes + probe breakdown.
   // Does NOT call buildStatusLine to avoid a contradictory ✅ inside a 🚨 block
   // (e.g. tool-count change with no BREAKING metrics).  The 🚨 header itself
   // serves as the status signal; regression/warning detail still appears via
@@ -255,6 +321,7 @@ export function buildDigestMessage(
     const lines = [
       `🚨 **ALERT — CLI Wrapper Monitor — Weekly Digest** (${today})`,
       ...buildMetricLines(current, report),
+      ...buildToolSurfaceChangesBlock(prior, current),
       ...buildSectionChangesBlock(report, prior, current),
       ...buildProbeBreakdown(report),
     ];
@@ -266,6 +333,7 @@ export function buildDigestMessage(
     `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
     ...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)),
     ...buildMetricLines(current, report),
+    ...buildToolSurfaceChangesBlock(prior, current),
     ...buildSectionChangesBlock(report, prior, current),
   ];
   return { message: truncateForDiscord(lines.join('\n')), tier, magnitude, prior, current };

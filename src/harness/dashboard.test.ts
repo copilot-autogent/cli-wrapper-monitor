@@ -11,6 +11,8 @@ import {
   generateSparklineSVG,
   buildStatusHero,
   generateStatusHeroHTML,
+  extractToolNamesDiff,
+  generateToolNamesHTML,
 } from "./dashboard.js";
 
 // ---------------------------------------------------------------------------
@@ -773,5 +775,193 @@ describe("generateStatusHeroHTML", () => {
     const hero = buildStatusHero([SNAP_A, snapSmaller]);
     const html = generateStatusHeroHTML(hero);
     expect(html).toContain("-10.0%");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractToolNamesDiff
+// ---------------------------------------------------------------------------
+
+describe("extractToolNamesDiff", () => {
+  function snap(overrides: Partial<MetricSnapshot> & { capturedAt: string }): MetricSnapshot {
+    return makeSnap(overrides);
+  }
+
+  it("returns nulls when prior is null", () => {
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const { added, removed } = extractToolNamesDiff(null, current);
+    expect(added).toBeNull();
+    expect(removed).toBeNull();
+  });
+
+  it("returns nulls when prior has no toolNames or toolSchemas", () => {
+    const prior = snap({ capturedAt: "2026-05-01T00:00:00.000Z" });
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toBeNull();
+    expect(removed).toBeNull();
+  });
+
+  it("returns empty arrays when names are identical", () => {
+    const prior = snap({ capturedAt: "2026-05-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toEqual([]);
+    expect(removed).toEqual([]);
+  });
+
+  it("detects added tools", () => {
+    const prior = snap({ capturedAt: "2026-05-01T00:00:00.000Z", toolNames: ["a"] });
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toEqual(["b"]);
+    expect(removed).toEqual([]);
+  });
+
+  it("detects removed tools", () => {
+    const prior = snap({ capturedAt: "2026-05-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a"] });
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toEqual([]);
+    expect(removed).toEqual(["b"]);
+  });
+
+  it("detects swap (count unchanged)", () => {
+    const prior = snap({ capturedAt: "2026-05-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const current = snap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "c"] });
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toEqual(["c"]);
+    expect(removed).toEqual(["b"]);
+  });
+
+  it("falls back to toolSchemas keys when toolNames absent", () => {
+    const prior = snap({
+      capturedAt: "2026-05-01T00:00:00.000Z",
+      toolSchemas: { a: { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: "x" } },
+    });
+    const current = snap({
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      toolSchemas: {
+        a: { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: "x" },
+        b: { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: "y" },
+      },
+    });
+    const { added, removed } = extractToolNamesDiff(prior, current);
+    expect(added).toEqual(["b"]);
+    expect(removed).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateToolNamesHTML
+// ---------------------------------------------------------------------------
+
+describe("generateToolNamesHTML", () => {
+  function makeCard(overrides: Partial<ReturnType<typeof extractSummaryCard>> = {}) {
+    return {
+      capturedAt: "2026-06-01T00:00:00.000Z",
+      date: "2026-06-01",
+      toolCount: 3,
+      hookCount: null,
+      systemPromptChars: null,
+      systemPromptTokens: null,
+      headroomPct: null,
+      model: "claude-sonnet-4.6",
+      sdkVersion: "^1.0.0",
+      toolNames: ["alpha", "beta", "gamma"],
+      toolNamesAdded: null,
+      toolNamesRemoved: null,
+      ...overrides,
+    };
+  }
+
+  it("returns empty string when toolNames is null", () => {
+    const card = makeCard({ toolNames: null });
+    expect(generateToolNamesHTML(card)).toBe("");
+  });
+
+  it("renders a <details> block with tool count", () => {
+    const html = generateToolNamesHTML(makeCard());
+    expect(html).toContain("<details");
+    expect(html).toContain("Tools (3)");
+  });
+
+  it("lists all tool names", () => {
+    const html = generateToolNamesHTML(makeCard());
+    expect(html).toContain("alpha");
+    expect(html).toContain("beta");
+    expect(html).toContain("gamma");
+  });
+
+  it("shows added badge when toolNamesAdded is non-empty", () => {
+    const card = makeCard({ toolNames: ["alpha", "beta", "gamma", "delta"], toolNamesAdded: ["delta"], toolNamesRemoved: [] });
+    const html = generateToolNamesHTML(card);
+    expect(html).toContain("+1 added");
+  });
+
+  it("shows removed badge when toolNamesRemoved is non-empty", () => {
+    const card = makeCard({ toolNames: ["alpha", "beta"], toolNamesAdded: [], toolNamesRemoved: ["gamma"] });
+    const html = generateToolNamesHTML(card);
+    expect(html).toContain("-1 removed");
+  });
+
+  it("marks added tools with tool-item-added class", () => {
+    const card = makeCard({
+      toolNames: ["alpha", "beta", "delta"],
+      toolNamesAdded: ["delta"],
+      toolNamesRemoved: [],
+    });
+    const html = generateToolNamesHTML(card);
+    expect(html).toContain('class="tool-item-added"');
+  });
+
+  it("shows removed tools with (removed) label", () => {
+    const card = makeCard({
+      toolNames: ["alpha", "beta"],
+      toolNamesAdded: [],
+      toolNamesRemoved: ["gamma"],
+    });
+    const html = generateToolNamesHTML(card);
+    expect(html).toContain("gamma (removed)");
+    expect(html).toContain('class="tool-item-removed"');
+  });
+
+  it("shows unavailability note when diff data is null", () => {
+    const card = makeCard({ toolNamesAdded: null, toolNamesRemoved: null });
+    const html = generateToolNamesHTML(card);
+    expect(html).toContain("Tool name history unavailable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractSummaryCard — toolNames fields
+// ---------------------------------------------------------------------------
+
+describe("extractSummaryCard — toolNames", () => {
+  it("includes toolNames from latest snapshot", () => {
+    const snap = makeSnap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const card = extractSummaryCard([snap]);
+    expect(card?.toolNames).toEqual(["a", "b"]);
+  });
+
+  it("returns null toolNames when snapshot has no toolNames or toolSchemas", () => {
+    const snap = makeSnap({ capturedAt: "2026-06-01T00:00:00.000Z" });
+    const card = extractSummaryCard([snap]);
+    expect(card?.toolNames).toBeNull();
+  });
+
+  it("computes toolNamesAdded and toolNamesRemoved from two snapshots", () => {
+    const prior = makeSnap({ capturedAt: "2026-05-01T00:00:00.000Z", toolNames: ["a", "b"] });
+    const current = makeSnap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a", "c"] });
+    const card = extractSummaryCard([prior, current]);
+    expect(card?.toolNamesAdded).toEqual(["c"]);
+    expect(card?.toolNamesRemoved).toEqual(["b"]);
+  });
+
+  it("returns null diffs when there is only one snapshot", () => {
+    const snap = makeSnap({ capturedAt: "2026-06-01T00:00:00.000Z", toolNames: ["a"] });
+    const card = extractSummaryCard([snap]);
+    expect(card?.toolNamesAdded).toBeNull();
+    expect(card?.toolNamesRemoved).toBeNull();
   });
 });

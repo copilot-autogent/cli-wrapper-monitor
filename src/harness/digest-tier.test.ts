@@ -680,3 +680,110 @@ describe('buildDigestMessage — tier output', () => {
     expect(tier2).toBe('alert');
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildDriftMagnitude — toolSurfaceChanges
+// ---------------------------------------------------------------------------
+
+describe('buildDriftMagnitude — toolSurfaceChanges', () => {
+  it('returns 0 when both snapshots have identical toolNames', () => {
+    const snap = makeSnapshot({ toolNames: ['tool-a', 'tool-b', 'tool-c'] });
+    const mag = buildDriftMagnitude(diffOf(snap, snap));
+    expect(mag.toolSurfaceChanges).toBe(0);
+  });
+
+  it('counts added tools when a new tool appears', () => {
+    const prior = makeSnapshot({ toolNames: ['tool-a', 'tool-b'] });
+    const current = makeSnapshot({ toolNames: ['tool-a', 'tool-b', 'tool-c'] });
+    const mag = buildDriftMagnitude(diffOf(prior, current));
+    expect(mag.toolSurfaceChanges).toBe(1);
+  });
+
+  it('counts removed tools when a tool disappears', () => {
+    const prior = makeSnapshot({ toolNames: ['tool-a', 'tool-b', 'tool-c'] });
+    const current = makeSnapshot({ toolNames: ['tool-a', 'tool-b'] });
+    const mag = buildDriftMagnitude(diffOf(prior, current));
+    expect(mag.toolSurfaceChanges).toBe(1);
+  });
+
+  it('counts both adds and removes for a swap (count unchanged)', () => {
+    const prior = makeSnapshot({ toolNames: ['tool-a', 'tool-b'] });
+    const current = makeSnapshot({ toolNames: ['tool-a', 'tool-c'] }); // b removed, c added
+    const mag = buildDriftMagnitude(diffOf(prior, current));
+    expect(mag.toolSurfaceChanges).toBe(2);
+  });
+
+  it('returns 0 when neither snapshot has toolNames or toolSchemas', () => {
+    const snap = makeSnapshot(); // no toolNames, no toolSchemas
+    const mag = buildDriftMagnitude(diffOf(snap, snap));
+    expect(mag.toolSurfaceChanges).toBe(0);
+  });
+
+  it('falls back to toolSchemas keys when toolNames absent', () => {
+    const prior = makeSnapshot({
+      toolSchemas: { 'tool-a': { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'x' } },
+    });
+    const current = makeSnapshot({
+      toolSchemas: {
+        'tool-a': { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'x' },
+        'tool-b': { parameterCount: 0, requiredParams: [], optionalParams: [], descriptionHash: 'y' },
+      },
+    });
+    const mag = buildDriftMagnitude(diffOf(prior, current));
+    expect(mag.toolSurfaceChanges).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyDigestTier — toolSurfaceChanges thresholds
+// ---------------------------------------------------------------------------
+
+describe('classifyDigestTier — toolSurfaceChanges', () => {
+  it('returns stable when toolSurfaceChanges is 0 and no other drift', () => {
+    const tier = classifyDigestTier({
+      systemPromptDeltaPct: 0,
+      toolCountDelta: 0,
+      probeRefusalDeltaPp: 0,
+      hasSectionChanges: false,
+      hasAnyDrift: false,
+      toolSurfaceChanges: 0,
+    });
+    expect(tier).toBe('stable');
+  });
+
+  it('returns change when toolSurfaceChanges is 1', () => {
+    const tier = classifyDigestTier({
+      systemPromptDeltaPct: 0,
+      toolCountDelta: 0,
+      probeRefusalDeltaPp: 0,
+      hasSectionChanges: false,
+      hasAnyDrift: true, // 1 tool change → hasAnyDrift
+      toolSurfaceChanges: 1,
+    });
+    expect(tier).toBe('change');
+  });
+
+  it('returns alert when toolSurfaceChanges is 2 (swap scenario)', () => {
+    const tier = classifyDigestTier({
+      systemPromptDeltaPct: 0,
+      toolCountDelta: 0,
+      probeRefusalDeltaPp: 0,
+      hasSectionChanges: false,
+      hasAnyDrift: true,
+      toolSurfaceChanges: 2,
+    });
+    expect(tier).toBe('alert');
+  });
+
+  it('returns alert when toolSurfaceChanges >= 2 (more than 2 changes)', () => {
+    const tier = classifyDigestTier({
+      systemPromptDeltaPct: 0,
+      toolCountDelta: 0,
+      probeRefusalDeltaPp: 0,
+      hasSectionChanges: false,
+      hasAnyDrift: true,
+      toolSurfaceChanges: 3,
+    });
+    expect(tier).toBe('alert');
+  });
+});

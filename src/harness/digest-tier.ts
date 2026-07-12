@@ -43,6 +43,14 @@ export interface DriftMagnitude {
    * the four numeric signals are all zero.
    */
   hasAnyDrift: boolean;
+  /**
+   * Total number of named tool additions + removals between the two snapshots.
+   * Computed from `toolNames` fields (sorted lists) when available; falls back
+   * to `toolSchemas` keys when `toolNames` is absent; 0 when neither snapshot
+   * carries named-tool data (pre-toolNames baselines).
+   * Used to detect swap-out regressions invisible to toolCountDelta alone.
+   */
+  toolSurfaceChanges: number;
 }
 
 /**
@@ -147,6 +155,23 @@ export function buildDriftMagnitude(diffReport: DiffReport): DriftMagnitude {
         c.currentCharCount === null,
     );
 
+  // --- named tool surface changes ---
+  // Resolve the best available tool-name sets for each snapshot.
+  // Preference: toolNames (explicit sorted list) → toolSchemas keys → null (unavailable).
+  function resolveToolNameSet(snap: { toolNames?: string[]; toolSchemas?: Record<string, unknown> }): Set<string> | null {
+    if (snap.toolNames !== undefined) return new Set(snap.toolNames);
+    if (snap.toolSchemas !== undefined) return new Set(Object.keys(snap.toolSchemas));
+    return null;
+  }
+  const baselineToolNames = resolveToolNameSet(baseline);
+  const currentToolNames = resolveToolNameSet(current);
+  let toolSurfaceChanges = 0;
+  if (baselineToolNames !== null && currentToolNames !== null) {
+    const added = [...currentToolNames].filter((n) => !baselineToolNames.has(n)).length;
+    const removed = [...baselineToolNames].filter((n) => !currentToolNames.has(n)).length;
+    toolSurfaceChanges = added + removed;
+  }
+
   return {
     systemPromptDeltaPct,
     toolCountDelta,
@@ -157,6 +182,7 @@ export function buildDriftMagnitude(diffReport: DiffReport): DriftMagnitude {
       systemPromptDeltaPct > 0 ||
       toolCountDelta !== 0 ||
       probeRefusalDeltaPp > 0 ||
+      toolSurfaceChanges > 0 ||
       diffReport.hasBreaking ||
       diffReport.warnings.length > 0 ||
       diffReport.binaryChanged ||
@@ -164,6 +190,7 @@ export function buildDriftMagnitude(diffReport: DiffReport): DriftMagnitude {
       diffReport.toolSchemaChanged ||
       diffReport.modelPoolChanges.length > 0 ||
       diffReport.systemPromptChanged,
+    toolSurfaceChanges,
   };
 }
 
@@ -203,7 +230,8 @@ export function classifyDigestTier(
   if (
     magnitude.systemPromptDeltaPct >= alertSysPct ||
     magnitude.toolCountDelta !== 0 ||
-    magnitude.probeRefusalDeltaPp >= alertProbePp
+    magnitude.probeRefusalDeltaPp >= alertProbePp ||
+    magnitude.toolSurfaceChanges >= 2
   ) {
     return 'alert';
   }

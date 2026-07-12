@@ -158,6 +158,12 @@ export interface MetricSnapshot {
    */
   possibleCauses?: ProvenanceLinkEntry[];
   /**
+   * Sorted list of tool names (IDs) captured at baseline time.
+   * Used for named addition/removal diffs across snapshots.
+   * Absent in older baselines that pre-date named-tool tracking; treat as unknown when missing.
+   */
+  toolNames?: string[];
+  /**
    * Per-tool parameter schemas captured at baseline time.
    * Keys are tool names; values describe parameter counts, names, and description fingerprint.
    * Absent in older baselines that pre-date schema tracking.
