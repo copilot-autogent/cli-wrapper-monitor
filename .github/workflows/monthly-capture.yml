@@ -11,11 +11,18 @@
 # Secrets required:
 #   AUTOGENT_PAT        — PAT with `contents: read` on
 #                         JackywithaWhiteDog/autogent (for static source
-#                         extraction). Also passed as GITHUB_TOKEN to enable
-#                         the refusal-rate experiment (GitHub Models API).
-#                         Absent → capture degrades to a static fallback.
+#                         extraction). Falls back to github.token for public
+#                         repo access when absent.
 #                         NOTE: an Actions secret must NOT use the reserved
 #                         GITHUB_ prefix, hence AUTOGENT_PAT (not GITHUB_*).
+#   MODELS_API_TOKEN    — Fine-grained PAT with the "Models" permission
+#                         (account-level, read-only).  Required for refusal-rate
+#                         probes and context-tax live mode (GitHub Models API at
+#                         models.inference.ai.azure.com).
+#                         Without this secret all probe calls return 401 and
+#                         dangerousRefusedRate / safeAllowedRate stay at 0.
+#                         AUTOGENT_PAT does NOT include the models permission —
+#                         keep them as separate least-privilege secrets.
 #   DISCORD_WEBHOOK_URL — incoming webhook URL; absent → no notification.
 name: Monthly Capture (PR flow)
 
@@ -79,7 +86,9 @@ jobs:
         continue-on-error: true
         with:
           repository: JackywithaWhiteDog/autogent
-          token: ${{ secrets.AUTOGENT_PAT }}
+          # AUTOGENT_PAT → higher rate limits + works if repo goes private.
+          # Falls back to github.token which can read public repos without a PAT.
+          token: ${{ secrets.AUTOGENT_PAT || github.token }}
           ref: main
           path: autogent-src
           fetch-depth: 1
@@ -120,7 +129,19 @@ jobs:
         id: run_capture
         continue-on-error: true
         env:
+          # MODELS_API_TOKEN must be a fine-grained PAT with the "Models"
+          # (read) permission.  ModelsApiClient reads this env var first so
+          # it stays separate from GITHUB_TOKEN (used by provenance fetch,
+          # alert-issue-filer, and other GitHub REST API calls).
+          MODELS_API_TOKEN: ${{ secrets.MODELS_API_TOKEN }}
+          # GITHUB_TOKEN provides access to the GitHub REST API (provenance
+          # search, alert-issue filing).  AUTOGENT_PAT has contents:read on
+          # the autogent repo; it lacks models permission — keep it separate.
           GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
+          # Enable live token-count mode for context-tax (requires a models-
+          # capable token; ContextTaxExperiment falls back to static on error,
+          # so this is safe to always enable).
+          LIVE_MODE: "true"
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run capture
 
