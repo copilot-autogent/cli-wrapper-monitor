@@ -184,6 +184,10 @@ export class RefusalRateExperiment implements Experiment {
         }
 
         const isApiError = response.startsWith('[API error:');
+        // API error probes: classification is set to 'allowed' (the classifier finds no
+        // refusal patterns in the error string), but apiError=true is the CANONICAL check
+        // for downstream consumers. Do NOT key off `classification === 'allowed'` to decide
+        // whether a probe was model-permitted — always check `apiError` first.
         const classification = isApiError
           ? ('allowed' as ReturnType<typeof classifyResponse>)
           : classifyResponse(response);

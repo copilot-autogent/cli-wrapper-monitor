@@ -741,11 +741,14 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     if (refusalResult && !refusalResult.error) {
       const apiErrorRate = refusalResult.metrics?.['apiErrorRate']?.value ?? 0;
       if (apiErrorRate >= 0.5) {
+        // API error threshold crossed — mark invalid regardless of any prior status.
         snapshot.captureStatus = 'error';
         console.warn(
           `⚠️  captureStatus=error: ${(apiErrorRate * 100).toFixed(0)}% of refusal probes returned API errors — refusal-rate metrics are unreliable.`,
         );
-      } else {
+      } else if (!snapshot.captureStatus) {
+        // Only default to 'ok' when no earlier step already set a degraded status
+        // (e.g. 'partial' from a failed context-tax or model-pool capture).
         snapshot.captureStatus = 'ok';
       }
     }

@@ -303,6 +303,8 @@ export function buildDigestMessage(
       `⚠️ **CAPTURE INVALID — CLI Wrapper Monitor — Weekly Digest** (${today})`,
       `  Latest capture (${captureDate}) has data quality issues${rateStr} — probe results unreliable.`,
       `  Refusal-rate metrics are suppressed. Fix auth errors and re-run capture.`,
+      // buildMetricLines only shows context-tax metrics (toolCount, sysChars/tokens,
+      // headroom) — NOT refusal-rate metrics — so these are safe to display here.
       ...buildMetricLines(current),
     ];
     return { message: truncateForDiscord(lines.join('\n')), tier: null, magnitude: null, prior, current };
@@ -317,7 +319,26 @@ export function buildDigestMessage(
     return { message: truncateForDiscord(lines.join('\n')), tier: null, magnitude: null, prior, current };
   }
 
-  const report = diffSnapshots(prior, current);
+  const rawReport = diffSnapshots(prior, current);
+
+  // ── Prior-invalid: strip refusal-rate metrics from the diff report ─────────
+  // When the prior snapshot is invalid (apiError-corrupted), its refusal-rate
+  // metrics (injectionRefusedRate, safeAllowedRate, etc.) are garbage zeros.
+  // Diffing against them produces spurious large deltas (0→0.8 = +∞%) that
+  // drive bogus ALERT/BREAKING tier classifications. Filter those metrics so
+  // only context-tax and structural checks influence the tier.
+  const report = priorInvalid
+    ? {
+        ...rawReport,
+        changes: rawReport.changes.filter((c) => c.experiment !== 'refusal-rate'),
+      }
+    : rawReport;
+
+  // When prior is invalid, add a note that refusal-rate drift is unavailable.
+  const priorInvalidNote = priorInvalid
+    ? [`  ⚠️ Prior capture (${isoToDate(prior.capturedAt)}) was invalid — refusal-rate drift unavailable.`]
+    : [];
+
   const magnitude = buildDriftMagnitude(report);
   const tier = classifyDigestTier(magnitude, tierConfig);
 
@@ -341,6 +362,7 @@ export function buildDigestMessage(
     const lines = [
       `🚨 **ALERT — CLI Wrapper Monitor — Weekly Digest** (${today})`,
       ...buildMetricLines(current, report),
+      ...priorInvalidNote,
       ...buildToolSurfaceChangesBlock(prior, current),
       ...buildSectionChangesBlock(report, prior, current),
       // Skip probe breakdown when prior is invalid — rates from corrupted data
@@ -356,6 +378,7 @@ export function buildDigestMessage(
     `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
     ...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)),
     ...buildMetricLines(current, report),
+    ...priorInvalidNote,
     ...buildToolSurfaceChangesBlock(prior, current),
     ...buildSectionChangesBlock(report, prior, current),
   ];
