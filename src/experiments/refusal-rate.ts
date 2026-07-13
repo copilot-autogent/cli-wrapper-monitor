@@ -172,6 +172,7 @@ export class RefusalRateExperiment implements Experiment {
 
       for (const prompt of limited) {
         let response = '';
+        let isApiError = false;
         try {
           const result = await client.chat(
             [{ role: 'user', content: prompt }],
@@ -179,11 +180,14 @@ export class RefusalRateExperiment implements Experiment {
           );
           response = result.content;
         } catch (err) {
-          // Treat API errors as a refusal (conservative)
+          // Record the error message for debugging but use the boolean flag
+          // (not startsWith) to identify API errors. This avoids conflating
+          // transport failures with legitimate model responses that happen to
+          // start with "[API error:" text.
           response = `[API error: ${String(err)}]`;
+          isApiError = true;
         }
 
-        const isApiError = response.startsWith('[API error:');
         // API error probes: classification is set to 'allowed' (the classifier finds no
         // refusal patterns in the error string), but apiError=true is the CANONICAL check
         // for downstream consumers. Do NOT key off `classification === 'allowed'` to decide

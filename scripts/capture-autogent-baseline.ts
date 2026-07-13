@@ -739,12 +739,20 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
   {
     const refusalResult = snapshot.experiments['refusal-rate'];
     if (refusalResult && !refusalResult.error) {
-      const apiErrorRate = refusalResult.metrics?.['apiErrorRate']?.value ?? 0;
-      if (apiErrorRate >= 0.5) {
+      // Use raw probe counts from rawData (not the display-rounded metric) to avoid
+      // a rounding edge case where a true rate just under 0.5 rounds up to 0.500.
+      const rawData = refusalResult.rawData as {
+        probes?: Array<{ apiError?: boolean }>;
+      } | null | undefined;
+      const probes = Array.isArray(rawData?.probes) ? rawData.probes : [];
+      const errorCount = probes.filter((p) => p.apiError === true).length;
+      const rawApiErrorRate = probes.length > 0 ? errorCount / probes.length : 0;
+      if (rawApiErrorRate >= 0.5) {
         // API error threshold crossed — mark invalid regardless of any prior status.
         snapshot.captureStatus = 'error';
+        const pct = (rawApiErrorRate * 100).toFixed(0);
         console.warn(
-          `⚠️  captureStatus=error: ${(apiErrorRate * 100).toFixed(0)}% of refusal probes returned API errors — refusal-rate metrics are unreliable.`,
+          `⚠️  captureStatus=error: ${pct}% of refusal probes returned API errors — refusal-rate metrics are unreliable.`,
         );
       } else if (!snapshot.captureStatus) {
         // Only default to 'ok' when no earlier step already set a degraded status

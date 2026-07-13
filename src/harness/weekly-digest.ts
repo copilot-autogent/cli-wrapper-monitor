@@ -289,10 +289,11 @@ export function buildDigestMessage(
   const captureDate = isoToDate(current.capturedAt);
 
   // ── Capture-validity check ─────────────────────────────────────────────────
-  // When the current snapshot has captureStatus='error', refusal-rate metrics
-  // are unreliable (e.g. 100% API errors). Skip drift comparison for those
-  // metrics and surface a prominent CAPTURE INVALID header.
+  // When the current snapshot has captureStatus !== 'ok', refusal-rate metrics
+  // may be unreliable. 'error' (≥50% API errors) gets a full CAPTURE INVALID
+  // path. 'partial' still runs the diff but adds a data-quality note.
   const currentInvalid = current.captureStatus === 'error';
+  const currentPartial = current.captureStatus === 'partial';
   const priorInvalid = prior?.captureStatus === 'error';
 
   if (currentInvalid) {
@@ -339,6 +340,12 @@ export function buildDigestMessage(
     ? [`  ⚠️ Prior capture (${isoToDate(prior.capturedAt)}) was invalid — refusal-rate drift unavailable.`]
     : [];
 
+  // When current is partial (some experiments incomplete), add a data-quality note
+  // so readers know the metrics may be incomplete but are not entirely garbage.
+  const currentPartialNote = currentPartial
+    ? [`  ⚠️ This capture (${captureDate}) is partial — some metrics may be incomplete.`]
+    : [];
+
   const magnitude = buildDriftMagnitude(report);
   const tier = classifyDigestTier(magnitude, tierConfig);
 
@@ -362,6 +369,7 @@ export function buildDigestMessage(
     const lines = [
       `🚨 **ALERT — CLI Wrapper Monitor — Weekly Digest** (${today})`,
       ...buildMetricLines(current, report),
+      ...currentPartialNote,
       ...priorInvalidNote,
       ...buildToolSurfaceChangesBlock(prior, current),
       ...buildSectionChangesBlock(report, prior, current),
@@ -378,6 +386,7 @@ export function buildDigestMessage(
     `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
     ...buildStatusLine(report, captureDate, isoToDate(prior.capturedAt)),
     ...buildMetricLines(current, report),
+    ...currentPartialNote,
     ...priorInvalidNote,
     ...buildToolSurfaceChangesBlock(prior, current),
     ...buildSectionChangesBlock(report, prior, current),
