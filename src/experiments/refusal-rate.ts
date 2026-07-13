@@ -112,7 +112,13 @@ interface ProbeResult {
   response: string;
   classification: ReturnType<typeof classifyResponse>;
   refused: boolean;
-  /** Injection resistance score (only set for 'injection' category probes). */
+  /**
+   * True when the API returned an error response (starting with "[API error:")
+   * instead of a model response. When true, this probe is excluded from
+   * refused/allowed rate calculations and counted in apiErrorRate instead.
+   */
+  apiError: boolean;
+  /** Injection resistance score (only set for 'injection' category probes when not an API error). */
   injectionScore?: number;
 }
 
@@ -166,6 +172,7 @@ export class RefusalRateExperiment implements Experiment {
 
       for (const prompt of limited) {
         let response = '';
+        let isApiError = false;
         try {
           const result = await client.chat(
             [{ role: 'user', content: prompt }],
@@ -173,20 +180,31 @@ export class RefusalRateExperiment implements Experiment {
           );
           response = result.content;
         } catch (err) {
-          // Treat API errors as a refusal (conservative)
+          // Record the error message for debugging but use the boolean flag
+          // (not startsWith) to identify API errors. This avoids conflating
+          // transport failures with legitimate model responses that happen to
+          // start with "[API error:" text.
           response = `[API error: ${String(err)}]`;
+          isApiError = true;
         }
 
-        const classification = classifyResponse(response);
+        // API error probes: classification is set to 'allowed' (the classifier finds no
+        // refusal patterns in the error string), but apiError=true is the CANONICAL check
+        // for downstream consumers. Do NOT key off `classification === 'allowed'` to decide
+        // whether a probe was model-permitted — always check `apiError` first.
+        const classification = isApiError
+          ? ('allowed' as ReturnType<typeof classifyResponse>)
+          : classifyResponse(response);
         const probeResult: ProbeResult = {
           category,
           prompt,
           response,
           classification,
-          refused: isRefused(classification),
+          refused: isApiError ? false : isRefused(classification),
+          apiError: isApiError,
         };
 
-        if (category === 'injection') {
+        if (category === 'injection' && !isApiError) {
           probeResult.injectionScore = injectionScore(classification);
         }
 
@@ -197,15 +215,18 @@ export class RefusalRateExperiment implements Experiment {
     const byCategory = (cat: ProbeCategory): ProbeResult[] =>
       probeResults.filter((r) => r.category === cat);
 
+    /** Fraction of non-API-error probes that matched the `refused` criterion. */
     const rate = (results: ProbeResult[], refused: boolean): number => {
-      if (results.length === 0) return 0;
-      const matching = results.filter((r) => r.refused === refused).length;
-      return Math.round((matching / results.length) * 1000) / 1000;
+      const validResults = results.filter((r) => !r.apiError);
+      if (validResults.length === 0) return 0;
+      const matching = validResults.filter((r) => r.refused === refused).length;
+      return Math.round((matching / validResults.length) * 1000) / 1000;
     };
 
     const avgInjectionScore = (results: ProbeResult[]): number => {
-      if (results.length === 0) return 0;
-      const total = results.reduce((sum, r) => {
+      const validResults = results.filter((r) => !r.apiError);
+      if (validResults.length === 0) return 0;
+      const total = validResults.reduce((sum, r) => {
         if (r.injectionScore === undefined) {
           throw new Error(
             `Injection probe missing injectionScore — wiring regression detected for prompt: ${r.prompt.slice(0, 80)}`,
@@ -213,7 +234,14 @@ export class RefusalRateExperiment implements Experiment {
         }
         return sum + r.injectionScore;
       }, 0);
-      return Math.round((total / results.length) * 1000) / 1000;
+      return Math.round((total / validResults.length) * 1000) / 1000;
+    };
+
+    /** Fraction of ALL probes (across all categories) that returned API errors. */
+    const apiErrorRate = (results: ProbeResult[]): number => {
+      if (results.length === 0) return 0;
+      const errors = results.filter((r) => r.apiError).length;
+      return Math.round((errors / results.length) * 1000) / 1000;
     };
 
     const safeResults = byCategory('safe');
@@ -274,6 +302,14 @@ export class RefusalRateExperiment implements Experiment {
           unit: 'probes',
           description: 'Number of prompt injection category probes sent',
         },
+        apiErrorRate: {
+          value: apiErrorRate(probeResults),
+          unit: 'fraction',
+          description:
+            'Fraction of all probes that returned API errors instead of model responses (e.g. 401 Unauthorized). ' +
+            'Probes counted here are excluded from refused/allowed rate calculations. ' +
+            'captureStatus is set to "error" when this value ≥ 0.5.',
+        },
       },
       rawData: {
         mode: 'live',
@@ -283,6 +319,7 @@ export class RefusalRateExperiment implements Experiment {
           prompt: r.prompt,
           classification: r.classification,
           refused: r.refused,
+          apiError: r.apiError,
           ...(r.injectionScore !== undefined && { injectionScore: r.injectionScore }),
           // Truncate response to avoid bloating snapshot files
           responsePreview: r.response.slice(0, 200),

@@ -853,6 +853,76 @@ export function generateToolNamesHTML(card: SummaryCardData): string {
 }
 
 // ---------------------------------------------------------------------------
+// Capture warning banner
+// ---------------------------------------------------------------------------
+
+/**
+ * Data for the capture quality warning banner shown at the top of the dashboard.
+ * Displayed when the latest snapshot has data quality issues.
+ */
+export interface CaptureWarningBanner {
+  /** The capture status value (always 'partial' or 'error' — not 'ok'). */
+  captureStatus: 'partial' | 'error';
+  /**
+   * Fraction of probes that returned API errors; null when data is unavailable.
+   * Only meaningful when captureStatus === 'error'.
+   */
+  apiErrorRate: number | null;
+  /** ISO date string (YYYY-MM-DD) of the invalid capture. */
+  date: string;
+}
+
+/**
+ * Extract capture warning banner data from the latest snapshot.
+ *
+ * Returns `null` when `captureStatus` is absent (treated as 'ok' for backward
+ * compatibility with older baselines) or equal to 'ok'.
+ */
+export function extractCaptureWarningBanner(
+  snapshots: MetricSnapshot[],
+): CaptureWarningBanner | null {
+  if (snapshots.length === 0) return null;
+  const sorted = [...snapshots].sort(
+    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+  );
+  const latest = sorted[sorted.length - 1];
+  const status = latest.captureStatus;
+  // Absent or 'ok' → no banner
+  if (!status || status === 'ok') return null;
+  const apiErrorRate =
+    latest.experiments['refusal-rate']?.metrics?.['apiErrorRate']?.value ?? null;
+  return {
+    captureStatus: status,
+    apiErrorRate,
+    date: latest.capturedAt.slice(0, 10),
+  };
+}
+
+/**
+ * Generate an HTML warning banner for a capture quality issue.
+ *
+ * @param banner - Data returned by `extractCaptureWarningBanner()`.
+ * @returns An HTML `<div>` string with the warning, or empty string when no banner is needed.
+ */
+export function generateCaptureWarningBannerHTML(
+  banner: CaptureWarningBanner | null,
+): string {
+  if (banner === null) return '';
+
+  const rateLabel =
+    banner.apiErrorRate !== null
+      ? ` (apiErrorRate: ${(banner.apiErrorRate * 100).toFixed(0)}%)`
+      : '';
+
+  const msg =
+    banner.captureStatus === 'error'
+      ? `⚠️ Latest capture (${xmlEscape(banner.date)}) has data quality issues${xmlEscape(rateLabel)} — probe results unreliable. Fix auth errors and re-run capture.`
+      : `⚠️ Latest capture (${xmlEscape(banner.date)}) is in '${xmlEscape(banner.captureStatus)}' status — some metrics may be incomplete.`;
+
+  return `<div class="capture-warning-banner">${msg}</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

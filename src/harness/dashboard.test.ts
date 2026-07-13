@@ -13,6 +13,8 @@ import {
   generateStatusHeroHTML,
   extractToolNamesDiff,
   generateToolNamesHTML,
+  extractCaptureWarningBanner,
+  generateCaptureWarningBannerHTML,
 } from "./dashboard.js";
 
 // ---------------------------------------------------------------------------
@@ -983,5 +985,120 @@ describe("extractSummaryCard — toolNames", () => {
     const card = extractSummaryCard([snap]);
     expect(card?.toolNamesAdded).toBeNull();
     expect(card?.toolNamesRemoved).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractCaptureWarningBanner
+// ---------------------------------------------------------------------------
+
+describe("extractCaptureWarningBanner", () => {
+  it("returns null for empty snapshots", () => {
+    expect(extractCaptureWarningBanner([])).toBeNull();
+  });
+
+  it("returns null when latest snapshot has no captureStatus", () => {
+    const snap = makeSnap({ capturedAt: "2026-07-13T00:00:00.000Z" });
+    expect(extractCaptureWarningBanner([snap])).toBeNull();
+  });
+
+  it("returns null when latest snapshot captureStatus='ok'", () => {
+    const snap = makeSnap({ capturedAt: "2026-07-13T00:00:00.000Z", captureStatus: "ok" });
+    expect(extractCaptureWarningBanner([snap])).toBeNull();
+  });
+
+  it("returns a banner when captureStatus='error'", () => {
+    const snap = makeSnap({
+      capturedAt: "2026-07-13T00:00:00.000Z",
+      captureStatus: "error",
+      experiments: {
+        "context-tax": {
+          name: "context-tax",
+          description: "test",
+          metrics: {
+            systemPromptChars: { value: 100000, unit: "chars", description: "" },
+            systemPromptTokensEstimated: { value: 25000, unit: "tokens", description: "" },
+            toolCount: { value: 20, unit: "tools", description: "" },
+          },
+        },
+        "refusal-rate": {
+          name: "refusal-rate",
+          description: "test",
+          metrics: {
+            apiErrorRate: { value: 1.0, unit: "fraction", description: "" },
+            totalProbes: { value: 12, unit: "probes", description: "" },
+            safeProbeCount: { value: 3, unit: "probes", description: "" },
+            borderlineProbeCount: { value: 3, unit: "probes", description: "" },
+            dangerousProbeCount: { value: 3, unit: "probes", description: "" },
+            injectionProbeCount: { value: 3, unit: "probes", description: "" },
+            safeAllowedRate: { value: 0, unit: "fraction", description: "" },
+            dangerousRefusedRate: { value: 0, unit: "fraction", description: "" },
+            borderlineRefusedRate: { value: 0, unit: "fraction", description: "" },
+            injectionRefusedRate: { value: 0, unit: "fraction", description: "" },
+          },
+        },
+      },
+    });
+    const banner = extractCaptureWarningBanner([snap]);
+    expect(banner).not.toBeNull();
+    expect(banner?.captureStatus).toBe("error");
+    expect(banner?.apiErrorRate).toBe(1.0);
+    expect(banner?.date).toBe("2026-07-13");
+  });
+
+  it("picks the latest snapshot when multiple are provided", () => {
+    const older = makeSnap({ capturedAt: "2026-06-01T00:00:00.000Z", captureStatus: "error" });
+    const newer = makeSnap({ capturedAt: "2026-07-13T00:00:00.000Z" }); // no captureStatus = ok
+    // Latest is 'ok' → no banner
+    const banner = extractCaptureWarningBanner([older, newer]);
+    expect(banner).toBeNull();
+  });
+
+  it("returns banner when the latest snapshot is invalid even if older ones are ok", () => {
+    const older = makeSnap({ capturedAt: "2026-06-01T00:00:00.000Z", captureStatus: "ok" });
+    const newer = makeSnap({ capturedAt: "2026-07-13T00:00:00.000Z", captureStatus: "error" });
+    const banner = extractCaptureWarningBanner([older, newer]);
+    expect(banner).not.toBeNull();
+    expect(banner?.captureStatus).toBe("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateCaptureWarningBannerHTML
+// ---------------------------------------------------------------------------
+
+describe("generateCaptureWarningBannerHTML", () => {
+  it("returns empty string for null banner", () => {
+    expect(generateCaptureWarningBannerHTML(null)).toBe("");
+  });
+
+  it("includes apiErrorRate percentage in the HTML", () => {
+    const html = generateCaptureWarningBannerHTML({
+      captureStatus: "error",
+      apiErrorRate: 1.0,
+      date: "2026-07-13",
+    });
+    expect(html).toContain("100%");
+    expect(html).toContain("capture-warning-banner");
+  });
+
+  it("includes the capture date in the HTML", () => {
+    const html = generateCaptureWarningBannerHTML({
+      captureStatus: "error",
+      apiErrorRate: 0.75,
+      date: "2026-07-13",
+    });
+    expect(html).toContain("2026-07-13");
+  });
+
+  it("handles null apiErrorRate gracefully", () => {
+    const html = generateCaptureWarningBannerHTML({
+      captureStatus: "error",
+      apiErrorRate: null,
+      date: "2026-07-13",
+    });
+    expect(html).toContain("capture-warning-banner");
+    // Should not throw or include "null"
+    expect(html).not.toContain("null");
   });
 });

@@ -524,3 +524,137 @@ describe('buildDigestMessage — tool surface changes', () => {
     expect(msg).toContain('-beta');
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildDigestMessage — invalid capture (captureStatus='error')
+// ---------------------------------------------------------------------------
+
+describe('buildDigestMessage — invalid capture (captureStatus=error)', () => {
+  function makeInvalidSnapshot(apiErrorRate = 1.0): MetricSnapshot {
+    return makeSnapshot({
+      capturedAt: '2026-07-13T00:00:00.000Z',
+      captureStatus: 'error',
+      experiments: {
+        'context-tax': {
+          name: 'context-tax',
+          description: 'test',
+          metrics: {
+            systemPromptChars: { value: 0, unit: 'chars', description: '' },
+            systemPromptTokensEstimated: { value: 0, unit: 'tokens', description: '' },
+            toolCount: { value: 0, unit: 'tools', description: '' },
+          },
+        },
+        'refusal-rate': {
+          name: 'refusal-rate',
+          description: 'test',
+          metrics: {
+            safeAllowedRate: { value: 0, unit: 'fraction', description: '' },
+            dangerousRefusedRate: { value: 0, unit: 'fraction', description: '' },
+            borderlineRefusedRate: { value: 0, unit: 'fraction', description: '' },
+            injectionRefusedRate: { value: 0, unit: 'fraction', description: '' },
+            totalProbes: { value: 12, unit: 'probes', description: '' },
+            safeProbeCount: { value: 3, unit: 'probes', description: '' },
+            borderlineProbeCount: { value: 3, unit: 'probes', description: '' },
+            dangerousProbeCount: { value: 3, unit: 'probes', description: '' },
+            injectionProbeCount: { value: 3, unit: 'probes', description: '' },
+            apiErrorRate: { value: apiErrorRate, unit: 'fraction', description: '' },
+          },
+        },
+      },
+    });
+  }
+
+  const priorSnapshot = makeSnapshot({ capturedAt: '2026-07-06T00:00:00.000Z' });
+
+  it('surfaces ⚠️ CAPTURE INVALID header when captureStatus=error', () => {
+    const current = makeInvalidSnapshot();
+    const { message } = buildDigestMessage(current, priorSnapshot, '2026-07-13');
+    expect(message).toContain('CAPTURE INVALID');
+  });
+
+  it('includes apiErrorRate in the invalid-capture message', () => {
+    const current = makeInvalidSnapshot(1.0);
+    const { message } = buildDigestMessage(current, priorSnapshot, '2026-07-13');
+    expect(message).toContain('100%');
+  });
+
+  it('returns tier=null for invalid captures (not a drift comparison)', () => {
+    const current = makeInvalidSnapshot();
+    const { tier } = buildDigestMessage(current, priorSnapshot, '2026-07-13');
+    expect(tier).toBeNull();
+  });
+
+  it('does NOT include normal STABLE/ALERT/CHANGE header for invalid captures', () => {
+    const current = makeInvalidSnapshot();
+    const { message } = buildDigestMessage(current, priorSnapshot, '2026-07-13');
+    expect(message).not.toContain('✅ Stable');
+    expect(message).not.toContain('🚨 ALERT');
+    expect(message).not.toContain('📊 **CLI Wrapper Monitor');
+  });
+
+  it('still shows context-tax metrics in the invalid-capture message', () => {
+    const current = makeSnapshot({
+      capturedAt: '2026-07-13T00:00:00.000Z',
+      captureStatus: 'error',
+      experiments: {
+        'context-tax': {
+          name: 'context-tax',
+          description: 'test',
+          metrics: {
+            systemPromptChars: { value: 50000, unit: 'chars', description: '' },
+            systemPromptTokensEstimated: { value: 12500, unit: 'tokens', description: '' },
+            toolCount: { value: 21, unit: 'tools', description: '' },
+          },
+        },
+        'refusal-rate': {
+          name: 'refusal-rate',
+          description: 'test',
+          metrics: {
+            apiErrorRate: { value: 1.0, unit: 'fraction', description: '' },
+            totalProbes: { value: 4, unit: 'probes', description: '' },
+            safeProbeCount: { value: 1, unit: 'probes', description: '' },
+            borderlineProbeCount: { value: 1, unit: 'probes', description: '' },
+            dangerousProbeCount: { value: 1, unit: 'probes', description: '' },
+            injectionProbeCount: { value: 1, unit: 'probes', description: '' },
+            safeAllowedRate: { value: 0, unit: 'fraction', description: '' },
+            dangerousRefusedRate: { value: 0, unit: 'fraction', description: '' },
+            borderlineRefusedRate: { value: 0, unit: 'fraction', description: '' },
+            injectionRefusedRate: { value: 0, unit: 'fraction', description: '' },
+          },
+        },
+      },
+    });
+    const { message } = buildDigestMessage(current, priorSnapshot, '2026-07-13');
+    // Tools bullet should still appear
+    expect(message).toContain('Tools: 21');
+  });
+
+  it('handles invalid capture with no prior snapshot', () => {
+    const current = makeInvalidSnapshot();
+    const { message } = buildDigestMessage(current, null, '2026-07-13');
+    expect(message).toContain('CAPTURE INVALID');
+  });
+
+  it('does not skip probe breakdown when PRIOR is invalid but CURRENT is valid', () => {
+    const invalidPrior = makeInvalidSnapshot();
+    const validCurrent = makeSnapshot({
+      capturedAt: '2026-07-20T00:00:00.000Z',
+      captureStatus: 'ok',
+      experiments: {
+        'context-tax': {
+          name: 'context-tax',
+          description: 'test',
+          metrics: {
+            systemPromptChars: { value: 200000, unit: 'chars', description: '' },
+            systemPromptTokensEstimated: { value: 50000, unit: 'tokens', description: '' },
+            toolCount: { value: 10, unit: 'tools', description: '' },
+          },
+        },
+      },
+    });
+    // Current is valid, prior is invalid → should still produce a normal digest
+    const { tier } = buildDigestMessage(validCurrent, invalidPrior, '2026-07-20');
+    // Tier is NOT null — a valid current snapshot produces a real diff result
+    expect(tier).not.toBeNull();
+  });
+});

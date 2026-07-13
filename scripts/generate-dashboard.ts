@@ -31,6 +31,8 @@ import {
   buildStatusHero,
   generateStatusHeroHTML,
   generateToolNamesHTML,
+  extractCaptureWarningBanner,
+  generateCaptureWarningBannerHTML,
   type SummaryCardData,
   type RegressionEntry,
   type ModelPoolEntry,
@@ -442,6 +444,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
   const hero = buildStatusHero(snapshots);
 
   const heroSection = generateStatusHeroHTML(hero, generatedAt);
+  const captureWarningBanner = generateCaptureWarningBannerHTML(extractCaptureWarningBanner(snapshots));
   const toolNamesSection = card ? generateToolNamesHTML(card) : '';
   const summarySection = card ? renderSummaryCard(card) : `<section class="section"><p class="no-data">No baseline data available.</p></section>`;
   const sparklinesSection = renderSparklines(toolSeries, charsSeries, injectionSeries, milestones);
@@ -555,6 +558,18 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
     .card-value.danger   { color: #e74c3c; }
     .card-value.warning  { color: #e67e22; }
     .card-value.ok       { color: #27ae60; }
+
+    /* Capture quality warning banner */
+    .capture-warning-banner {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-left: 4px solid #e67e22;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin: 0 40px 16px;
+      font-size: 0.9rem;
+      color: #664d03;
+    }
 
     /* Sparklines */
     .sparkline-grid {
@@ -788,7 +803,7 @@ function generateDashboardHTML(snapshots: MetricSnapshot[], milestones: Record<s
   </header>
 
   <main>
-    ${heroSection}
+    ${captureWarningBanner ? captureWarningBanner + '\n    ' : ''}${heroSection}
     ${summarySection}
     ${toolNamesSection ? `<section class="section tool-names-section">\n  <h2>🔧 Tool Names</h2>\n  ${toolNamesSection}\n</section>` : ''}
     ${sparklinesSection}

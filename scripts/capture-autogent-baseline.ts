@@ -733,6 +733,35 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     }
   }
 
+  // Derive captureStatus from refusal-rate apiErrorRate (if the experiment ran).
+  // This must run before the probeResults block so that captureStatus is set
+  // regardless of whether captureProbeResults is enabled.
+  {
+    const refusalResult = snapshot.experiments['refusal-rate'];
+    if (refusalResult && !refusalResult.error) {
+      // Use raw probe counts from rawData (not the display-rounded metric) to avoid
+      // a rounding edge case where a true rate just under 0.5 rounds up to 0.500.
+      const rawData = refusalResult.rawData as {
+        probes?: Array<{ apiError?: boolean }>;
+      } | null | undefined;
+      const probes = Array.isArray(rawData?.probes) ? rawData.probes : [];
+      const errorCount = probes.filter((p) => p.apiError === true).length;
+      const rawApiErrorRate = probes.length > 0 ? errorCount / probes.length : 0;
+      if (rawApiErrorRate >= 0.5) {
+        // API error threshold crossed — mark invalid regardless of any prior status.
+        snapshot.captureStatus = 'error';
+        const pct = (rawApiErrorRate * 100).toFixed(0);
+        console.warn(
+          `⚠️  captureStatus=error: ${pct}% of refusal probes returned API errors — refusal-rate metrics are unreliable.`,
+        );
+      } else if (!snapshot.captureStatus) {
+        // Only default to 'ok' when no earlier step already set a degraded status
+        // (e.g. 'partial' from a failed context-tax or model-pool capture).
+        snapshot.captureStatus = 'ok';
+      }
+    }
+  }
+
   // Attach per-probe results when captureProbeResults=true and refusal-rate experiment ran.
   if (captureConfig.captureProbeResults) {
     const refusalResult = snapshot.experiments['refusal-rate'];
@@ -743,6 +772,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
           prompt: string;
           classification: string;
           refused: boolean;
+          apiError?: boolean;
           injectionScore?: number;
         }>;
       };
@@ -753,6 +783,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
           prompt: p.prompt,
           classification: p.classification as ClassificationResult,
           refused: p.refused,
+          ...(p.apiError === true && { apiError: true }),
           ...(p.injectionScore !== undefined && { injectionScore: p.injectionScore }),
         }));
         console.log(`Probe results captured: ${snapshot.probeResults.length} probes (captureProbeResults=true).`);
