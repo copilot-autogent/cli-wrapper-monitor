@@ -288,6 +288,26 @@ export function buildDigestMessage(
   const today = runDate ?? new Date().toISOString().slice(0, 10);
   const captureDate = isoToDate(current.capturedAt);
 
+  // ── Capture-validity check ─────────────────────────────────────────────────
+  // When the current snapshot has captureStatus='error', refusal-rate metrics
+  // are unreliable (e.g. 100% API errors). Skip drift comparison for those
+  // metrics and surface a prominent CAPTURE INVALID header.
+  const currentInvalid = current.captureStatus === 'error';
+  const priorInvalid = prior?.captureStatus === 'error';
+
+  if (currentInvalid) {
+    const apiErrorRate =
+      current.experiments['refusal-rate']?.metrics?.['apiErrorRate']?.value ?? null;
+    const rateStr = apiErrorRate !== null ? ` (apiErrorRate: ${(apiErrorRate * 100).toFixed(0)}%)` : '';
+    const lines = [
+      `⚠️ **CAPTURE INVALID — CLI Wrapper Monitor — Weekly Digest** (${today})`,
+      `  Latest capture (${captureDate}) has data quality issues${rateStr} — probe results unreliable.`,
+      `  Refusal-rate metrics are suppressed. Fix auth errors and re-run capture.`,
+      ...buildMetricLines(current),
+    ];
+    return { message: truncateForDiscord(lines.join('\n')), tier: null, magnitude: null, prior, current };
+  }
+
   if (prior === null) {
     const lines = [
       `📊 **CLI Wrapper Monitor — Weekly Digest** (${today})`,
@@ -323,7 +343,10 @@ export function buildDigestMessage(
       ...buildMetricLines(current, report),
       ...buildToolSurfaceChangesBlock(prior, current),
       ...buildSectionChangesBlock(report, prior, current),
-      ...buildProbeBreakdown(report),
+      // Skip probe breakdown when prior is invalid — rates from corrupted data
+      // produce misleading drift signals (e.g. 0%→0% looks "STABLE" even though
+      // both captures had 100% API errors).
+      ...(priorInvalid ? [] : buildProbeBreakdown(report)),
     ];
     return { message: truncateForDiscord(lines.join('\n')), tier, magnitude, prior, current };
   }

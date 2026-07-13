@@ -733,6 +733,24 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     }
   }
 
+  // Derive captureStatus from refusal-rate apiErrorRate (if the experiment ran).
+  // This must run before the probeResults block so that captureStatus is set
+  // regardless of whether captureProbeResults is enabled.
+  {
+    const refusalResult = snapshot.experiments['refusal-rate'];
+    if (refusalResult && !refusalResult.error) {
+      const apiErrorRate = refusalResult.metrics?.['apiErrorRate']?.value ?? 0;
+      if (apiErrorRate >= 0.5) {
+        snapshot.captureStatus = 'error';
+        console.warn(
+          `⚠️  captureStatus=error: ${(apiErrorRate * 100).toFixed(0)}% of refusal probes returned API errors — refusal-rate metrics are unreliable.`,
+        );
+      } else {
+        snapshot.captureStatus = 'ok';
+      }
+    }
+  }
+
   // Attach per-probe results when captureProbeResults=true and refusal-rate experiment ran.
   if (captureConfig.captureProbeResults) {
     const refusalResult = snapshot.experiments['refusal-rate'];
@@ -743,6 +761,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
           prompt: string;
           classification: string;
           refused: boolean;
+          apiError?: boolean;
           injectionScore?: number;
         }>;
       };
@@ -753,6 +772,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
           prompt: p.prompt,
           classification: p.classification as ClassificationResult,
           refused: p.refused,
+          ...(p.apiError === true && { apiError: true }),
           ...(p.injectionScore !== undefined && { injectionScore: p.injectionScore }),
         }));
         console.log(`Probe results captured: ${snapshot.probeResults.length} probes (captureProbeResults=true).`);
