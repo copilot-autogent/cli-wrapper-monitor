@@ -121,13 +121,17 @@ jobs:
         continue-on-error: true
         env:
           # MODELS_API_TOKEN must be a fine-grained PAT with the "Models"
-          # (read) permission.  Without it all refusal-rate probes return 401.
-          # AUTOGENT_PAT is a fallback only; it lacks the models permission
-          # and will produce 401 errors — add MODELS_API_TOKEN to fix this.
-          GITHUB_TOKEN: ${{ secrets.MODELS_API_TOKEN || secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
-          # Enable live token-count mode for context-tax (requires GITHUB_TOKEN
-          # with models permission; ContextTaxExperiment falls back to static
-          # on error, so this is safe to always enable).
+          # (read) permission.  ModelsApiClient reads this env var first so
+          # it stays separate from GITHUB_TOKEN (used by provenance fetch,
+          # alert-issue-filer, and other GitHub REST API calls).
+          MODELS_API_TOKEN: ${{ secrets.MODELS_API_TOKEN }}
+          # GITHUB_TOKEN provides access to the GitHub REST API (provenance
+          # search, alert-issue filing).  AUTOGENT_PAT has contents:read on
+          # the autogent repo; it lacks models permission — keep it separate.
+          GITHUB_TOKEN: ${{ secrets.AUTOGENT_PAT || secrets.GITHUB_TOKEN }}
+          # Enable live token-count mode for context-tax (requires a models-
+          # capable token; ContextTaxExperiment falls back to static on error,
+          # so this is safe to always enable).
           LIVE_MODE: "true"
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           BASELINES_DIR: baselines/weekly

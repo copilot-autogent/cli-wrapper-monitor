@@ -65,12 +65,19 @@ export class ModelsApiClient {
   constructor(config: ModelsApiConfig = {}) {
     const token =
       config.token ??
+      // Prefer a dedicated models-scoped token when present.
+      // MODELS_API_TOKEN must be a fine-grained PAT with the "Models" (read)
+      // permission.  GITHUB_TOKEN / GITHUB_API_TOKEN are used as fallbacks so
+      // local runs and environments that provide a single all-scope token
+      // still work without extra configuration.
+      process.env['MODELS_API_TOKEN'] ??
       process.env['GITHUB_TOKEN'] ??
       process.env['GITHUB_API_TOKEN'];
     if (!token) {
       throw new Error(
         'ModelsApiClient: no token provided. ' +
-          'Set GITHUB_TOKEN environment variable or pass config.token.',
+          'Set MODELS_API_TOKEN (fine-grained PAT with "Models" read permission) ' +
+          'or GITHUB_TOKEN environment variable, or pass config.token.',
       );
     }
     this.token = token;
@@ -151,11 +158,15 @@ export class ModelsApiClient {
 }
 
 /**
- * Return true if a GitHub token is available in the environment.
+ * Return true if a GitHub token suitable for the Models API is available.
+ * Checks MODELS_API_TOKEN first (dedicated models-scoped PAT), then falls back
+ * to GITHUB_TOKEN / GITHUB_API_TOKEN for backwards compatibility.
  * Used by experiments to decide whether to run in live or static mode.
  */
 export function hasGitHubToken(): boolean {
   return Boolean(
-    process.env['GITHUB_TOKEN'] ?? process.env['GITHUB_API_TOKEN'],
+    process.env['MODELS_API_TOKEN'] ??
+    process.env['GITHUB_TOKEN'] ??
+    process.env['GITHUB_API_TOKEN'],
   );
 }
