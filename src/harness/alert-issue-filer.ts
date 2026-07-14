@@ -178,25 +178,30 @@ export function buildAlertIssueTitle(trigger: AlertTrigger, captureDate: string)
 /**
  * Build the GitHub compare URL spanning the two snapshots.
  *
- * If both snapshots carry a `binaryHash` that looks like a git SHA (i.e., a
- * short hex string without a "sha256:" prefix), use the more-precise SHA-based
- * compare endpoint.  Otherwise fall back to date-scoped refs so the link always
- * resolves even when the field stores a file fingerprint rather than a commit SHA.
+ * If both snapshots carry a `binaryHash` that looks like a git SHA (7–40 hex
+ * chars, without a "sha256:" prefix or other non-SHA marker), use the more-
+ * precise SHA-based compare endpoint.  Otherwise fall back to date-scoped refs
+ * so the link always resolves even when the field stores a file fingerprint.
  */
 function buildCompareUrl(prior: MetricSnapshot, current: MetricSnapshot): string {
   const base = 'https://github.com/JackywithaWhiteDog/autogent/compare';
 
-  // Treat a binaryHash as a git SHA when it is present, not the placeholder
-  // 'unknown', and does NOT start with 'sha256:' (file-fingerprint format).
+  // Accept only well-formed git SHAs (7–40 lowercase hex chars).
+  // Reject 'unknown', 'sha256:…' fingerprints, empty strings, and other sentinels.
+  const GIT_SHA_RE = /^[0-9a-f]{7,40}$/i;
   const isGitSha = (h: string | undefined): h is string =>
-    h !== undefined && h !== 'unknown' && !h.startsWith('sha256:');
+    h !== undefined && GIT_SHA_RE.test(h);
 
   if (isGitSha(prior.binaryHash) && isGitSha(current.binaryHash)) {
     return `${base}/${prior.binaryHash}...${current.binaryHash}`;
   }
 
   // Fall back to date-scoped refs derived from capturedAt.
-  const toDate = (iso: string) => iso.slice(0, 10); // YYYY-MM-DD
+  // Validate the ISO-8601 format to avoid generating broken refs.
+  const toDate = (iso: string): string => {
+    const m = /^(\d{4}-\d{2}-\d{2})/.exec(iso);
+    return m ? m[1] : 'unknown';
+  };
   return `${base}/main@{${toDate(prior.capturedAt)}}...main@{${toDate(current.capturedAt)}}`;
 }
 

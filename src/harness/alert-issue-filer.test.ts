@@ -315,6 +315,18 @@ describe('buildAlertIssueBody', () => {
     expect(body).toContain('main@{2026-06-30}...main@{2026-07-07}');
   });
 
+  it('uses "unknown" date segment when capturedAt is malformed', () => {
+    const priorBad = makeSnapshot({ capturedAt: 'not-a-date', binaryHash: undefined });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorBad, current);
+    expect(body).toContain('main@{unknown}...main@{2026-07-07}');
+  });
+
+  it('rejects non-hex binaryHash strings (e.g. "pending") and uses date-based URL', () => {
+    const priorPending = makeSnapshot({ capturedAt: '2026-06-30T00:00:00.000Z', binaryHash: 'pending' });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorPending, current);
+    expect(body).toContain('main@{2026-06-30}...main@{2026-07-07}');
+  });
+
   it('compare URL is a plain URL (not markdown link)', () => {
     const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', prior, current);
     const urlLine = body.split('\n').find(l => l.includes('github.com/JackywithaWhiteDog/autogent/compare'));
