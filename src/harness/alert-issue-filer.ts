@@ -176,14 +176,48 @@ export function buildAlertIssueTitle(trigger: AlertTrigger, captureDate: string)
 // ---------------------------------------------------------------------------
 
 /**
+ * Build the GitHub compare URL spanning the two snapshots.
+ *
+ * If both snapshots carry a `binaryHash` that looks like a git SHA (7–40 hex
+ * chars, without a "sha256:" prefix or other non-SHA marker), use the more-
+ * precise SHA-based compare endpoint.  Otherwise fall back to date-scoped refs
+ * so the link always resolves even when the field stores a file fingerprint.
+ */
+function buildCompareUrl(prior: MetricSnapshot, current: MetricSnapshot): string {
+  const base = 'https://github.com/JackywithaWhiteDog/autogent/compare';
+
+  // Accept only well-formed git SHAs (7–40 lowercase hex chars).
+  // Reject 'unknown', 'sha256:…' fingerprints, empty strings, and other sentinels.
+  const GIT_SHA_RE = /^[0-9a-f]{7,40}$/i;
+  const isGitSha = (h: string | undefined): h is string =>
+    h !== undefined && GIT_SHA_RE.test(h);
+
+  if (isGitSha(prior.binaryHash) && isGitSha(current.binaryHash)) {
+    return `${base}/${prior.binaryHash}...${current.binaryHash}`;
+  }
+
+  // Fall back to date-scoped refs derived from capturedAt.
+  // Validate the ISO-8601 format to avoid generating broken refs.
+  const toDate = (iso: string): string => {
+    const m = /^(\d{4}-\d{2}-\d{2})/.exec(iso);
+    return m ? m[1] : 'unknown';
+  };
+  return `${base}/main@{${toDate(prior.capturedAt)}}...main@{${toDate(current.capturedAt)}}`;
+}
+
+/**
  * Format the GitHub issue body for an alert trigger.
- * Includes the drift delta, a context block, and the full digest message.
+ * Includes the drift delta, a context block, the full digest message, and an
+ * "Investigate" section with a GitHub compare URL spanning the two snapshots.
  */
 export function buildAlertIssueBody(
   trigger: AlertTrigger,
   captureDate: string,
   digestMessage: string,
+  prior: MetricSnapshot,
+  current: MetricSnapshot,
 ): string {
+  const compareUrl = buildCompareUrl(prior, current);
   return [
     `## 🚨 ALERT: \`${trigger.metric}\` drift detected`,
     ``,
@@ -200,6 +234,11 @@ export function buildAlertIssueBody(
     `\`\`\``,
     digestMessage,
     `\`\`\``,
+    ``,
+    `## Investigate`,
+    ``,
+    `Autogent commits in this window:`,
+    compareUrl,
     ``,
     `---`,
     `_Auto-filed by weekly-stability-digest. Close when resolved or if noise._`,
@@ -362,7 +401,7 @@ export async function fileAlertIssuesIfNeeded(
       }
 
       const title = buildAlertIssueTitle(trigger, captureDate);
-      const body = buildAlertIssueBody(trigger, captureDate, digestMessage);
+      const body = buildAlertIssueBody(trigger, captureDate, digestMessage, prior, current);
       const issueNumber = await createAlertIssue(title, body, githubApi);
 
       if (verbose) {

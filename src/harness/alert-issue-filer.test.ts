@@ -256,36 +256,83 @@ describe('buildAlertIssueTitle', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildAlertIssueBody', () => {
+  const trigger = { metric: 'toolCount', fromValue: '21 tools', toValue: '18 tools', delta: '-3 tools' };
+  const prior = makeSnapshot({ capturedAt: '2026-06-30T00:00:00.000Z' });
+  const current = makeSnapshot({ capturedAt: '2026-07-07T00:00:00.000Z' });
+
   it('includes the metric name in the body', () => {
-    const trigger = { metric: 'toolCount', fromValue: '21 tools', toValue: '18 tools', delta: '-3 tools' };
-    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest content here');
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest content here', prior, current);
     expect(body).toContain('toolCount');
   });
 
   it('includes prior and current values', () => {
-    const trigger = { metric: 'toolCount', fromValue: '21 tools', toValue: '18 tools', delta: '-3 tools' };
-    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest');
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', prior, current);
     expect(body).toContain('21 tools');
     expect(body).toContain('18 tools');
   });
 
   it('includes the delta', () => {
-    const trigger = { metric: 'toolCount', fromValue: '21 tools', toValue: '18 tools', delta: '-3 tools' };
-    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest');
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', prior, current);
     expect(body).toContain('-3 tools');
   });
 
   it('includes the digest message in a code block', () => {
-    const trigger = { metric: 'toolCount', fromValue: '21 tools', toValue: '18 tools', delta: '-3 tools' };
-    const body = buildAlertIssueBody(trigger, '2026-07-07', '🚨 ALERT digest message');
+    const body = buildAlertIssueBody(trigger, '2026-07-07', '🚨 ALERT digest message', prior, current);
     expect(body).toContain('🚨 ALERT digest message');
     expect(body).toContain('```');
   });
 
   it('includes the auto-filed footer', () => {
-    const trigger = { metric: 'toolCount', fromValue: '21 tools', toValue: '18 tools', delta: '-3 tools' };
-    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest');
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', prior, current);
     expect(body).toContain('Auto-filed by weekly-stability-digest');
+  });
+
+  it('includes an Investigate section with a date-based compare URL when binaryHash is sha256 format', () => {
+    // makeSnapshot uses binaryHash: 'sha256:aabbcc' → date-based fallback
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', prior, current);
+    expect(body).toContain('## Investigate');
+    expect(body).toContain('Autogent commits in this window:');
+    expect(body).toContain('https://github.com/JackywithaWhiteDog/autogent/compare/main@{2026-06-30}...main@{2026-07-07}');
+  });
+
+  it('uses SHA-based compare URL when both snapshots have a git-SHA binaryHash', () => {
+    const priorWithSha = makeSnapshot({ capturedAt: '2026-06-30T00:00:00.000Z', binaryHash: 'abc1234' });
+    const currentWithSha = makeSnapshot({ capturedAt: '2026-07-07T00:00:00.000Z', binaryHash: 'def5678' });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorWithSha, currentWithSha);
+    expect(body).toContain('https://github.com/JackywithaWhiteDog/autogent/compare/abc1234...def5678');
+    expect(body).not.toContain('main@{');
+  });
+
+  it('falls back to date-based compare URL when one snapshot has an unknown binaryHash', () => {
+    const priorUnknown = makeSnapshot({ capturedAt: '2026-06-30T00:00:00.000Z', binaryHash: 'unknown' });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorUnknown, current);
+    expect(body).toContain('main@{2026-06-30}...main@{2026-07-07}');
+  });
+
+  it('falls back to date-based compare URL when binaryHash is absent', () => {
+    const priorNoBinaryHash = makeSnapshot({ capturedAt: '2026-06-30T00:00:00.000Z', binaryHash: undefined });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorNoBinaryHash, current);
+    expect(body).toContain('main@{2026-06-30}...main@{2026-07-07}');
+  });
+
+  it('uses "unknown" date segment when capturedAt is malformed', () => {
+    const priorBad = makeSnapshot({ capturedAt: 'not-a-date', binaryHash: undefined });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorBad, current);
+    expect(body).toContain('main@{unknown}...main@{2026-07-07}');
+  });
+
+  it('rejects non-hex binaryHash strings (e.g. "pending") and uses date-based URL', () => {
+    const priorPending = makeSnapshot({ capturedAt: '2026-06-30T00:00:00.000Z', binaryHash: 'pending' });
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', priorPending, current);
+    expect(body).toContain('main@{2026-06-30}...main@{2026-07-07}');
+  });
+
+  it('compare URL is a plain URL (not markdown link)', () => {
+    const body = buildAlertIssueBody(trigger, '2026-07-07', 'digest', prior, current);
+    const urlLine = body.split('\n').find(l => l.includes('github.com/JackywithaWhiteDog/autogent/compare'));
+    expect(urlLine).toBeDefined();
+    // Plain URL — not wrapped in []() markdown syntax
+    expect(urlLine).not.toMatch(/\[.*\]\(.*\)/);
   });
 });
 
