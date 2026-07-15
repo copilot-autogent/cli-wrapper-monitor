@@ -9,6 +9,7 @@
  *   - buildAlertIssueBody     – format the issue body from digest context
  *   - buildCompareCommits     – fetch commits in the compare window from the autogent repo
  *   - filterCandidateCommits  – keyword-filter commits per triggered signal
+ *   - SIGNAL_KEYWORDS         – per-signal keyword mapping used by filterCandidateCommits
  *   - fileAlertIssuesIfNeeded – dedup-check + file one issue per triggered metric
  */
 
@@ -289,8 +290,10 @@ export function buildAlertIssueBody(
       } else {
         for (const c of group.candidates) {
           const shortSha = c.sha.slice(0, 7);
+          // Escape ] in link text to prevent breaking markdown syntax
+          const safeMessage = c.message.replace(/\]/g, '\\]');
           lines.push(
-            `- \`${shortSha}\` [${c.message}](https://github.com/${AUTOGENT_REPO}/commit/${c.sha})`,
+            `- \`${shortSha}\` [${safeMessage}](https://github.com/${AUTOGENT_REPO}/commit/${c.sha})`,
           );
         }
         lines.push(``);
@@ -312,15 +315,16 @@ export function buildAlertIssueBody(
  * defined by the two snapshot timestamps.
  *
  * Uses the `since` / `until` parameters of the GitHub Commits API.
- * Returns an empty array on any API error (graceful degradation).
+ * Returns `null` on any API error (graceful degradation — caller omits culprits section).
+ * Returns an empty array when the API succeeds but the window contains no commits.
  */
 export async function buildCompareCommits(
   prior: MetricSnapshot,
   current: MetricSnapshot,
   opts?: GitHubApiOptions,
-): Promise<CommitEntry[]> {
+): Promise<CommitEntry[] | null> {
   const { token, baseUrl } = resolveApiOptions(opts);
-  if (!token) return [];
+  if (!token) return null;
 
   const commits: CommitEntry[] = [];
 
@@ -343,7 +347,7 @@ export async function buildCompareCommits(
         signal: AbortSignal.timeout(15_000),
       });
 
-      if (!res.ok) return [];
+      if (!res.ok) return null;
 
       const data = (await res.json()) as Array<{ sha: string; commit: { message: string } }>;
 
@@ -355,7 +359,7 @@ export async function buildCompareCommits(
       if (data.length < COMMITS_PER_PAGE) break;
     }
   } catch {
-    return [];
+    return null;
   }
 
   return commits;
@@ -522,7 +526,7 @@ export async function fileAlertIssuesIfNeeded(
 
   const results: AlertIssueResult[] = [];
 
-  // Fetch commits once for all triggers; empty on error (graceful degradation).
+  // Fetch commits once for all triggers (null on error → omit culprits section gracefully).
   const commits = await buildCompareCommits(prior, current, githubApi);
 
   for (const trigger of triggers) {
@@ -539,7 +543,8 @@ export async function fileAlertIssuesIfNeeded(
       }
 
       const title = buildAlertIssueTitle(trigger, captureDate);
-      const candidateGroups = filterCandidateCommits(commits, [trigger.metric]);
+      const candidateGroups =
+        commits !== null ? filterCandidateCommits(commits, [trigger.metric]) : undefined;
       const body = buildAlertIssueBody(trigger, captureDate, digestMessage, prior, current, candidateGroups);
       const issueNumber = await createAlertIssue(title, body, githubApi);
 

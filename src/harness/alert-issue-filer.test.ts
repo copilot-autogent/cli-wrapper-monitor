@@ -955,17 +955,17 @@ describe('buildCompareCommits', () => {
     expect(commits[1].message).toBe('fix: update prompt');
   });
 
-  it('returns empty array when token is absent', async () => {
+  it('returns null when token is absent', async () => {
     const mockFetch = vi.fn();
     globalThis.fetch = mockFetch as typeof globalThis.fetch;
 
     const commits = await buildCompareCommits(prior, current, { token: '' });
 
-    expect(commits).toHaveLength(0);
+    expect(commits).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('returns empty array when API returns non-OK status (graceful degradation)', async () => {
+  it('returns null when API returns non-OK status (graceful degradation)', async () => {
     const mockFetch = vi.fn().mockResolvedValueOnce({
       ok: false,
       status: 503,
@@ -977,10 +977,10 @@ describe('buildCompareCommits', () => {
       baseUrl: 'https://api.github.com',
     });
 
-    expect(commits).toHaveLength(0);
+    expect(commits).toBeNull();
   });
 
-  it('returns empty array when fetch throws (graceful degradation)', async () => {
+  it('returns null when fetch throws (graceful degradation)', async () => {
     const mockFetch = vi.fn().mockRejectedValueOnce(new Error('Network error'));
     globalThis.fetch = mockFetch as typeof globalThis.fetch;
 
@@ -989,7 +989,7 @@ describe('buildCompareCommits', () => {
       baseUrl: 'https://api.github.com',
     });
 
-    expect(commits).toHaveLength(0);
+    expect(commits).toBeNull();
   });
 
   it('paginates when first page is full (100 items)', async () => {
