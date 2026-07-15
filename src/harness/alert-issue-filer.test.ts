@@ -948,11 +948,11 @@ describe('buildCompareCommits', () => {
     });
 
     expect(commits).toHaveLength(2);
-    expect(commits[0].sha).toBe('abcdef1234567890abcdef1234567890abcdef12');
+    expect(commits![0].sha).toBe('abcdef1234567890abcdef1234567890abcdef12');
     // Only subject line (before first \n)
-    expect(commits[0].message).toBe('feat: add new tool');
-    expect(commits[1].sha).toBe('deadbeef1234567890abcdef1234567890abcdef');
-    expect(commits[1].message).toBe('fix: update prompt');
+    expect(commits![0].message).toBe('feat: add new tool');
+    expect(commits![1].sha).toBe('deadbeef1234567890abcdef1234567890abcdef');
+    expect(commits![1].message).toBe('fix: update prompt');
   });
 
   it('returns null when token is absent', async () => {
