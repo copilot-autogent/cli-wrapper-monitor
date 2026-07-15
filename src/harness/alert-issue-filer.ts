@@ -4,9 +4,12 @@
  * Files a GitHub issue when the weekly digest detects ALERT-tier drift.
  *
  * Public API:
- *   - extractAlertTriggers  – derive which metrics triggered ALERT from a DriftMagnitude
- *   - buildAlertIssueTitle  – format the canonical issue title for a trigger
- *   - buildAlertIssueBody   – format the issue body from digest context
+ *   - extractAlertTriggers    – derive which metrics triggered ALERT from a DriftMagnitude
+ *   - buildAlertIssueTitle    – format the canonical issue title for a trigger
+ *   - buildAlertIssueBody     – format the issue body from digest context
+ *   - buildCompareCommits     – fetch commits in the compare window from the autogent repo
+ *   - filterCandidateCommits  – keyword-filter commits per triggered signal
+ *   - SIGNAL_KEYWORDS         – per-signal keyword mapping used by filterCandidateCommits
  *   - fileAlertIssuesIfNeeded – dedup-check + file one issue per triggered metric
  */
 
@@ -54,6 +57,37 @@ export interface FileAlertIssuesParams {
   /** When true, log filing decisions to stdout. Defaults to true. */
   verbose?: boolean;
 }
+
+/** A single commit in the compare window. */
+export interface CommitEntry {
+  /** Full 40-char git SHA */
+  sha: string;
+  /** First line of the commit message (subject line) */
+  message: string;
+}
+
+/** Commits matched for a single triggered signal. */
+export interface CandidateGroup {
+  /** Metric name that triggered the alert, e.g. "toolCount" */
+  signal: string;
+  /** Candidate commits whose subject line matched a keyword for this signal */
+  candidates: CommitEntry[];
+}
+
+/**
+ * Per-signal keyword mapping for commit attribution.
+ * Commit subject lines are matched case-insensitively against these substrings.
+ */
+export const SIGNAL_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
+  systemPromptChars: ['system prompt', 'prompt', 'instruction', 'hook', 'context'],
+  toolCount: ['tool', 'function', 'schema', 'definition'],
+  injectionRefusedRate: ['model', 'refusal', 'safety', 'policy', 'filter', 'content'],
+};
+
+const AUTOGENT_REPO = 'JackywithaWhiteDog/autogent';
+const MAX_CANDIDATES_PER_SIGNAL = 10;
+const COMMITS_PER_PAGE = 100;
+const MAX_COMMIT_PAGES = 3;
 
 /** Result returned per trigger after a filing attempt. */
 export interface AlertIssueResult {
@@ -207,8 +241,9 @@ function buildCompareUrl(prior: MetricSnapshot, current: MetricSnapshot): string
 
 /**
  * Format the GitHub issue body for an alert trigger.
- * Includes the drift delta, a context block, the full digest message, and an
- * "Investigate" section with a GitHub compare URL spanning the two snapshots.
+ * Includes the drift delta, a context block, the full digest message, an
+ * "Investigate" section with a GitHub compare URL spanning the two snapshots,
+ * and an optional "Likely culprits" section with keyword-matched commits.
  */
 export function buildAlertIssueBody(
   trigger: AlertTrigger,
@@ -216,9 +251,10 @@ export function buildAlertIssueBody(
   digestMessage: string,
   prior: MetricSnapshot,
   current: MetricSnapshot,
+  candidateGroups?: CandidateGroup[],
 ): string {
   const compareUrl = buildCompareUrl(prior, current);
-  return [
+  const lines = [
     `## 🚨 ALERT: \`${trigger.metric}\` drift detected`,
     ``,
     `| Field | Value |`,
@@ -240,9 +276,112 @@ export function buildAlertIssueBody(
     `Autogent commits in this window:`,
     compareUrl,
     ``,
-    `---`,
-    `_Auto-filed by weekly-stability-digest. Close when resolved or if noise._`,
-  ].join('\n');
+  ];
+
+  if (candidateGroups !== undefined) {
+    lines.push(`## Likely culprits`, ``);
+    for (const group of candidateGroups) {
+      lines.push(`### ${group.signal}`, ``);
+      if (group.candidates.length === 0) {
+        lines.push(
+          `> No commits matched keywords for this signal — check the full compare link above.`,
+          ``,
+        );
+      } else {
+        for (const c of group.candidates) {
+          const shortSha = c.sha.slice(0, 7);
+          // Escape ] in link text to prevent breaking markdown syntax
+          const safeMessage = c.message.replace(/\]/g, '\\]');
+          lines.push(
+            `- \`${shortSha}\` [${safeMessage}](https://github.com/${AUTOGENT_REPO}/commit/${c.sha})`,
+          );
+        }
+        lines.push(``);
+      }
+    }
+  }
+
+  lines.push(`---`, `_Auto-filed by weekly-stability-digest. Close when resolved or if noise._`);
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// buildCompareCommits + filterCandidateCommits — commit attribution
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch paginated commits from the autogent repo within the compare window
+ * defined by the two snapshot timestamps.
+ *
+ * Uses the `since` / `until` parameters of the GitHub Commits API.
+ * Returns `null` on any API error (graceful degradation — caller omits culprits section).
+ * Returns an empty array when the API succeeds but the window contains no commits.
+ */
+export async function buildCompareCommits(
+  prior: MetricSnapshot,
+  current: MetricSnapshot,
+  opts?: GitHubApiOptions,
+): Promise<CommitEntry[] | null> {
+  const { token, baseUrl } = resolveApiOptions(opts);
+  if (!token) return null;
+
+  const commits: CommitEntry[] = [];
+
+  try {
+    for (let page = 1; page <= MAX_COMMIT_PAGES; page++) {
+      const params = new URLSearchParams({
+        since: prior.capturedAt,
+        until: current.capturedAt,
+        per_page: String(COMMITS_PER_PAGE),
+        page: String(page),
+      });
+      const url = `${baseUrl}/repos/${AUTOGENT_REPO}/commits?${params.toString()}`;
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!res.ok) return null;
+
+      const data = (await res.json()) as Array<{ sha: string; commit: { message: string } }>;
+
+      for (const item of data) {
+        const subject = item.commit.message.split('\n')[0] ?? '';
+        commits.push({ sha: item.sha, message: subject });
+      }
+
+      if (data.length < COMMITS_PER_PAGE) break;
+    }
+  } catch {
+    return null;
+  }
+
+  return commits;
+}
+
+/**
+ * For each triggered signal, case-insensitively match commits against its
+ * keyword list and return up to MAX_CANDIDATES_PER_SIGNAL candidates.
+ *
+ * Signals not present in SIGNAL_KEYWORDS are returned with an empty candidate list.
+ */
+export function filterCandidateCommits(
+  commits: CommitEntry[],
+  signals: string[],
+): CandidateGroup[] {
+  return signals.map((signal) => {
+    const keywords = SIGNAL_KEYWORDS[signal] ?? [];
+    const candidates = commits
+      .filter((c) => keywords.some((kw) => c.message.toLowerCase().includes(kw.toLowerCase())))
+      .slice(0, MAX_CANDIDATES_PER_SIGNAL);
+    return { signal, candidates };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -387,6 +526,9 @@ export async function fileAlertIssuesIfNeeded(
 
   const results: AlertIssueResult[] = [];
 
+  // Fetch commits once for all triggers (null on error → omit culprits section gracefully).
+  const commits = await buildCompareCommits(prior, current, githubApi);
+
   for (const trigger of triggers) {
     try {
       const existingIssueNumber = await findExistingAlertIssue(trigger.metric, githubApi);
@@ -401,7 +543,9 @@ export async function fileAlertIssuesIfNeeded(
       }
 
       const title = buildAlertIssueTitle(trigger, captureDate);
-      const body = buildAlertIssueBody(trigger, captureDate, digestMessage, prior, current);
+      const candidateGroups =
+        commits !== null ? filterCandidateCommits(commits, [trigger.metric]) : undefined;
+      const body = buildAlertIssueBody(trigger, captureDate, digestMessage, prior, current, candidateGroups);
       const issueNumber = await createAlertIssue(title, body, githubApi);
 
       if (verbose) {
