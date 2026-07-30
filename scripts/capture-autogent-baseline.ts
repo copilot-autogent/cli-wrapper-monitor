@@ -40,7 +40,14 @@ import {
 import { ContextTaxExperiment } from '../src/experiments/context-tax.js';
 import { RefusalRateExperiment } from '../src/experiments/refusal-rate.js';
 import { hasGitHubToken } from '../src/harness/models-api-client.js';
-import type { ModelPool, ToolParamSchema, ProbeCategory, ClassificationResult } from '../src/harness/types.js';
+import type {
+  CaptureStatus,
+  ClassificationResult,
+  ExperimentResult,
+  ModelPool,
+  ProbeCategory,
+  ToolParamSchema,
+} from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 import { parsePromptSections } from '../src/harness/prompt-sections.js';
 import { loadCaptureConfig } from './capture-config.js';
@@ -68,6 +75,28 @@ const SKIP_MODEL_POOL = process.env['SKIP_MODEL_POOL'] === 'true';
 const SKIP_PROVENANCE = process.env['SKIP_PROVENANCE'] === 'true';
 const DRY_RUN = process.argv.includes('--dry-run');
 const PREFLIGHT = process.argv.includes('--preflight');
+
+/**
+ * Mark a refusal-rate capture invalid when the experiment ran without usable
+ * probe data or when at least half of its probes returned API errors.
+ */
+export function classifyRefusalCaptureStatus(
+  refusalResult: ExperimentResult | undefined,
+  currentStatus?: CaptureStatus,
+): CaptureStatus | undefined {
+  if (!refusalResult) return currentStatus;
+
+  const rawData = refusalResult.rawData as {
+    probes?: Array<{ apiError?: boolean }>;
+  } | null | undefined;
+  const probes = Array.isArray(rawData?.probes) ? rawData.probes : [];
+  if (refusalResult.error || probes.length === 0) return 'error';
+
+  const errorCount = probes.filter((p) => p.apiError === true).length;
+  return errorCount / probes.length >= 0.5
+    ? 'error'
+    : currentStatus ?? 'ok';
+}
 
 // Workspace path: where the bootstrap files and memory live at runtime.
 // Defaults to ~/.autogent on most systems, or /home/autogent/.autogent in Docker.
@@ -733,31 +762,29 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     }
   }
 
-  // Derive captureStatus from refusal-rate apiErrorRate (if the experiment ran).
+  // Derive captureStatus from refusal-rate probe data (if the experiment ran).
   // This must run before the probeResults block so that captureStatus is set
   // regardless of whether captureProbeResults is enabled.
   {
     const refusalResult = snapshot.experiments['refusal-rate'];
-    if (refusalResult && !refusalResult.error) {
-      // Use raw probe counts from rawData (not the display-rounded metric) to avoid
-      // a rounding edge case where a true rate just under 0.5 rounds up to 0.500.
-      const rawData = refusalResult.rawData as {
-        probes?: Array<{ apiError?: boolean }>;
-      } | null | undefined;
-      const probes = Array.isArray(rawData?.probes) ? rawData.probes : [];
-      const errorCount = probes.filter((p) => p.apiError === true).length;
-      const rawApiErrorRate = probes.length > 0 ? errorCount / probes.length : 0;
-      if (rawApiErrorRate >= 0.5) {
-        // API error threshold crossed — mark invalid regardless of any prior status.
-        snapshot.captureStatus = 'error';
-        const pct = (rawApiErrorRate * 100).toFixed(0);
+    if (refusalResult) {
+      const previousStatus = snapshot.captureStatus;
+      snapshot.captureStatus = classifyRefusalCaptureStatus(refusalResult, previousStatus);
+      if (refusalResult.error || !refusalResult.rawData ||
+        !Array.isArray((refusalResult.rawData as { probes?: unknown }).probes) ||
+        ((refusalResult.rawData as { probes?: unknown[] }).probes?.length ?? 0) === 0) {
+        console.warn(
+          '⚠️  captureStatus=error: refusal-rate experiment produced no probe results.',
+        );
+      } else if (snapshot.captureStatus === 'error' && previousStatus !== 'error') {
+        const probes = (refusalResult.rawData as {
+          probes: Array<{ apiError?: boolean }>;
+        }).probes;
+        const errorCount = probes.filter((p) => p.apiError === true).length;
+        const pct = ((errorCount / probes.length) * 100).toFixed(0);
         console.warn(
           `⚠️  captureStatus=error: ${pct}% of refusal probes returned API errors — refusal-rate metrics are unreliable.`,
         );
-      } else if (!snapshot.captureStatus) {
-        // Only default to 'ok' when no earlier step already set a degraded status
-        // (e.g. 'partial' from a failed context-tax or model-pool capture).
-        snapshot.captureStatus = 'ok';
       }
     }
   }

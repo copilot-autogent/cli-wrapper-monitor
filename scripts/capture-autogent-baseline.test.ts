@@ -54,11 +54,37 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-import { captureBaseline } from './capture-autogent-baseline.js';
+import {
+  captureBaseline,
+  classifyRefusalCaptureStatus,
+} from './capture-autogent-baseline.js';
 
 describe('capture-autogent-baseline --dry-run', () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('classifyRefusalCaptureStatus', () => {
+    const result = (probes?: Array<{ apiError?: boolean }>) => ({
+      name: 'refusal-rate',
+      description: 'test',
+      metrics: {},
+      rawData: probes === undefined ? undefined : { probes },
+    });
+
+    it('marks an absent probe array as an error', () => {
+      expect(classifyRefusalCaptureStatus(result())).toBe('error');
+    });
+
+    it('marks an empty probe array as an error', () => {
+      expect(classifyRefusalCaptureStatus(result([]))).toBe('error');
+    });
+
+    it('preserves existing partial status for usable probes', () => {
+      expect(
+        classifyRefusalCaptureStatus(result([{ apiError: false }]), 'partial'),
+      ).toBe('partial');
+    });
   });
 
   it('does not call fs.writeFileSync when dryRun is true', async () => {

@@ -64,14 +64,14 @@ export class ModelsApiClient {
 
   constructor(config: ModelsApiConfig = {}) {
     const token =
-      config.token ??
+      config.token ||
       // Prefer a dedicated models-scoped token when present.
       // MODELS_API_TOKEN must be a fine-grained PAT with the "Models" (read)
       // permission.  GITHUB_TOKEN / GITHUB_API_TOKEN are used as fallbacks so
       // local runs and environments that provide a single all-scope token
       // still work without extra configuration.
-      process.env['MODELS_API_TOKEN'] ??
-      process.env['GITHUB_TOKEN'] ??
+      process.env['MODELS_API_TOKEN'] ||
+      process.env['GITHUB_TOKEN'] ||
       process.env['GITHUB_API_TOKEN'];
     if (!token) {
       throw new Error(
@@ -165,8 +165,8 @@ export class ModelsApiClient {
  */
 export function hasGitHubToken(): boolean {
   return Boolean(
-    process.env['MODELS_API_TOKEN'] ??
-    process.env['GITHUB_TOKEN'] ??
+    process.env['MODELS_API_TOKEN'] ||
+    process.env['GITHUB_TOKEN'] ||
     process.env['GITHUB_API_TOKEN'],
   );
 }
