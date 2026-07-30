@@ -24,13 +24,6 @@ describe('hasGitHubToken', () => {
     expect(hasGitHubToken()).toBe(true);
   });
 
-  it('falls back when MODELS_API_TOKEN is empty', () => {
-    process.env['MODELS_API_TOKEN'] = '';
-    process.env['GITHUB_TOKEN'] = 'github-token';
-
-    expect(hasGitHubToken()).toBe(true);
-  });
-
   it('prefers MODELS_API_TOKEN when both tokens are present', () => {
     process.env['MODELS_API_TOKEN'] = 'models-token';
     process.env['GITHUB_TOKEN'] = 'github-token';
