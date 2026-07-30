@@ -54,11 +54,63 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-import { captureBaseline } from './capture-autogent-baseline.js';
+import {
+  captureBaseline,
+  classifyRefusalCaptureStatus,
+} from './capture-autogent-baseline.js';
+import type { ExperimentResult } from '../src/harness/types.js';
 
 describe('capture-autogent-baseline --dry-run', () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('classifyRefusalCaptureStatus', () => {
+    const result = (
+      probes?: Array<{ apiError?: boolean }>,
+      error?: string,
+    ): ExperimentResult => ({
+      name: 'refusal-rate',
+      description: 'test',
+      metrics: {},
+      rawData: probes === undefined ? undefined : { probes },
+      ...(error !== undefined && { error }),
+    });
+
+    it('marks an absent probe array as an error', () => {
+      expect(classifyRefusalCaptureStatus(result())).toBe('error');
+    });
+
+    it('marks an empty probe array as an error', () => {
+      expect(classifyRefusalCaptureStatus(result([]))).toBe('error');
+    });
+
+    it('marks an errored run with no probes as an error', () => {
+      expect(classifyRefusalCaptureStatus(result([], 'capture failed'))).toBe('error');
+    });
+
+    it('preserves existing partial status for usable probes', () => {
+      expect(
+        classifyRefusalCaptureStatus(result([{ apiError: false }]), 'partial'),
+      ).toBe('partial');
+    });
+
+    it('preserves existing status when an errored run has partial probe data', () => {
+      expect(
+        classifyRefusalCaptureStatus(
+          result([{ apiError: false }], 'transient failure'),
+          'partial',
+        ),
+      ).toBe('partial');
+    });
+
+    it('marks a capture invalid when half of probes are API errors', () => {
+      expect(
+        classifyRefusalCaptureStatus(
+          result([{ apiError: true }, { apiError: false }]),
+        ),
+      ).toBe('error');
+    });
   });
 
   it('does not call fs.writeFileSync when dryRun is true', async () => {
