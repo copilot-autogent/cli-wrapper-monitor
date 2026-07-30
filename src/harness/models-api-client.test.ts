@@ -17,6 +17,14 @@ afterEach(() => {
 });
 
 describe('hasGitHubToken', () => {
+  it('returns false when no token is available', () => {
+    delete process.env['MODELS_API_TOKEN'];
+    delete process.env['GITHUB_TOKEN'];
+    delete process.env['GITHUB_API_TOKEN'];
+
+    expect(hasGitHubToken()).toBe(false);
+  });
+
   it('falls back to GITHUB_TOKEN when MODELS_API_TOKEN is absent', () => {
     delete process.env['MODELS_API_TOKEN'];
     delete process.env['GITHUB_API_TOKEN'];

@@ -58,6 +58,7 @@ import {
   captureBaseline,
   classifyRefusalCaptureStatus,
 } from './capture-autogent-baseline.js';
+import type { ExperimentResult } from '../src/harness/types.js';
 
 describe('capture-autogent-baseline --dry-run', () => {
   afterEach(() => {
@@ -68,7 +69,7 @@ describe('capture-autogent-baseline --dry-run', () => {
     const result = (
       probes?: Array<{ apiError?: boolean }>,
       error?: string,
-    ) => ({
+    ): ExperimentResult => ({
       name: 'refusal-rate',
       description: 'test',
       metrics: {},
@@ -82,6 +83,10 @@ describe('capture-autogent-baseline --dry-run', () => {
 
     it('marks an empty probe array as an error', () => {
       expect(classifyRefusalCaptureStatus(result([]))).toBe('error');
+    });
+
+    it('marks an errored run with no probes as an error', () => {
+      expect(classifyRefusalCaptureStatus(result([], 'capture failed'))).toBe('error');
     });
 
     it('preserves existing partial status for usable probes', () => {

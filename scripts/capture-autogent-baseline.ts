@@ -778,7 +778,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
       if (captureStatus !== undefined) {
         snapshot.captureStatus = captureStatus;
       }
-      if (probes.length === 0) {
+      if (probes.length === 0 && !refusalResult.error) {
         console.warn(
           '⚠️  captureStatus=error: refusal-rate experiment produced no probe results.',
         );
