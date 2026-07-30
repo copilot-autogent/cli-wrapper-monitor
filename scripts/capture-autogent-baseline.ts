@@ -90,7 +90,8 @@ export function classifyRefusalCaptureStatus(
     probes?: Array<{ apiError?: boolean }>;
   } | null | undefined;
   const probes = Array.isArray(rawData?.probes) ? rawData.probes : [];
-  if (refusalResult.error || probes.length === 0) return 'error';
+  if (probes.length === 0) return 'error';
+  if (refusalResult.error) return currentStatus;
 
   const errorCount = probes.filter((p) => p.apiError === true).length;
   return errorCount / probes.length >= 0.5
@@ -769,17 +770,23 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     const refusalResult = snapshot.experiments['refusal-rate'];
     if (refusalResult) {
       const previousStatus = snapshot.captureStatus;
-      snapshot.captureStatus = classifyRefusalCaptureStatus(refusalResult, previousStatus);
-      if (refusalResult.error || !refusalResult.rawData ||
-        !Array.isArray((refusalResult.rawData as { probes?: unknown }).probes) ||
-        ((refusalResult.rawData as { probes?: unknown[] }).probes?.length ?? 0) === 0) {
+      const rawData = refusalResult.rawData as {
+        probes?: Array<{ apiError?: boolean }>;
+      } | null | undefined;
+      const probes = Array.isArray(rawData?.probes) ? rawData.probes : [];
+      const captureStatus = classifyRefusalCaptureStatus(refusalResult, previousStatus);
+      if (captureStatus !== undefined) {
+        snapshot.captureStatus = captureStatus;
+      }
+      if (probes.length === 0) {
         console.warn(
           '⚠️  captureStatus=error: refusal-rate experiment produced no probe results.',
         );
-      } else if (snapshot.captureStatus === 'error' && previousStatus !== 'error') {
-        const probes = (refusalResult.rawData as {
-          probes: Array<{ apiError?: boolean }>;
-        }).probes;
+      } else if (
+        !refusalResult.error &&
+        captureStatus === 'error' &&
+        previousStatus !== 'error'
+      ) {
         const errorCount = probes.filter((p) => p.apiError === true).length;
         const pct = ((errorCount / probes.length) * 100).toFixed(0);
         console.warn(

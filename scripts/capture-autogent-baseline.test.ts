@@ -65,11 +65,15 @@ describe('capture-autogent-baseline --dry-run', () => {
   });
 
   describe('classifyRefusalCaptureStatus', () => {
-    const result = (probes?: Array<{ apiError?: boolean }>) => ({
+    const result = (
+      probes?: Array<{ apiError?: boolean }>,
+      error?: string,
+    ) => ({
       name: 'refusal-rate',
       description: 'test',
       metrics: {},
       rawData: probes === undefined ? undefined : { probes },
+      ...(error !== undefined && { error }),
     });
 
     it('marks an absent probe array as an error', () => {
@@ -84,6 +88,23 @@ describe('capture-autogent-baseline --dry-run', () => {
       expect(
         classifyRefusalCaptureStatus(result([{ apiError: false }]), 'partial'),
       ).toBe('partial');
+    });
+
+    it('preserves existing status when an errored run has partial probe data', () => {
+      expect(
+        classifyRefusalCaptureStatus(
+          result([{ apiError: false }], 'transient failure'),
+          'partial',
+        ),
+      ).toBe('partial');
+    });
+
+    it('marks a capture invalid when half of probes are API errors', () => {
+      expect(
+        classifyRefusalCaptureStatus(
+          result([{ apiError: true }, { apiError: false }]),
+        ),
+      ).toBe('error');
     });
   });
 
