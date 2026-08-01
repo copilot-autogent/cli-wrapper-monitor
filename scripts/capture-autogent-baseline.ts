@@ -192,9 +192,12 @@ export function captureToolSearchFromEnvironment(
   const enabled = env['TOOL_SEARCH_ENABLED'];
   const deferred = env['DEFERRED_TOOL_NAMES'];
   const references = env['TOOL_REFERENCES'];
-  // A reference list is required to prove that the runtime search result was
-  // captured; omitting it must not be persisted as an empty result.
+  // The reference variable is required to prove that the runtime search result
+  // was captured; an explicitly empty value is a valid zero-reference result.
   if (references === undefined) {
+    return undefined;
+  }
+  if (enabled !== undefined && enabled !== 'true' && enabled !== 'false') {
     return undefined;
   }
   const deferredNames = new Set(

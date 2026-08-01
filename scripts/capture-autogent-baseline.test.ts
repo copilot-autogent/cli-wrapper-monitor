@@ -74,6 +74,12 @@ describe('capture-autogent-baseline --dry-run', () => {
       expect(
         captureToolSearchFromEnvironment(tools, { TOOL_SEARCH_ENABLED: 'true' }),
       ).toBeUndefined();
+      expect(
+        captureToolSearchFromEnvironment(tools, {
+          TOOL_SEARCH_ENABLED: 'enabled',
+          TOOL_REFERENCES: 'search_code',
+        }),
+      ).toBeUndefined();
     });
 
     it('normalizes deterministic deferred-tool and reference capture data', () => {
