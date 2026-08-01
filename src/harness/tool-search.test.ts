@@ -61,6 +61,12 @@ describe('deferred tool-search baseline fixture', () => {
     expect(diffToolSearch(undefined, captureToolSearchSnapshot(fixture))).toEqual([]);
   });
 
+  it('detects loss of deferred-tool capture after instrumentation was enabled', () => {
+    expect(diffToolSearch(captureToolSearchSnapshot(fixture), undefined)).toEqual([
+      { type: 'capture_disappeared' },
+    ]);
+  });
+
   it('trims and drops empty string references', () => {
     expect(
       captureToolSearchSnapshot({

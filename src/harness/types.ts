@@ -315,7 +315,8 @@ export interface ToolSearchChange {
     | 'tool_undeferred'
     | 'reference_added'
     | 'reference_removed'
-    | 'references_disappeared';
+    | 'references_disappeared'
+    | 'capture_disappeared';
   toolName?: string;
   reference?: string;
   before?: boolean;

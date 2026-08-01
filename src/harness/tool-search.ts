@@ -35,7 +35,9 @@ export function captureToolSearchSnapshot(input: ToolSearchCaptureInput): ToolSe
     (input.toolReferences ?? []).flatMap((reference) =>
       typeof reference === 'string'
         ? [reference.trim()].filter(Boolean)
-        : reference.tool_name ? [reference.tool_name.trim()].filter(Boolean) : [],
+        : typeof reference.tool_name === 'string'
+          ? [reference.tool_name.trim()].filter(Boolean)
+          : [],
     ),
   );
   return { enabled, deferredToolNames, toolReferences };
@@ -45,7 +47,8 @@ export function diffToolSearch(
   baseline: ToolSearchSnapshot | undefined,
   current: ToolSearchSnapshot | undefined,
 ): ToolSearchChange[] {
-  if (!baseline || !current) return [];
+  if (!baseline) return [];
+  if (!current) return [{ type: 'capture_disappeared' }];
   const changes: ToolSearchChange[] = [];
 
   if (baseline.enabled !== current.enabled) {
