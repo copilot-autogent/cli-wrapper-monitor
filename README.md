@@ -273,6 +273,13 @@ TOOL_DEFS_FILE=./tools.json npm run experiments
 npm run capture
 AUTOGENT_PATH=/path/to/autogent npm run capture
 
+# Include deferred tool-search state from a runtime capture when available.
+# Values are comma-separated; tool references are normalized as an unordered set.
+TOOL_SEARCH_ENABLED=true \
+DEFERRED_TOOL_NAMES=search_code,read_file \
+TOOL_REFERENCES=search_code \
+npm run capture
+
 # Validate environment without writing files (dry run)
 # Authenticates, verifies SDK connection, calls listModels(), runs a lightweight
 # probe, and prints what would be written — exits without writing any files.

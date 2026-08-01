@@ -19,6 +19,8 @@
  *   SKIP_MODEL_POOL=true npx tsx scripts/capture-autogent-baseline.ts
  *   SKIP_PROVENANCE=true npx tsx scripts/capture-autogent-baseline.ts
  *   npx tsx scripts/capture-autogent-baseline.ts --dry-run
+ *   TOOL_SEARCH_ENABLED=true DEFERRED_TOOL_NAMES=search_code \
+ *     TOOL_REFERENCES=search_code npx tsx scripts/capture-autogent-baseline.ts
  *   npx tsx scripts/capture-autogent-baseline.ts --preflight
  */
 import { createHash } from 'node:crypto';
@@ -47,6 +49,7 @@ import type {
   ModelPool,
   ProbeCategory,
   ToolParamSchema,
+  ToolSearchSnapshot,
 } from '../src/harness/types.js';
 import { fetchProvenanceLinks } from '../src/harness/provenance.js';
 import { parsePromptSections } from '../src/harness/prompt-sections.js';
@@ -58,6 +61,7 @@ import {
   FAILURE_STREAK_THRESHOLD,
 } from '../src/harness/capture-health.js';
 import { runPreflight } from './preflight.js';
+import { captureToolSearchSnapshot } from '../src/harness/tool-search.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // BASELINES_DIR can be overridden via the BASELINES_DIR environment variable.
@@ -173,6 +177,53 @@ interface ToolDef {
   name: string;
   description: string;
   parameters?: unknown;
+}
+
+/**
+ * Capture runtime deferred-tool data when the caller supplies it.
+ * The live SDK session is optional in baseline capture, so these environment
+ * inputs let CI feed the session's deterministic tool-search result without
+ * making older capture jobs require a live SDK.
+ */
+export function captureToolSearchFromEnvironment(
+  toolDefs: ReadonlyArray<Pick<ToolDef, 'name'>>,
+  env: NodeJS.ProcessEnv = process.env,
+): ToolSearchSnapshot | undefined {
+  const enabled = env['TOOL_SEARCH_ENABLED'];
+  const deferred = env['DEFERRED_TOOL_NAMES'];
+  const references = env['TOOL_REFERENCES'];
+  // The reference variable is required to prove that the runtime search result
+  // was captured; an explicitly empty value is a valid zero-reference result.
+  if (references === undefined) {
+    return undefined;
+  }
+  if (enabled !== undefined && enabled !== 'true' && enabled !== 'false') {
+    return undefined;
+  }
+  const deferredNames = new Set(
+    (deferred ?? '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
+  const toolInputs = [
+    ...toolDefs.map((tool) => ({
+      name: tool.name,
+      deferLoading: deferredNames.has(tool.name),
+    })),
+    ...[...deferredNames]
+      .filter((name) => !toolDefs.some((tool) => tool.name === name))
+      .map((name) => ({ name, deferLoading: true })),
+  ];
+  const toolReferences = (references ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return captureToolSearchSnapshot({
+    enabled: enabled === undefined ? undefined : enabled === 'true',
+    tools: toolInputs,
+    toolReferences,
+  });
 }
 
 /**
@@ -751,6 +802,16 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     snapshot.toolSchemas = toolSchemas;
     snapshot.toolSchemaHash = toolSchemaHash;
   }
+  const toolSearch = captureToolSearchFromEnvironment(toolDefs);
+  snapshot.toolSearchAvailable = toolSearch !== undefined;
+  if (toolSearch) {
+    snapshot.toolSearch = toolSearch;
+    console.log(
+      `Tool search: ${toolSearch.enabled ? 'enabled' : 'disabled'}; ` +
+        `deferred=${toolSearch.deferredToolNames.length}; ` +
+        `references=${toolSearch.toolReferences.length}`,
+    );
+  }
 
   // Attach section breakdown when prompt content is available.
   // Section text is stored only when capturePromptSectionText=true in capture.config.json
@@ -1010,7 +1071,16 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
         }
       }
     }
-    if (diff.binaryChanged || diff.systemPromptChanged || diff.hookChanged || diff.toolSchemaChanged) {
+    if (diff.toolSearchChanges.length > 0) {
+      console.warn('⚠️  Deferred tool-search state changed — see diff report for details.');
+    }
+    if (
+      diff.binaryChanged ||
+      diff.systemPromptChanged ||
+      diff.hookChanged ||
+      diff.toolSchemaChanged ||
+      diff.toolSearchChanges.length > 0
+    ) {
       console.warn('');
     }
 

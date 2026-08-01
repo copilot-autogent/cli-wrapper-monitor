@@ -1,6 +1,7 @@
-import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, PromptSectionChange, ToolParamSchema, ToolSchemaChange } from './types.js';
+import type { DiffReport, MetricChange, MetricSnapshot, ModelPool, ModelPoolChange, PromptSectionChange, ToolParamSchema, ToolSchemaChange, ToolSearchChange } from './types.js';
 import { classifyDeltaPct } from '../severity.js';
 import { diffPromptSections } from './prompt-sections.js';
+import { diffToolSearch } from './tool-search.js';
 
 /**
  * Compute an aggregate security regression score (0–100, higher = more regressed).
@@ -10,6 +11,8 @@ import { diffPromptSections } from './prompt-sections.js';
  *   - Model pool drop:        20 pts if any model removed
  *   - Hook count decrease:    20 pts if hook count drops
  *   - Hook body change:        5 pts if any hook body changed (single-hash tracking)
+ *   - Deferred tool-search regressions: 10 pts for newly deferred tools or
+ *     missing references (max 30)
  *   - Injection refusal drop: 15 pts if any per-experiment refusal rate drops >5 pp
  *   - Headroom below 50%:      5 pts if headroom crosses below 50% (was ≥50% or absent before)
  *
@@ -21,12 +24,22 @@ export function computeSecurityPostureScore(
   toolSchemaChanges: ToolSchemaChange[],
   modelPoolChanges: ModelPoolChange[],
   hookChanged: boolean,
+  toolSearchChanges: ToolSearchChange[] = [],
 ): number {
   let score = 0;
 
   // Tool removals: 10 pts per removed tool, capped at 30
   const removedToolCount = toolSchemaChanges.filter((c) => c.type === 'removed').length;
   score += Math.min(removedToolCount * 10, 30);
+
+  const toolSearchBreakCount = toolSearchChanges.filter(
+    (change) =>
+      change.type === 'tool_deferred' ||
+      change.type === 'references_disappeared' ||
+      change.type === 'reference_removed' ||
+      (change.type === 'enabled_changed' && change.before === true && change.after === false),
+  ).length;
+  score += Math.min(toolSearchBreakCount * 10, 30);
 
   // Model pool drop: 20 pts if any model removed
   if (modelPoolChanges.some((c) => c.type === 'removed')) {
@@ -247,6 +260,11 @@ export function diffSnapshots(
     baseline.toolSchemaHash !== current.toolSchemaHash;
 
   const toolSchemaChanges = diffToolSchemas(baseline.toolSchemas, current.toolSchemas);
+  const toolSearchChanges: ToolSearchChange[] = diffToolSearch(
+    baseline.toolSearch,
+    current.toolSearch,
+    current.toolSearchAvailable,
+  );
 
   const modelPoolChanges = diffModelPool(baseline.modelPool, current.modelPool);
 
@@ -302,6 +320,28 @@ export function diffSnapshots(
           : 'parameter count unknown';
         structuralBreaks.push(`Tool removed: \`${change.toolName}\` (${paramLabel})`);
       }
+
+    }
+  }
+
+  if (baseline.toolSearch) {
+    for (const change of toolSearchChanges) {
+      if (
+        change.type === 'tool_deferred' ||
+        change.type === 'references_disappeared' ||
+        change.type === 'reference_removed' ||
+        (change.type === 'enabled_changed' && change.before === true && change.after === false)
+      ) {
+        if (change.type === 'enabled_changed') {
+          structuralBreaks.push('Tool search was disabled');
+        } else if (change.type === 'reference_removed') {
+          structuralBreaks.push(`Tool reference disappeared: \`${change.reference}\``);
+        } else if (change.type === 'tool_deferred') {
+          structuralBreaks.push(`Tool became deferred: \`${change.toolName}\``);
+        } else {
+          structuralBreaks.push('Tool references disappeared from capture');
+        }
+      }
     }
   }
 
@@ -318,6 +358,9 @@ export function diffSnapshots(
   // ── WARNING-level structural notes ────────────────────────────────────────
   // Hook body changed without count change: notable but not BREAKING.
   const warnings: string[] = [];
+  if (toolSearchChanges.some((change) => change.type === 'capture_unavailable')) {
+    warnings.push('Deferred tool-search capture was unavailable');
+  }
   if (
     hookChanged &&
     baselineHookCount !== undefined &&
@@ -370,6 +413,7 @@ export function diffSnapshots(
     modelPoolChanges,
     toolSchemaChanged,
     toolSchemaChanges,
+    toolSearchChanges,
     promptSectionChanges,
     promptSectionsAvailable,
     securityPostureScore: computeSecurityPostureScore(
@@ -378,6 +422,7 @@ export function diffSnapshots(
       toolSchemaChanges,
       modelPoolChanges,
       hookChanged,
+      toolSearchChanges,
     ),
   };
 }
@@ -524,6 +569,27 @@ export function formatDiffReport(report: DiffReport): string {
     }
   } else if (report.baseline.toolSchemas != null && report.current.toolSchemas != null) {
     lines.push('', '## Tool Schema Changes', '', '> No tool schema changes detected.', '');
+  }
+
+  if (report.toolSearchChanges.length > 0) {
+    lines.push('', '## Deferred Tool Search Changes', '');
+    for (const change of report.toolSearchChanges) {
+      if (change.type === 'enabled_changed') {
+        lines.push(`⚠️  **Tool search enablement**: ${change.before} → ${change.after}`);
+      } else if (change.type === 'tool_deferred') {
+        lines.push(`🔴 **Tool became deferred**: \`${change.toolName}\``);
+      } else if (change.type === 'tool_undeferred') {
+        lines.push(`✅ **Tool is no longer deferred**: \`${change.toolName}\``);
+      } else if (change.type === 'references_disappeared') {
+        lines.push('🔴 **Tool references disappeared** from the current capture');
+      } else if (change.type === 'reference_added') {
+        lines.push(`✅ **Tool reference added**: \`${change.reference}\``);
+      } else if (change.type === 'reference_removed') {
+        lines.push(`⚠️  **Tool reference removed**: \`${change.reference}\``);
+      }
+    }
+  } else if (report.baseline.toolSearch && report.current.toolSearch) {
+    lines.push('', '## Deferred Tool Search Changes', '', '> No deferred tool-search changes detected.', '');
   }
 
   // Prompt section changes
