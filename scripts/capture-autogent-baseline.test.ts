@@ -57,12 +57,35 @@ vi.mock('node:fs', async (importOriginal) => {
 import {
   captureBaseline,
   classifyRefusalCaptureStatus,
+  captureToolSearchFromEnvironment,
 } from './capture-autogent-baseline.js';
 import type { ExperimentResult } from '../src/harness/types.js';
 
 describe('capture-autogent-baseline --dry-run', () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('captureToolSearchFromEnvironment', () => {
+    const tools = [{ name: 'search_code' }, { name: 'read_file' }];
+
+    it('returns no field when runtime tool-search data was not supplied', () => {
+      expect(captureToolSearchFromEnvironment(tools, {})).toBeUndefined();
+    });
+
+    it('normalizes deterministic deferred-tool and reference capture data', () => {
+      expect(
+        captureToolSearchFromEnvironment(tools, {
+          TOOL_SEARCH_ENABLED: 'true',
+          DEFERRED_TOOL_NAMES: 'read_file, search_code, missing_tool, read_file',
+          TOOL_REFERENCES: 'search_code,read_file,search_code',
+        }),
+      ).toEqual({
+        enabled: true,
+        deferredToolNames: ['missing_tool', 'read_file', 'search_code'],
+        toolReferences: ['read_file', 'search_code'],
+      });
+    });
   });
 
   describe('classifyRefusalCaptureStatus', () => {

@@ -48,6 +48,16 @@ export interface ToolParamSchema {
   descriptionHash: string;
 }
 
+/** Deferred tool-search state captured from an SDK tool set or session result. */
+export interface ToolSearchSnapshot {
+  /** Whether the SDK configured tool search for this capture. */
+  enabled: boolean;
+  /** Names of tools marked deferLoading, sorted for stable persistence. */
+  deferredToolNames: string[];
+  /** Tool names returned by tool search, sorted for order-insensitive comparison. */
+  toolReferences: string[];
+}
+
 /** A single measured metric value */
 export interface MetricValue {
   value: number;
@@ -195,6 +205,11 @@ export interface MetricSnapshot {
    */
   toolSchemaHash?: string;
   /**
+   * Deferred tool-search state and returned tool references.
+   * Absent in older baselines that pre-date deferred tool-search tracking.
+   */
+  toolSearch?: ToolSearchSnapshot;
+  /**
    * Per-section character and token breakdown of the system prompt.
    * Sections: "Tools", "Safety", "Introduction", "Other".
    * Absent in older baselines that pre-date section attribution.
@@ -292,6 +307,21 @@ export interface ToolSchemaChange {
   removedParams?: string[];
 }
 
+/** A deferred tool-search change between two snapshots. */
+export interface ToolSearchChange {
+  type:
+    | 'enabled_changed'
+    | 'tool_deferred'
+    | 'tool_undeferred'
+    | 'reference_added'
+    | 'reference_removed'
+    | 'references_disappeared';
+  toolName?: string;
+  reference?: string;
+  before?: boolean;
+  after?: boolean;
+}
+
 /** Full comparison between a baseline and current snapshot */
 export interface DiffReport {
   baseline: MetricSnapshot;
@@ -326,6 +356,8 @@ export interface DiffReport {
   toolSchemaChanged: boolean;
   /** Per-tool schema changes: added/removed tools and parameter/description diffs */
   toolSchemaChanges: ToolSchemaChange[];
+  /** Deferred tool-search enablement, deferred-tool, and reference changes. */
+  toolSearchChanges: ToolSearchChange[];
   /**
    * Per-section character-count deltas between the two snapshots.
    * Empty when neither snapshot has promptSections data.
