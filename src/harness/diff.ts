@@ -260,7 +260,11 @@ export function diffSnapshots(
     baseline.toolSchemaHash !== current.toolSchemaHash;
 
   const toolSchemaChanges = diffToolSchemas(baseline.toolSchemas, current.toolSchemas);
-  const toolSearchChanges: ToolSearchChange[] = diffToolSearch(baseline.toolSearch, current.toolSearch);
+  const toolSearchChanges: ToolSearchChange[] = diffToolSearch(
+    baseline.toolSearch,
+    current.toolSearch,
+    current.toolSearchAvailable,
+  );
 
   const modelPoolChanges = diffModelPool(baseline.modelPool, current.modelPool);
 
@@ -354,6 +358,9 @@ export function diffSnapshots(
   // ── WARNING-level structural notes ────────────────────────────────────────
   // Hook body changed without count change: notable but not BREAKING.
   const warnings: string[] = [];
+  if (toolSearchChanges.some((change) => change.type === 'capture_unavailable')) {
+    warnings.push('Deferred tool-search capture was unavailable');
+  }
   if (
     hookChanged &&
     baselineHookCount !== undefined &&

@@ -51,8 +51,12 @@ export function captureToolSearchSnapshot(input: ToolSearchCaptureInput): ToolSe
 export function diffToolSearch(
   baseline: ToolSearchSnapshot | undefined,
   current: ToolSearchSnapshot | undefined,
+  currentAvailable?: boolean,
 ): ToolSearchChange[] {
-  if (!baseline || !current) return [];
+  if (!baseline) return [];
+  if (!current) {
+    return currentAvailable === false ? [{ type: 'capture_unavailable' }] : [];
+  }
   const changes: ToolSearchChange[] = [];
 
   if (baseline.enabled !== current.enabled) {

@@ -803,6 +803,7 @@ export async function captureBaseline(opts: { dryRun?: boolean } = {}): Promise<
     snapshot.toolSchemaHash = toolSchemaHash;
   }
   const toolSearch = captureToolSearchFromEnvironment(toolDefs);
+  snapshot.toolSearchAvailable = toolSearch !== undefined;
   if (toolSearch) {
     snapshot.toolSearch = toolSearch;
     console.log(

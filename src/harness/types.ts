@@ -209,6 +209,8 @@ export interface MetricSnapshot {
    * Absent in older baselines that pre-date deferred tool-search tracking.
    */
   toolSearch?: ToolSearchSnapshot;
+  /** Whether this capture attempted deferred tool-search instrumentation. */
+  toolSearchAvailable?: boolean;
   /**
    * Per-section character and token breakdown of the system prompt.
    * Sections: "Tools", "Safety", "Introduction", "Other".
@@ -315,7 +317,8 @@ export interface ToolSearchChange {
     | 'tool_undeferred'
     | 'reference_added'
     | 'reference_removed'
-    | 'references_disappeared';
+    | 'references_disappeared'
+    | 'capture_unavailable';
   toolName?: string;
   reference?: string;
   before?: boolean;
