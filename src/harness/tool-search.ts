@@ -73,15 +73,11 @@ export function diffToolSearch(
 
   const beforeReferences = new Set(baseline.toolReferences);
   const afterReferences = new Set(current.toolReferences);
-  if (baseline.toolReferences.length > 0 && current.toolReferences.length === 0) {
-    changes.push({ type: 'references_disappeared' });
-  } else {
-    for (const reference of current.toolReferences) {
-      if (!beforeReferences.has(reference)) changes.push({ type: 'reference_added', reference });
-    }
-    for (const reference of baseline.toolReferences) {
-      if (!afterReferences.has(reference)) changes.push({ type: 'reference_removed', reference });
-    }
+  for (const reference of current.toolReferences) {
+    if (!beforeReferences.has(reference)) changes.push({ type: 'reference_added', reference });
+  }
+  for (const reference of baseline.toolReferences) {
+    if (!afterReferences.has(reference)) changes.push({ type: 'reference_removed', reference });
   }
   return changes;
 }

@@ -53,7 +53,8 @@ describe('deferred tool-search baseline fixture', () => {
     });
     expect(diffToolSearch(baseline, current)).toEqual([
       { type: 'tool_deferred', toolName: 'search_code' },
-      { type: 'references_disappeared' },
+      { type: 'reference_removed', reference: 'read_file' },
+      { type: 'reference_removed', reference: 'search_code' },
     ]);
   });
 
@@ -105,9 +106,10 @@ describe('deferred tool-search baseline fixture', () => {
     expect(report.hasBreaking).toBe(true);
     expect(report.structuralBreaks).toEqual([
       'Tool became deferred: `search_code`',
-      'Tool references disappeared from capture',
+      'Tool reference disappeared: `read_file`',
+      'Tool reference disappeared: `search_code`',
     ]);
     expect(formatDiffReport(report)).toContain('Deferred Tool Search Changes');
-    expect(formatDiffReport(report)).toContain('Tool references disappeared');
+    expect(formatDiffReport(report)).toContain('Tool reference removed');
   });
 });
