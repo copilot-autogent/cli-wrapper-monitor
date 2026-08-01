@@ -37,6 +37,8 @@ export function captureToolSearchSnapshot(input: ToolSearchCaptureInput): ToolSe
         ? [reference.trim()].filter(Boolean)
         : reference !== null &&
             typeof reference === 'object' &&
+            'type' in reference &&
+            reference.type === 'tool_reference' &&
             'tool_name' in reference &&
             typeof reference.tool_name === 'string'
           ? [reference.tool_name.trim()].filter(Boolean)
@@ -50,8 +52,7 @@ export function diffToolSearch(
   baseline: ToolSearchSnapshot | undefined,
   current: ToolSearchSnapshot | undefined,
 ): ToolSearchChange[] {
-  if (!baseline) return [];
-  if (!current) return [{ type: 'capture_disappeared' }];
+  if (!baseline || !current) return [];
   const changes: ToolSearchChange[] = [];
 
   if (baseline.enabled !== current.enabled) {

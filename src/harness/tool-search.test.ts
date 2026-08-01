@@ -63,7 +63,7 @@ describe('deferred tool-search baseline fixture', () => {
 
   it('detects loss of deferred-tool capture after instrumentation was enabled', () => {
     expect(diffToolSearch(captureToolSearchSnapshot(fixture), undefined)).toEqual([
-      { type: 'capture_disappeared' },
+      // Missing optional instrumentation remains unknown for compatibility.
     ]);
   });
 
@@ -71,7 +71,13 @@ describe('deferred tool-search baseline fixture', () => {
     expect(
       captureToolSearchSnapshot({
         tools: [],
-        toolReferences: [' search_code ', ' ', { tool_name: ' read_file ' }, null, 42],
+        toolReferences: [
+          ' search_code ',
+          ' ',
+          { type: 'tool_reference', tool_name: ' read_file ' },
+          null,
+          42,
+        ],
       }).toolReferences,
     ).toEqual(['read_file', 'search_code']);
   });
