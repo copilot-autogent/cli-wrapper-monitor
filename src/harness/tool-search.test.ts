@@ -71,7 +71,7 @@ describe('deferred tool-search baseline fixture', () => {
     expect(
       captureToolSearchSnapshot({
         tools: [],
-        toolReferences: [' search_code ', ' ', { tool_name: ' read_file ' }],
+        toolReferences: [' search_code ', ' ', { tool_name: ' read_file ' }, null, 42],
       }).toolReferences,
     ).toEqual(['read_file', 'search_code']);
   });

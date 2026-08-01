@@ -10,7 +10,7 @@ export interface ToolSearchToolInput {
 export interface ToolSearchCaptureInput {
   enabled?: boolean;
   tools: ReadonlyArray<ToolSearchToolInput>;
-  toolReferences?: ReadonlyArray<string | { tool_name?: string }>;
+  toolReferences?: ReadonlyArray<unknown>;
 }
 
 function sortedUnique(values: Iterable<string>): string[] {
@@ -35,7 +35,10 @@ export function captureToolSearchSnapshot(input: ToolSearchCaptureInput): ToolSe
     (input.toolReferences ?? []).flatMap((reference) =>
       typeof reference === 'string'
         ? [reference.trim()].filter(Boolean)
-        : typeof reference.tool_name === 'string'
+        : reference !== null &&
+            typeof reference === 'object' &&
+            'tool_name' in reference &&
+            typeof reference.tool_name === 'string'
           ? [reference.tool_name.trim()].filter(Boolean)
           : [],
     ),
