@@ -11,6 +11,8 @@ import { diffToolSearch } from './tool-search.js';
  *   - Model pool drop:        20 pts if any model removed
  *   - Hook count decrease:    20 pts if hook count drops
  *   - Hook body change:        5 pts if any hook body changed (single-hash tracking)
+ *   - Deferred tool-search regressions: 10 pts for newly deferred tools or
+ *     missing references (max 30)
  *   - Injection refusal drop: 15 pts if any per-experiment refusal rate drops >5 pp
  *   - Headroom below 50%:      5 pts if headroom crosses below 50% (was ≥50% or absent before)
  *
@@ -22,12 +24,22 @@ export function computeSecurityPostureScore(
   toolSchemaChanges: ToolSchemaChange[],
   modelPoolChanges: ModelPoolChange[],
   hookChanged: boolean,
+  toolSearchChanges: ToolSearchChange[] = [],
 ): number {
   let score = 0;
 
   // Tool removals: 10 pts per removed tool, capped at 30
   const removedToolCount = toolSchemaChanges.filter((c) => c.type === 'removed').length;
   score += Math.min(removedToolCount * 10, 30);
+
+  const toolSearchBreakCount = toolSearchChanges.filter(
+    (change) =>
+      change.type === 'tool_deferred' ||
+      change.type === 'references_disappeared' ||
+      change.type === 'reference_removed' ||
+      (change.type === 'enabled_changed' && change.before === true && change.after === false),
+  ).length;
+  score += Math.min(toolSearchBreakCount * 10, 30);
 
   // Model pool drop: 20 pts if any model removed
   if (modelPoolChanges.some((c) => c.type === 'removed')) {
@@ -403,6 +415,7 @@ export function diffSnapshots(
       toolSchemaChanges,
       modelPoolChanges,
       hookChanged,
+      toolSearchChanges,
     ),
   };
 }

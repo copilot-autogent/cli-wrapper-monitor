@@ -34,8 +34,8 @@ export function captureToolSearchSnapshot(input: ToolSearchCaptureInput): ToolSe
   const toolReferences = sortedUnique(
     (input.toolReferences ?? []).flatMap((reference) =>
       typeof reference === 'string'
-        ? [reference]
-        : reference.tool_name ? [reference.tool_name] : [],
+        ? [reference.trim()].filter(Boolean)
+        : reference.tool_name ? [reference.tool_name.trim()].filter(Boolean) : [],
     ),
   );
   return { enabled, deferredToolNames, toolReferences };

@@ -61,6 +61,15 @@ describe('deferred tool-search baseline fixture', () => {
     expect(diffToolSearch(undefined, captureToolSearchSnapshot(fixture))).toEqual([]);
   });
 
+  it('trims and drops empty string references', () => {
+    expect(
+      captureToolSearchSnapshot({
+        tools: [],
+        toolReferences: [' search_code ', ' ', { tool_name: ' read_file ' }],
+      }).toolReferences,
+    ).toEqual(['read_file', 'search_code']);
+  });
+
   it('classifies hidden-tool and dropped-reference changes in the full report', () => {
     const before = captureToolSearchSnapshot({
       ...fixture,
