@@ -37,6 +37,7 @@ export function computeSecurityPostureScore(
       change.type === 'tool_deferred' ||
       change.type === 'references_disappeared' ||
       change.type === 'reference_removed' ||
+      change.type === 'capture_disappeared' ||
       (change.type === 'enabled_changed' && change.before === true && change.after === false),
   ).length;
   score += Math.min(toolSearchBreakCount * 10, 30);
@@ -320,12 +321,13 @@ export function diffSnapshots(
     }
   }
 
-  if (baseline.toolSearch && current.toolSearch) {
+  if (baseline.toolSearch) {
     for (const change of toolSearchChanges) {
       if (
         change.type === 'tool_deferred' ||
         change.type === 'references_disappeared' ||
         change.type === 'reference_removed' ||
+        change.type === 'capture_disappeared' ||
         (change.type === 'enabled_changed' && change.before === true && change.after === false)
       ) {
         if (change.type === 'enabled_changed') {
@@ -334,6 +336,8 @@ export function diffSnapshots(
           structuralBreaks.push(`Tool reference disappeared: \`${change.reference}\``);
         } else if (change.type === 'tool_deferred') {
           structuralBreaks.push(`Tool became deferred: \`${change.toolName}\``);
+        } else if (change.type === 'capture_disappeared') {
+          structuralBreaks.push('Deferred tool-search capture disappeared');
         } else {
           structuralBreaks.push('Tool references disappeared from capture');
         }
@@ -575,6 +579,8 @@ export function formatDiffReport(report: DiffReport): string {
         lines.push(`✅ **Tool is no longer deferred**: \`${change.toolName}\``);
       } else if (change.type === 'references_disappeared') {
         lines.push('🔴 **Tool references disappeared** from the current capture');
+      } else if (change.type === 'capture_disappeared') {
+        lines.push('🔴 **Deferred tool-search capture disappeared**');
       } else if (change.type === 'reference_added') {
         lines.push(`✅ **Tool reference added**: \`${change.reference}\``);
       } else if (change.type === 'reference_removed') {
